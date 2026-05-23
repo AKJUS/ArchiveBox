@@ -5,6 +5,8 @@ from typing import Any
 from django import forms
 from django.utils.safestring import mark_safe
 
+from archivebox.config.common import get_config
+from archivebox.core.forms import PluginConfigFormMixin
 from archivebox.personas.importers import (
     PersonaImportResult,
     PersonaImportSource,
@@ -22,7 +24,7 @@ def _mode_label(title: str, description: str) -> str:
     )
 
 
-class PersonaAdminForm(forms.ModelForm):
+class PersonaAdminForm(PluginConfigFormMixin, forms.ModelForm):
     import_mode = forms.ChoiceField(
         required=False,
         initial="none",
@@ -112,6 +114,9 @@ class PersonaAdminForm(forms.ModelForm):
                 "Use the custom path/CDP option if the browser data lives elsewhere."
             )
 
+        persona_config = self.instance.config if self.instance and self.instance.pk and isinstance(self.instance.config, dict) else {}
+        self.build_plugin_groups({**get_config(), **persona_config})
+
     def clean_name(self) -> str:
         name = str(self.cleaned_data.get("name") or "").strip()
         is_valid, error_message = validate_persona_name(name)
@@ -124,6 +129,16 @@ class PersonaAdminForm(forms.ModelForm):
         self._resolved_import_source = None
 
         import_mode = str(cleaned_data.get("import_mode") or "none").strip() or "none"
+        manual_config = cleaned_data.get("config") or {}
+        if not isinstance(manual_config, dict):
+            manual_config = {}
+        plugin_config_overrides = self.clean_plugin_config_overrides(get_config())
+        cleaned_data["plugin_config"] = plugin_config_overrides
+        cleaned_data["config"] = {
+            **{key: value for key, value in manual_config.items() if key not in self.plugin_config_keys()},
+            **plugin_config_overrides,
+        }
+
         if import_mode == "none":
             return cleaned_data
 

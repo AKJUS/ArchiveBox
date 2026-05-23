@@ -12,6 +12,7 @@ from archivebox.personas.importers import (
     resolve_browser_profile_source,
     resolve_custom_import_source,
 )
+from archivebox.personas.models import Persona
 
 
 pytestmark = pytest.mark.django_db
@@ -110,6 +111,8 @@ def test_persona_admin_add_view_renders_import_ui(client, admin_user, monkeypatc
     assert b"Bootstrap a persona from a real browser session" in response.content
     assert b"Google Chrome / Default" in response.content
     assert b"auth.json" in response.content
+    assert b"Plugin Config" in response.content
+    assert b'name="plugin_config__wget__WGET_TIMEOUT"' in response.content
 
 
 def test_import_persona_from_source_copies_user_agent_to_persona_config(admin_user, monkeypatch, tmp_path):
@@ -189,3 +192,28 @@ def test_persona_admin_add_post_runs_shared_importer(client, admin_user, monkeyp
     }
     assert persona.COOKIES_FILE.endswith("cookies.txt")
     assert persona.AUTH_STORAGE_FILE.endswith("auth.json")
+
+
+def test_persona_admin_saves_typed_plugin_config(client, admin_user, monkeypatch):
+    monkeypatch.setattr("archivebox.personas.forms.discover_local_browser_profiles", lambda: [])
+    monkeypatch.setattr("archivebox.personas.admin.discover_local_browser_profiles", lambda: [])
+
+    client.login(username="personaadmin", password="testpassword")
+    response = client.post(
+        reverse("admin:personas_persona_add"),
+        {
+            "name": "PluginConfigPersona",
+            "created_by": str(admin_user.pk),
+            "config": "{}",
+            "import_mode": "none",
+            "plugin_config__wget__WGET_TIMEOUT": "77",
+            "plugin_config__wget__WGET_WARC_ENABLED": "false",
+            "_save": "Save",
+        },
+        HTTP_HOST=ADMIN_HOST,
+    )
+
+    assert response.status_code == 302
+    persona = Persona.objects.get(name="PluginConfigPersona")
+    assert persona.config["WGET_TIMEOUT"] == 77
+    assert persona.config["WGET_WARC_ENABLED"] is False

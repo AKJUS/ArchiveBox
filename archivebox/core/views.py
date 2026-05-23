@@ -1008,8 +1008,26 @@ class AddView(UserPassesTestMixin, FormView):
         return custom_config
 
     def get_context_data(self, **kwargs):
+        from archivebox.personas.models import Persona
+
         required_search_plugin = f"search_backend_{get_config().SEARCH_BACKEND_ENGINE}".strip()
         plugin_configs = discover_plugin_configs()
+        sensitive_keys = {
+            str(config_key)
+            for schema in plugin_configs.values()
+            for config_key, prop_schema in (schema.get("properties") or {}).items()
+            if isinstance(prop_schema, dict) and prop_schema.get("x-sensitive")
+        }
+        base_config = get_config()
+        persona_config_map = {}
+        for persona in Persona.objects.order_by("name"):
+            raw_config = {str(key): value for key, value in (persona.config or {}).items() if str(key) not in sensitive_keys}
+            persona_config_map[persona.name] = {
+                "config": raw_config,
+                "effective_config": {
+                    str(key): value for key, value in {**base_config, **raw_config}.items() if str(key) not in sensitive_keys
+                },
+            }
         plugin_dependency_map = {
             plugin_name: [
                 str(required_plugin).strip() for required_plugin in (schema.get("required_plugins") or []) if str(required_plugin).strip()
@@ -1026,6 +1044,7 @@ class AddView(UserPassesTestMixin, FormView):
             "FOOTER_INFO": get_config().FOOTER_INFO,
             "required_search_plugin": required_search_plugin,
             "plugin_dependency_map_json": json.dumps(plugin_dependency_map, sort_keys=True),
+            "persona_config_map_json": json.dumps(persona_config_map, sort_keys=True, default=str),
             "stdout": "",
         }
 
@@ -1044,6 +1063,9 @@ class AddView(UserPassesTestMixin, FormView):
         index_only = form.cleaned_data.get("index_only", False)
         notes = form.cleaned_data.get("notes", "")
         url_filters = form.cleaned_data.get("url_filters") or {}
+        plugin_config = form.cleaned_data.get("plugin_config") or {}
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
         custom_config = self._get_custom_config_overrides(form)
         persona_name = persona.name if persona else "Default"
         if persona:
@@ -1078,6 +1100,7 @@ class AddView(UserPassesTestMixin, FormView):
         }
 
         # Merge custom config overrides
+        config.update(plugin_config)
         config.update(custom_config)
         config["DEFAULT_PERSONA"] = persona_name
         if url_filters.get("allowlist"):

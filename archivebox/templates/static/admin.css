@@ -176,29 +176,6 @@ body.change-list #content .object-tools {
 }
 
 
-/*#content #changelist .actions {
-    position: fixed;
-    bottom: 0px;
-    z-index: 800;
-}*/
-#content #changelist .actions {
-    float: right;
-    margin-top: -34px;
-    padding: 0px;
-    background: none;
-    margin-right: 0px;
-    width: auto;
-    max-height: 40px;
-    display: block;
-    position: relative;
-    z-index: 2;
-}
-@media (max-width: 1000px) {
-    #content #changelist .actions {
-        max-height: 200px;
-    }
-}
-
 #content #changelist .actions .button {
     border-radius: 2px;
     background-color: #f5dd5d;
@@ -343,16 +320,6 @@ body.change-list #content .object-tools {
     .filtered #toolbar,
     .filtered div.xfull {
         margin-right: 168px;
-    }
-}
-
-@media (max-width: 1127px) {
-    #content #changelist .actions {
-        position: fixed;
-        bottom: 6px;
-        left: 10px;
-        float: left;
-        z-index: 1000;
     }
 }
 

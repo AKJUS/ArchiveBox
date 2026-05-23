@@ -42,9 +42,6 @@ for TAG_NAME in "${TAG_NAMES[@]}"; do
 done
 echo "${FULL_TAG_NAMES[@]}"
 
-
-./bin/lock_pkgs.sh
-
 # echo "[*] Logging in to Docker Hub & Github Container Registry"
 # docker login --username=nikisweeting
 # docker login ghcr.io --username=pirate

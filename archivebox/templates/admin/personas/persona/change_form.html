@@ -1,9 +1,11 @@
 {% extends "admin/change_form.html" %}
+{% load static %}
 
 {% block bodyclass %}{{ block.super }} app-personas model-persona{% endblock %}
 
 {% block extrastyle %}
 {{ block.super }}
+<link rel="stylesheet" href="{% static 'add.css' %}">
 <style>
     .persona-import-hero {
         margin: 0 0 22px;
@@ -197,6 +199,38 @@
             grid-template-columns: 1fr;
         }
     }
+
+    .persona-plugin-config {
+        margin: 0 0 24px;
+    }
+
+    .persona-plugin-config h2 {
+        margin: 0 0 6px;
+        color: #004882;
+        font-size: 18px;
+    }
+
+    .persona-plugin-config > p {
+        margin: 0 0 14px;
+        color: #64748b;
+        font-size: 13px;
+    }
+
+    .persona-plugin-config .plugin-card-main {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .persona-plugin-config .plugin-card-label-static {
+        grid-column: 1;
+    }
+
+    .persona-plugin-config .plugin-config-details {
+        grid-column: 2;
+    }
+
+    .persona-plugin-config .plugin-config-details[open] {
+        grid-column: 1 / -1;
+    }
 </style>
 {% endblock %}
 
@@ -246,4 +280,13 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 </section>
 {{ block.super }}
+{% endblock %}
+
+{% block after_field_sets %}
+{{ block.super }}
+<section class="module aligned persona-plugin-config">
+    <h2>Plugin Config</h2>
+    <p>These typed controls update the same Persona config JSON shown above. Shared config keys stay synced across plugin sections.</p>
+    {% include "core/plugin_config_grid.html" with plugin_groups=adminform.form.plugin_groups %}
+</section>
 {% endblock %}

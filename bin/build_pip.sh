@@ -13,8 +13,6 @@ IFS=$'\n'
 REPO_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && cd .. && pwd )"
 cd "$REPO_DIR"
 
-# Generate pdm.lock, requirements.txt, and package-lock.json
-bash ./bin/lock_pkgs.sh
 source .venv/bin/activate
 
 echo "[+] Building sdist, bdist_wheel, and egg_info"

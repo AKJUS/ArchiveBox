@@ -50,6 +50,30 @@ def test_add_view_renders_tag_editor_and_url_filter_fields(client, admin_user, m
     assert 'id="url-highlight-layer"' in body
     assert 'id="detected-urls-list"' in body
     assert "detected-url-toggle-btn" in body
+    assert "plugin-config-details" in body
+    assert 'name="plugin_config__wget__WGET_TIMEOUT"' in body
+    assert 'name="plugin_config__chrome__CHROME_HEADLESS"' in body
+    assert "personaConfigMap" in body
+    assert "archiveboxSetPluginConfigValues" in body
+    assert "el.name === 'config' || el.name.startsWith('plugin_config__')" in body
+
+
+def test_add_view_embeds_selected_persona_config_for_ui_hydration(client, admin_user, monkeypatch):
+    monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
+    Persona.objects.create(
+        name="Private",
+        created_by=admin_user,
+        config={"WGET_TIMEOUT": 88, "CHROME_HEADLESS": False},
+    )
+
+    response = client.get(reverse("add"), HTTP_HOST=WEB_HOST)
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Private" in body
+    assert "WGET_TIMEOUT" in body
+    assert "88" in body
+    assert "CHROME_HEADLESS" in body
 
 
 def test_add_view_checks_configured_search_backend_by_default(client, monkeypatch):
@@ -144,6 +168,41 @@ def test_add_view_selected_persona_wins_over_stale_config_override(client, admin
     runtime_config = get_config(crawl=crawl)
     assert runtime_config.ACTIVE_PERSONA == "Private"
     assert runtime_config.COOKIES_FILE == private_cookies_file
+
+
+def test_add_view_applies_plugin_config_overrides(client, admin_user, monkeypatch):
+    monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
+    client.force_login(admin_user)
+
+    response = client.post(
+        reverse("add"),
+        data={
+            "url": "https://example.com/plugin-config",
+            "tag": "",
+            "depth": "0",
+            "max_urls": "0",
+            "max_size": "0",
+            "url_filters_allowlist": "",
+            "url_filters_denylist": "",
+            "notes": "",
+            "schedule": "",
+            "persona": "Default",
+            "index_only": "",
+            "archiving_plugins": ["wget"],
+            "plugin_config__wget__WGET_TIMEOUT": "77",
+            "plugin_config__wget__WGET_WARC_ENABLED": "false",
+            "config": "{}",
+        },
+        HTTP_HOST=WEB_HOST,
+    )
+
+    assert response.status_code == 302
+
+    crawl = Crawl.objects.order_by("-created_at").first()
+    assert crawl is not None
+    assert crawl.config["PLUGINS"] == "wget"
+    assert crawl.config["WGET_TIMEOUT"] == 77
+    assert crawl.config["WGET_WARC_ENABLED"] is False
 
 
 def test_add_view_starts_background_runner_after_creating_crawl(client, admin_user, monkeypatch):

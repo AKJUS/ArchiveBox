@@ -169,65 +169,7 @@
                         <button type="button" class="preset-btn" data-preset="clear-all">✗ Clear All</button>
                     </div>
 
-                    <div class="plugin-groups-grid">
-                        <div class="plugin-group">
-                            <div class="plugin-group-header">
-                                <label>Chrome-dependent plugins</label>
-                                <button type="button" class="select-all-btn" data-group="chrome">
-                                    Select All Chrome
-                                </button>
-                            </div>
-                            <div class="plugin-checkboxes" id="chrome-plugins">
-                                {{ form.chrome_plugins }}
-                            </div>
-                        </div>
-
-                        <div class="plugin-group">
-                            <div class="plugin-group-header">
-                                <label>Archiving</label>
-                            </div>
-                            <div class="plugin-checkboxes">
-                                {{ form.archiving_plugins }}
-                            </div>
-                        </div>
-
-                        <div class="plugin-group">
-                            <div class="plugin-group-header">
-                                <label>Parsing</label>
-                            </div>
-                            <div class="plugin-checkboxes">
-                                {{ form.parsing_plugins }}
-                            </div>
-                        </div>
-
-                        <div class="plugin-group">
-                            <div class="plugin-group-header">
-                                <label>Search</label>
-                                <span class="plugin-group-note">(defaults to SEARCH_BACKEND_ENGINE)</span>
-                            </div>
-                            <div class="plugin-checkboxes">
-                                {{ form.search_plugins }}
-                            </div>
-                        </div>
-
-                        <div class="plugin-group">
-                            <div class="plugin-group-header">
-                                <label>Binary Providers</label>
-                            </div>
-                            <div class="plugin-checkboxes">
-                                {{ form.binary_plugins }}
-                            </div>
-                        </div>
-
-                        <div class="plugin-group">
-                            <div class="plugin-group-header">
-                                <label>Browser Extensions</label>
-                            </div>
-                            <div class="plugin-checkboxes">
-                                {{ form.extension_plugins }}
-                            </div>
-                        </div>
-                    </div>
+                    {% include "core/plugin_config_grid.html" with plugin_groups=form.plugin_groups %}
                 </div>
 
                 <!-- Advanced options (collapsible) -->
@@ -313,6 +255,8 @@
                 ];
                 const requiredSearchPlugin = '{{ required_search_plugin|default:""|escapejs }}';
                 const pluginDependencyMap = JSON.parse('{{ plugin_dependency_map_json|default:"{}"|escapejs }}');
+                const personaConfigMap = JSON.parse('{{ persona_config_map_json|default:"{}"|escapejs }}');
+                const personaSelect = document.querySelector('select[name="persona"]');
 
                 function dispatchChange(el) {
                     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -389,7 +333,7 @@
                     if (!rows || !updater) return;
 
                     let row = findConfigRow(key);
-                    if (!value) {
+                    if (value === undefined || value === null || value === '') {
                         if (row) {
                             row.remove();
                             updater();
@@ -407,7 +351,7 @@
                     if (!keyInput || !valueInput) return;
 
                     keyInput.value = key;
-                    valueInput.value = value;
+                    valueInput.value = typeof value === 'string' ? value : JSON.stringify(value);
                     keyInput.dispatchEvent(new Event('input', { bubbles: true }));
                     valueInput.dispatchEvent(new Event('input', { bubbles: true }));
                     updater();
@@ -419,6 +363,26 @@
                         .filter(Boolean)
                         .sort((left, right) => left.localeCompare(right));
                     setConfigRow('ENABLED_PLUGINS', selectedPlugins.join(','));
+                }
+
+                function replaceConfigRows(config) {
+                    const rows = getConfigEditorRows();
+                    const updater = getConfigUpdater();
+                    if (!rows || !updater || !config || typeof config !== 'object') return;
+                    Array.from(rows.querySelectorAll('.key-value-row')).forEach(row => row.remove());
+                    Object.entries(config).forEach(([key, value]) => setConfigRow(key, value));
+                    if (!rows.querySelector('.key-value-row')) addConfigRow();
+                    updater();
+                }
+
+                function applyPersonaConfig(personaName) {
+                    const personaData = personaConfigMap[personaName];
+                    if (!personaData) return;
+                    if (typeof window.archiveboxSetPluginConfigValues === 'function') {
+                        window.archiveboxSetPluginConfigValues(personaData.effective_config || {});
+                    }
+                    replaceConfigRows(personaData.config || {});
+                    updateURLPreview();
                 }
 
                 function ensureRequiredPluginsChecked(pluginName, visited = new Set()) {
@@ -1157,6 +1121,7 @@
                     const state = {};
                     document.querySelectorAll('#add-form input, #add-form textarea, #add-form select').forEach(el => {
                         if (el.name === 'csrfmiddlewaretoken') return;
+                        if (el.name === 'config' || el.name.startsWith('plugin_config__') || el.closest('#id_config_container')) return;
                         if (el.type === 'checkbox' || el.type === 'radio') {
                             state[el.name + ':' + el.value] = el.checked;
                         } else {
@@ -1172,9 +1137,11 @@
                         for (const [key, value] of Object.entries(state)) {
                             if (key.includes(':')) {
                                 const [name, val] = key.split(':');
+                                if (name === 'config' || name.startsWith('plugin_config__')) continue;
                                 const el = document.querySelector(`[name="${name}"][value="${val}"]`);
                                 if (el) el.checked = Boolean(value);
                             } else {
+                                if (key === 'config' || key.startsWith('plugin_config__')) continue;
                                 const el = document.querySelector(`[name="${key}"]`);
                                 if (el && el.type !== 'checkbox' && el.type !== 'radio') {
                                     if (el.tagName === 'SELECT') {
@@ -1192,6 +1159,9 @@
                             }
                         }
                         updateURLPreview(); // Update preview after loading URLs
+                        if (personaSelect) {
+                            applyPersonaConfig(personaSelect.value);
+                        }
                         normalizePluginSelections();
                         applyRequiredSearchPlugin();
                         syncEnabledPluginsConfig();
@@ -1204,6 +1174,13 @@
                 document.querySelectorAll('#add-form input, #add-form textarea, #add-form select').forEach(el => {
                     el.addEventListener('change', saveFormState);
                 });
+
+                if (personaSelect) {
+                    personaSelect.addEventListener('change', function() {
+                        applyPersonaConfig(personaSelect.value);
+                        saveFormState();
+                    });
+                }
 
                 loadFormState();
 

@@ -1,0 +1,169 @@
+<div class="plugin-config-form">
+    <div class="plugin-groups-grid">
+        {% for group in plugin_groups %}
+            {% if group.plugins %}
+                <div class="plugin-group">
+                    <div class="plugin-group-header">
+                        <label>{{ group.title }}</label>
+                        {% if group.note %}
+                            <span class="plugin-group-note">{{ group.note }}</span>
+                        {% endif %}
+                        {% if group.show_selectors and group.select_all_group %}
+                            <button type="button" class="select-all-btn" data-group="{{ group.select_all_group }}">
+                                Select All Chrome
+                            </button>
+                        {% endif %}
+                    </div>
+                    <div class="plugin-checkboxes"{% if group.dom_id %} id="{{ group.dom_id }}"{% endif %}>
+                        {% for plugin in group.plugins %}
+                            <div class="plugin-card">
+                                <div class="plugin-card-main">
+                                    {% if group.show_selectors %}
+                                        <input type="checkbox" name="{{ group.field_name }}" value="{{ plugin.name }}" id="{{ plugin.checkbox_id }}" {% if plugin.checked %}checked{% endif %}>
+                                        <label for="{{ plugin.checkbox_id }}" class="plugin-card-label">
+                                            {{ plugin.label }}
+                                        </label>
+                                    {% else %}
+                                        <div class="plugin-card-label plugin-card-label-static">
+                                            {{ plugin.label }}
+                                        </div>
+                                    {% endif %}
+                                    <details class="plugin-config-details">
+                                        <summary>
+                                            <span>Config</span>
+                                            <span class="plugin-config-count">{{ plugin.config_count }}</span>
+                                        </summary>
+                                        {% if plugin.required_plugins or plugin.required_binaries_count %}
+                                            <div class="plugin-config-meta">
+                                                {% if plugin.required_plugins %}
+                                                    Requires {{ plugin.required_plugins|join:", " }}
+                                                {% endif %}
+                                                {% if plugin.required_binaries_count %}
+                                                    {% if plugin.required_plugins %} · {% endif %}
+                                                    {{ plugin.required_binaries_count }} binary requirement{{ plugin.required_binaries_count|pluralize }}
+                                                {% endif %}
+                                            </div>
+                                        {% endif %}
+                                        {% if plugin.config_fields %}
+                                            <div class="plugin-config-grid">
+                                                {% for field in plugin.config_fields %}
+                                                    <div class="plugin-config-field">
+                                                        <label for="id_{{ field.input_name }}">
+                                                            <code>{{ field.key }}</code>
+                                                            <span class="plugin-config-type">{{ field.type_label }}</span>
+                                                        </label>
+                                                        {% if field.kind == "boolean" %}
+                                                            <input type="hidden" name="{{ field.input_name }}" value="false">
+                                                            <label class="plugin-config-toggle">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    class="plugin-config-input"
+                                                                    data-config-key="{{ field.key }}"
+                                                                    name="{{ field.input_name }}"
+                                                                    id="id_{{ field.input_name }}"
+                                                                    value="true"
+                                                                    {% if field.checked %}checked{% endif %}
+                                                                >
+                                                                <span>Enabled</span>
+                                                            </label>
+                                                        {% elif field.kind == "select" %}
+                                                            <select class="plugin-config-input" data-config-key="{{ field.key }}" name="{{ field.input_name }}" id="id_{{ field.input_name }}">
+                                                                {% for option in field.options %}
+                                                                    <option value="{{ option.value }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+                                                                {% endfor %}
+                                                            </select>
+                                                        {% elif field.kind == "json" %}
+                                                            <textarea
+                                                                class="plugin-config-input"
+                                                                data-config-key="{{ field.key }}"
+                                                                name="{{ field.input_name }}"
+                                                                id="id_{{ field.input_name }}"
+                                                                rows="3"
+                                                                spellcheck="false"
+                                                                {% if field.is_sensitive %}placeholder="Leave blank to keep current value"{% endif %}
+                                                            >{{ field.value }}</textarea>
+                                                        {% else %}
+                                                            <input
+                                                                class="plugin-config-input"
+                                                                data-config-key="{{ field.key }}"
+                                                                type="{{ field.input_type }}"
+                                                                name="{{ field.input_name }}"
+                                                                id="id_{{ field.input_name }}"
+                                                                value="{{ field.value }}"
+                                                                {% if field.pattern %}pattern="{{ field.pattern }}"{% endif %}
+                                                                {% if field.is_sensitive %}autocomplete="off" placeholder="Leave blank to keep current value"{% endif %}
+                                                            >
+                                                        {% endif %}
+                                                        {% if field.description %}
+                                                            <div class="plugin-config-help">{{ field.description }}</div>
+                                                        {% endif %}
+                                                        <div class="plugin-config-default">Current: <code>{{ field.current }}</code> · Default: <code>{{ field.default }}</code></div>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        {% else %}
+                                            <div class="plugin-config-empty">This plugin has no crawl-configurable options.</div>
+                                        {% endif %}
+                                    </details>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+<script>
+(function() {
+    if (window.archiveboxPluginConfigSyncLoaded) return;
+    window.archiveboxPluginConfigSyncLoaded = true;
+    let syncing = false;
+
+    function valueToFieldString(value) {
+        if (value === undefined || value === null) return '';
+        if (typeof value === 'object') return JSON.stringify(value, null, 2);
+        return String(value);
+    }
+
+    function setPluginInputValue(input, value) {
+        if (!input) return;
+        if (input.type === 'checkbox') {
+            input.checked = value === true || value === 'true' || value === '1' || value === 'on';
+        } else {
+            input.value = valueToFieldString(value);
+        }
+    }
+
+    function getPluginInputValue(input) {
+        return input.type === 'checkbox' ? input.checked : input.value;
+    }
+
+    function syncMatchingPluginInputs(source) {
+        if (syncing || !source || !source.dataset.configKey) return;
+        syncing = true;
+        document.querySelectorAll(`.plugin-config-input[data-config-key="${CSS.escape(source.dataset.configKey)}"]`).forEach((input) => {
+            if (input !== source) setPluginInputValue(input, getPluginInputValue(source));
+        });
+        syncing = false;
+    }
+
+    window.archiveboxSetPluginConfigValues = function(values) {
+        if (!values || typeof values !== 'object') return;
+        syncing = true;
+        document.querySelectorAll('.plugin-config-input[data-config-key]').forEach((input) => {
+            if (Object.prototype.hasOwnProperty.call(values, input.dataset.configKey)) {
+                setPluginInputValue(input, values[input.dataset.configKey]);
+            }
+        });
+        syncing = false;
+    };
+
+    document.addEventListener('input', function(event) {
+        if (event.target && event.target.matches('.plugin-config-input')) syncMatchingPluginInputs(event.target);
+    });
+    document.addEventListener('change', function(event) {
+        if (event.target && event.target.matches('.plugin-config-input')) syncMatchingPluginInputs(event.target);
+    });
+})();
+</script>

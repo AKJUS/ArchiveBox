@@ -89,11 +89,6 @@ docker buildx use xbuilder >/dev/null 2>&1 || create_builder
 check_platforms || (recreate_builder && check_platforms) || exit 1
 
 
-# Make sure pyproject.toml, pdm{.dev}.lock, requirements{-dev}.txt, package{-lock}.json are all up-to-date
-# echo "[!] Make sure you've run ./bin/lock_pkgs.sh recently!"
-bash ./bin/lock_pkgs.sh
-
-
 echo "[+] Building archivebox:$VERSION docker image..."
 # docker builder prune
 # docker build . --no-cache -t archivebox-dev \

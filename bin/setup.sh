@@ -20,7 +20,36 @@ set -o pipefail
 
 clear
 
-if [ $(id -u) -eq 0 ]; then
+ARCHIVEBOX_BRANCH="${ARCHIVEBOX_BRANCH:-dev}"
+ARCHIVEBOX_IMAGE="${ARCHIVEBOX_IMAGE:-archivebox/archivebox:dev}"
+ARCHIVEBOX_PLATFORM="${ARCHIVEBOX_PLATFORM:-linux/amd64}"
+ARCHIVEBOX_COMPOSE_URL="${ARCHIVEBOX_COMPOSE_URL:-https://raw.githubusercontent.com/ArchiveBox/ArchiveBox/${ARCHIVEBOX_BRANCH}/docker-compose.yml}"
+
+wait_for_archivebox() {
+    local url="http://127.0.0.1:8000/health/"
+    local host_header="admin.archivebox.localhost:8000"
+    local attempts=60
+    local attempt
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        if curl -fsS -H "Host: ${host_header}" "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "[!] Server process started, but health check did not become ready at $url after ${attempts}s."
+    echo "    Run the logs command below to inspect startup progress."
+    return 0
+}
+
+open_archivebox() {
+    if command -v open > /dev/null; then
+        open "http://127.0.0.1:8000" || true
+    fi
+}
+
+if [ "$(id -u)" -eq 0 ]; then
     echo
     echo "[X] You cannot run this script as root. You must run it as a non-root user with sudo ability."
     echo "    Create a new non-privileged user 'archivebox' if necessary."
@@ -32,35 +61,34 @@ if [ $(id -u) -eq 0 ]; then
     exit 2
 fi
 
-if (which docker > /dev/null && docker pull archivebox/archivebox:latest); then
+if (command -v docker > /dev/null && docker compose version > /dev/null && docker pull --platform "$ARCHIVEBOX_PLATFORM" "$ARCHIVEBOX_IMAGE"); then
     echo "[+] Initializing an ArchiveBox data folder at ~/archivebox/data using Docker Compose..."
     mkdir -p ~/archivebox/data || exit 1
     cd ~/archivebox
     if [ -f "./index.sqlite3" ]; then
         mv -i ~/archivebox/* ~/archivebox/data/
     fi
-    curl -fsSL 'https://raw.githubusercontent.com/ArchiveBox/ArchiveBox/stable/docker-compose.yml' > docker-compose.yml
-    mkdir -p ./etc
-    curl -fsSL 'https://raw.githubusercontent.com/ArchiveBox/ArchiveBox/stable/etc/sonic.cfg' > ./etc/sonic.cfg
-    docker compose run --rm archivebox init --setup
+    curl -fsSL "$ARCHIVEBOX_COMPOSE_URL" > docker-compose.yml
+    export ARCHIVEBOX_IMAGE ARCHIVEBOX_PLATFORM
+    docker compose run --rm archivebox init
     echo
     echo "[+] Starting ArchiveBox server using: docker compose up -d..."
     docker compose up -d
-    sleep 7
-    which open > /dev/null && open "http://127.0.0.1:8000" || true
+    wait_for_archivebox
+    open_archivebox
     echo
     echo "[√] Server started on http://0.0.0.0:8000 and data directory initialized in ~/archivebox/data. Usage:"
     echo "    cd ~/archivebox"
     echo "    docker compose ps"
     echo "    docker compose down"
-    echo "    docker compose pull"
+    echo "    ARCHIVEBOX_IMAGE=$ARCHIVEBOX_IMAGE docker compose pull"
     echo "    docker compose up"
     echo "    docker compose run archivebox manage createsuperuser"
     echo "    docker compose run archivebox add 'https://example.com'"
     echo "    docker compose run archivebox list"
     echo "    docker compose run archivebox help"
     exit 0
-elif (which docker > /dev/null && docker pull archivebox/archivebox:latest); then
+elif (command -v docker > /dev/null && docker pull --platform "$ARCHIVEBOX_PLATFORM" "$ARCHIVEBOX_IMAGE"); then
     echo "[+] Initializing an ArchiveBox data folder at ~/archivebox/data using Docker..."
     mkdir -p ~/archivebox/data || exit 1
     cd ~/archivebox
@@ -68,23 +96,23 @@ elif (which docker > /dev/null && docker pull archivebox/archivebox:latest); the
         mv -i ~/archivebox/* ~/archivebox/data/
     fi
     cd ./data
-    docker run -v "$PWD":/data -it --rm archivebox/archivebox:latest init --setup
+    docker run --platform "$ARCHIVEBOX_PLATFORM" -v "$PWD":/data -it --rm "$ARCHIVEBOX_IMAGE" init
     echo
     echo "[+] Starting ArchiveBox server using: docker run -d archivebox/archivebox..."
-    docker run -v "$PWD":/data -it -d -p 8000:8000 --name=archivebox archivebox/archivebox:latest
-    sleep 7
-    which open > /dev/null && open "http://127.0.0.1:8000" || true
+    docker run --platform "$ARCHIVEBOX_PLATFORM" -v "$PWD":/data -it -d -p 8000:8000 --name=archivebox "$ARCHIVEBOX_IMAGE"
+    wait_for_archivebox
+    open_archivebox
     echo
     echo "[√] Server started on http://0.0.0.0:8000 and data directory initialized in ~/archivebox/data. Usage:"
     echo "    cd ~/archivebox/data"
     echo "    docker ps --filter name=archivebox"
     echo "    docker kill archivebox"
-    echo "    docker pull archivebox/archivebox"
-    echo "    docker run -v $PWD:/data -d -p 8000:8000 --name=archivebox archivebox/archivebox"
-    echo "    docker run -v $PWD:/data -it archivebox/archivebox manage createsuperuser"
-    echo "    docker run -v $PWD:/data -it archivebox/archivebox add 'https://example.com'"
-    echo "    docker run -v $PWD:/data -it archivebox/archivebox list"
-    echo "    docker run -v $PWD:/data -it archivebox/archivebox help"
+    echo "    docker pull $ARCHIVEBOX_IMAGE"
+    echo "    docker run --platform $ARCHIVEBOX_PLATFORM -v $PWD:/data -d -p 8000:8000 --name=archivebox $ARCHIVEBOX_IMAGE"
+    echo "    docker run --platform $ARCHIVEBOX_PLATFORM -v $PWD:/data -it $ARCHIVEBOX_IMAGE manage createsuperuser"
+    echo "    docker run --platform $ARCHIVEBOX_PLATFORM -v $PWD:/data -it $ARCHIVEBOX_IMAGE add 'https://example.com'"
+    echo "    docker run --platform $ARCHIVEBOX_PLATFORM -v $PWD:/data -it $ARCHIVEBOX_IMAGE list"
+    echo "    docker run --platform $ARCHIVEBOX_PLATFORM -v $PWD:/data -it $ARCHIVEBOX_IMAGE help"
     exit 0
 fi
 
@@ -198,13 +226,13 @@ if [ -f "./index.sqlite3" ]; then
     mv -i ~/archivebox/* ~/archivebox/data/
 fi
 cd ./data
-: | python3 -m archivebox init --setup || true   # pipe in empty command to make sure stdin is closed
+: | python3 -m archivebox init --install || true   # pipe in empty command to make sure stdin is closed
 # init shows version output at the end too
 echo
 echo "[+] Starting ArchiveBox server using: nohup archivebox server &..."
 nohup python3 -m archivebox server 0.0.0.0:8000 > ./logs/server.log 2>&1 &
-sleep 7
-which open > /dev/null && open "http://127.0.0.1:8000" || true
+wait_for_archivebox
+open_archivebox
 echo
 echo "[√] Server started on http://0.0.0.0:8000 and data directory initialized in ~/archivebox/data. Usage:"
 echo "    cd ~/archivebox/data                               # see your data dir"
