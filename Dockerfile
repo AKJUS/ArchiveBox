@@ -313,9 +313,11 @@ RUN openssl rand -hex 16 > /etc/machine-id \
     && echo -e "\nTMP_DIR=$TMP_DIR\nLIB_DIR=$LIB_DIR\nMACHINE_ID=$(cat /etc/machine-id)\n" | tee -a /VERSION.txt
 
 # Pre-bake plugin-managed runtime dependencies using the same installer paths
-# users run later via archivebox init --install / archivebox install.
+# users run later via archivebox init --install / archivebox install. Build-time
+# runs as root so plugin installers can satisfy OS-level deps, then ownership is
+# returned to the runtime archivebox user.
 RUN echo "[+] Initializing image collection and installing plugin runtime dependencies into $LIB_DIR..." \
-    && gosu "$DEFAULT_PUID" archivebox init --install \
+    && PUID=0 PGID=0 archivebox init --install \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$DATA_DIR" "$LIB_DIR"
 
 # Print version for nice docker finish summary
