@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from django.shortcuts import render, redirect
-from django.http import JsonResponse, HttpRequest, HttpResponse, Http404, HttpResponseForbidden
+from django.http import JsonResponse, HttpRequest, HttpResponse, Http404, HttpResponseForbidden, QueryDict
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.views import View
@@ -1222,14 +1222,17 @@ class WebAddView(AddView):
         add_url = self._normalize_add_url(requested_url)
         assert self.form_class is not None
         defaults_form = self.form_class()
-        form_data = {
-            "url": add_url,
-            "depth": defaults_form.fields["depth"].initial or "0",
-            "max_urls": defaults_form.fields["max_urls"].initial or 0,
-            "max_size": defaults_form.fields["max_size"].initial or "0",
-            "persona": defaults_form.fields["persona"].initial or "Default",
-            "config": {},
-        }
+        form_data = QueryDict(mutable=True)
+        form_data.update(
+            {
+                "url": add_url,
+                "depth": defaults_form.fields["depth"].initial or "0",
+                "max_urls": defaults_form.fields["max_urls"].initial or 0,
+                "max_size": defaults_form.fields["max_size"].initial or "0",
+                "persona": defaults_form.fields["persona"].initial or "Default",
+                "config": "{}",
+            },
+        )
         if defaults_form.fields["index_only"].initial:
             form_data["index_only"] = "on"
 
