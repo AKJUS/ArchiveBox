@@ -248,7 +248,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
 
 # Runtime config used by plugin hooks. Plugin binaries and npm packages are
 # installed into LIB_DIR below by archivebox init --install.
-ENV PATH="$LIB_DIR/npm/node_modules/.bin:$PATH" \
+ENV PATH="$LIB_DIR/bin:$LIB_DIR/env/bin:$LIB_DIR/pip/venv/bin:$LIB_DIR/npm/node_modules/.bin:$LIB_DIR/puppeteer/bin:$PATH" \
     PERSONAS_DIR=/data/personas \
     NODE_PATH="$LIB_DIR/npm/node_modules:/data/personas/Default/node_modules" \
     CHROME_USER_DATA_DIR=/data/personas/Default/chrome_profile \
@@ -312,9 +312,14 @@ RUN openssl rand -hex 16 > /etc/machine-id \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR" \
     && echo -e "\nTMP_DIR=$TMP_DIR\nLIB_DIR=$LIB_DIR\nMACHINE_ID=$(cat /etc/machine-id)\n" | tee -a /VERSION.txt
 
-# Pre-bake plugin-managed runtime dependencies using the same installer path
-# users run later via archivebox init --install / archivebox install.
-RUN echo "[+] Initializing image collection and installing plugin runtime dependencies into $LIB_DIR..." \
+# Pre-bake plugin-managed runtime dependencies using the same installer paths
+# users run later via archivebox init --install / archivebox install. Browser
+# system deps need root for Puppeteer's --install-deps; the ArchiveBox install
+# pass still runs as the archivebox user and records normal dependency state.
+RUN echo "[+] Installing root-managed browser runtime dependencies into $LIB_DIR..." \
+    && abx-dl install chrome \
+    && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR" \
+    && echo "[+] Initializing image collection and installing plugin runtime dependencies into $LIB_DIR..." \
     && gosu "$DEFAULT_PUID" archivebox init --install \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$DATA_DIR" "$LIB_DIR"
 
