@@ -27,7 +27,7 @@ class PersonaAdmin(ConfigEditorMixin, BaseModelAdmin):
             "Persona",
             {
                 "fields": ("name", "created_by"),
-                "classes": ("card",),
+                "classes": ("card", "persona-card-primary"),
             },
         ),
         (
@@ -54,19 +54,22 @@ class PersonaAdmin(ConfigEditorMixin, BaseModelAdmin):
         ),
     )
 
-    change_fieldsets = add_fieldsets + (
+    change_fieldsets = (
+        add_fieldsets[0],
+        (
+            "Timestamps",
+            {
+                "fields": ("id", "created_at"),
+                "classes": ("card", "persona-card-timestamps"),
+            },
+        ),
+        add_fieldsets[1],
+        add_fieldsets[2],
         (
             "Artifacts",
             {
                 "fields": ("persona_paths", "import_artifact_status"),
                 "classes": ("card", "wide"),
-            },
-        ),
-        (
-            "Timestamps",
-            {
-                "fields": ("id", "created_at"),
-                "classes": ("card",),
             },
         ),
     )

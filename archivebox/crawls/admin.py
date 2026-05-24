@@ -8,7 +8,8 @@ from django.utils.html import escape, format_html, format_html_join
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.contrib import admin, messages
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 
 
 from django_object_actions import action
@@ -589,13 +590,22 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
     change_actions = ["recrawl"]
 
     def get_queryset(self, request):
-        """Keep the changelist query page-local; counts are resolved per displayed row."""
+        """Keep joins page-local while computing per-row snapshot counts in the page query."""
+        snapshot_count = (
+            Snapshot.objects.filter(crawl_id=OuterRef("pk")).order_by().values("crawl_id").annotate(count=Count("pk")).values("count")
+        )
         return (
             super()
             .get_queryset(request)
             .prefetch_related(
                 "created_by",
                 Prefetch("schedule", queryset=CrawlSchedule.objects.select_related("template")),
+            )
+            .annotate(
+                num_snapshots_cached=Coalesce(
+                    Subquery(snapshot_count, output_field=IntegerField()),
+                    Value(0),
+                ),
             )
         )
 
