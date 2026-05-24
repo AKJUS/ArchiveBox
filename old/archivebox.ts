@@ -480,7 +480,7 @@ const CHROME_EXTENSIONS: LoadedChromeExtension[] = [
     // Content access / unblocking / blocking plugins
     {webstore_id: 'ifibfemgeogfhoebkmokieepdoobkbpo', name: 'twocaptcha'},                 // https://2captcha.com/blog/how-to-use-2captcha-solver-extension-in-puppeteer
     {webstore_id: 'edibdbjcniadpccecjdfdjjppcpchdlm', name: 'istilldontcareaboutcookies'},
-    {webstore_id: 'cjpalhdlnbpafiamejdnhcphjbkeiagm', name: 'ublock'},
+    {webstore_id: 'ddkjiahejlhfcafbddmgiahcphecmpfh', name: 'ublock'},
     // {webstore_id: 'mlomiejdfkolichcflejclcbmpeaniij', name: 'ghostery'},
     // {webstore_id: 'mnjggcdmjocbbbhaepdhchncahnbgone', name: 'sponsorblock'},
     // {webstore_id: 'iplffkdpngmdjhlpjmppncnlhomiipha', name: 'unpaywall'},
@@ -651,12 +651,6 @@ const CHROME_ARGS_DEFAULT = [
     '--disable-cookie-encryption',                       // we need to be able to write unencrypted cookies to save/load auth.json
     // '--disable-sync',                                 // don't try to use Google account sync features
 
-    // Extensions
-    // chrome://inspect/#extensions
-    // `--load-extension=${CHROME_EXTENSIONS.map(({unpacked_path}) => unpacked_path).join(',')}`,  // not needed when using existing profile that already has extensions installed
-    `--allowlisted-extension-id=${CHROME_EXTENSIONS.map(({ webstore_id }) => webstore_id).join(',')}`,
-    '--allow-legacy-extension-manifests',
-
     // Browser window and viewport setup
     // chrome://version
     // `--user-agent="${DEFAULT_USER_AGENT}"`,
@@ -799,7 +793,6 @@ const getChromeArgs = ({CHROME_ARGS_DEFAULT, CHROME_ARGS_EXTRA,
         ...CHROME_ARGS_DEFAULT,
         `--user-data-dir=${CHROME_PROFILE_PATH}`,
         `--profile-directory=${CHROME_PROFILE_USER}`,
-        `--load-extension=${CHROME_EXTENSIONS.map(({unpacked_path}) => unpacked_path).join(',')}`,
         `--allowlisted-extension-id=${CHROME_EXTENSIONS.map(({id}) => id).join(',')}`,
         `--window-size=${DEFAULT_VIEWPORT.width},${DEFAULT_VIEWPORT.height}`,
         `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
@@ -922,10 +915,10 @@ async function isTargetExtension(target) {
         }
     }
     
-    const target_is_bg = ['service_worker', 'background_page'].includes(target_type)
+    const target_is_bg = target_type === 'service_worker'
     const target_is_extension = target_url?.startsWith('chrome-extension://')
     const extension_id = (target_is_extension && target_url.split('://')[1].split('/')[0]) || null
-    const manifest_version = target_type === 'service_worker' ? '3' : '2'
+    const manifest_version = '3'
 
     return {
         target_type,
@@ -1007,33 +1000,6 @@ async function loadExtensionFromTarget(extensions, target) {
             return await target_ctx.evaluate(async (command, tab) => {
                 // @ts-ignore
                 return await chrome.commands.onCommand.dispatch(command, tab)
-            }, command, tab)
-        }
-    } else if (manifest_version === '2') {
-        dispatchAction = async (tab) => {
-            // https://developer.chrome.com/docs/extensions/mv2/reference/browserAction#event-onClicked
-            return await target_ctx.evaluate(async (tab) => {
-                tab = tab || (await new Promise((resolve) =>
-                    chrome.tabs.query({currentWindow: true, active: true}, ([tab]) => resolve(tab))))
-                // @ts-ignore
-                return await chrome.browserAction.onClicked.dispatch(tab)
-            }, tab)
-        }
-        dispatchMessage = async (message, options) => {
-            // https://developer.chrome.com/docs/extensions/mv2/reference/runtime#method-sendMessage
-            return await target_ctx.evaluate(async (extension_id, message, options) => {
-                return await new Promise((resolve) =>
-                    chrome.runtime.sendMessage(extension_id, message, options, resolve)
-                )
-            }, extension_id, message, options)
-        }
-        dispatchCommand = async (command, tab) => {
-            // https://developer.chrome.com/docs/extensions/mv2/reference/commands#event-onCommand
-            return await target_ctx.evaluate(async (command, tab) => {
-                return await new Promise((resolve) =>
-                    // @ts-ignore
-                    chrome.commands.onCommand.dispatch(command, tab, resolve)
-                )
             }, command, tab)
         }
     }

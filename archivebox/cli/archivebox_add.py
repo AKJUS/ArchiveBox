@@ -22,8 +22,8 @@ from archivebox.config.common import get_config
 
 
 if TYPE_CHECKING:
-    from archivebox.core.models import Snapshot
     from archivebox.crawls.models import Crawl
+    from archivebox.core.models import Snapshot
 
 
 def _collect_input_urls(args: tuple[str, ...]) -> list[str]:
@@ -51,7 +51,8 @@ def add(
     snapshot_ids: list[str] | None = None,
     depth: int | str = 0,
     max_urls: int = 0,
-    max_size: int | str = 0,
+    crawl_max_size: int | str = 0,
+    snapshot_max_size: int | str = 0,
     tag: str = "",
     url_allowlist: str = "",
     url_denylist: str = "",
@@ -80,17 +81,19 @@ def add(
 
     depth = int(depth)
     max_urls = int(max_urls or 0)
-    max_size = parse_filesize_to_bytes(max_size)
+    crawl_max_size = parse_filesize_to_bytes(crawl_max_size)
+    snapshot_max_size = parse_filesize_to_bytes(snapshot_max_size)
 
     if depth not in (0, 1, 2, 3, 4):
         raise ValueError("Depth must be 0-4")
     if max_urls < 0:
         raise ValueError("max_urls must be >= 0")
-    if max_size < 0:
-        raise ValueError("max_size must be >= 0")
+    if crawl_max_size < 0:
+        raise ValueError("crawl_max_size must be >= 0")
+    if snapshot_max_size < 0:
+        raise ValueError("snapshot_max_size must be >= 0")
 
     # import models once django is set up
-    from archivebox.core.models import Snapshot
     from archivebox.crawls.models import Crawl
     from archivebox.base_models.models import get_or_create_system_user_pk
     from archivebox.personas.models import Persona
@@ -140,7 +143,8 @@ def add(
         urls=urls_content,
         max_depth=depth,
         max_urls=max_urls,
-        max_size=max_size,
+        crawl_max_size=crawl_max_size,
+        snapshot_max_size=snapshot_max_size,
         tags_str=tag,
         persona_id=persona_obj.id,
         label=f"{USER}@{HOSTNAME} $ {cmd_str} [{timestamp}]",
@@ -170,21 +174,7 @@ def add(
     if index_only:
         # Just create the crawl but don't start processing
         print("[yellow]\\[*] Index-only mode - crawl created but not started[/yellow]")
-        # Create snapshots for all URLs in the crawl
-        for url in crawl.get_urls_list():
-            snapshot, _ = Snapshot.objects.update_or_create(
-                crawl=crawl,
-                url=url,
-                defaults={
-                    "status": Snapshot.INITIAL_STATE,
-                    "retry_at": timezone.now(),
-                    "timestamp": str(timezone.now().timestamp()),
-                    "depth": 0,
-                },
-            )
-            if tag:
-                snapshot.save_tags(tag.split(","))
-            snapshot.ensure_crawl_symlink()
+        crawl.create_snapshots_from_urls()
         return crawl, crawl.snapshot_set.all()
 
     if bg:
@@ -268,7 +258,8 @@ def add(
     help="Recursively archive linked pages up to N hops away",
 )
 @click.option("--max-urls", type=int, default=0, help="Maximum number of URLs to snapshot for this crawl (0 = unlimited)")
-@click.option("--max-size", default="0", help="Maximum total crawl size in bytes or units like 45mb / 1gb (0 = unlimited)")
+@click.option("--crawl-max-size", default="0", help="Maximum total crawl size in bytes or units like 45mb / 1gb (0 = unlimited)")
+@click.option("--snapshot-max-size", default="0", help="Maximum per-snapshot size in bytes or units like 45mb / 1gb (0 = unlimited)")
 @click.option("--tag", "-t", default="", help="Comma-separated list of tags to add to each snapshot e.g. tag1,tag2,tag3")
 @click.option("--url-allowlist", "--domain-allowlist", default="", help="Comma-separated URL/domain allowlist for this crawl")
 @click.option("--url-denylist", "--domain-denylist", default="", help="Comma-separated URL/domain denylist for this crawl")
@@ -291,9 +282,13 @@ def main(**kwargs):
     if int(kwargs.get("max_urls") or 0) < 0:
         raise click.BadParameter("max_urls must be 0 or a positive integer.", param_hint="--max-urls")
     try:
-        kwargs["max_size"] = parse_filesize_to_bytes(kwargs.get("max_size"))
+        kwargs["crawl_max_size"] = parse_filesize_to_bytes(kwargs.get("crawl_max_size"))
     except ValueError as err:
-        raise click.BadParameter(str(err), param_hint="--max-size") from err
+        raise click.BadParameter(str(err), param_hint="--crawl-max-size") from err
+    try:
+        kwargs["snapshot_max_size"] = parse_filesize_to_bytes(kwargs.get("snapshot_max_size"))
+    except ValueError as err:
+        raise click.BadParameter(str(err), param_hint="--snapshot-max-size") from err
 
     add(urls=urls, **kwargs)
 

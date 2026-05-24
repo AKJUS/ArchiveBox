@@ -2,6 +2,7 @@ __package__ = "archivebox.core"
 
 import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from django import forms
@@ -221,6 +222,7 @@ class PluginConfigFormMixin:
         all_plugins = get_plugins()
         plugin_configs = discover_plugin_configs()
         runtime_config = runtime_config or get_config()
+        self.plugin_config_binary_urls = get_plugin_config_binary_urls(runtime_config)
         grouped_plugins = set().union(*(group[-1] for group in PLUGIN_GROUP_DEFINITIONS))
 
         for field_name, *_rest, plugin_names in PLUGIN_GROUP_DEFINITIONS:
@@ -273,6 +275,10 @@ class PluginConfigFormMixin:
         for index, (plugin_name, label) in enumerate(choices):
             schema = plugin_configs.get(str(plugin_name), {})
             properties = schema.get("properties") or {}
+            enabled_config_key = f"{str(plugin_name).upper()}_ENABLED"
+            enabled_prop_schema = properties.get(enabled_config_key)
+            if not isinstance(enabled_prop_schema, dict) or "boolean" not in _schema_types(enabled_prop_schema):
+                enabled_config_key = ""
             config_fields = [
                 self._build_plugin_config_field(str(plugin_name), str(config_key), prop_schema, runtime_config)
                 for config_key, prop_schema in properties.items()
@@ -284,6 +290,7 @@ class PluginConfigFormMixin:
                     "label": label,
                     "checked": str(plugin_name) in selected_values,
                     "checkbox_id": f"id_{field_name}_{index}",
+                    "enabled_config_key": enabled_config_key,
                     "description": str(schema.get("description") or "").strip(),
                     "required_plugins": [str(item) for item in schema.get("required_plugins") or []],
                     "required_binaries_count": len(schema.get("required_binaries") or []),
@@ -311,6 +318,8 @@ class PluginConfigFormMixin:
                 current_value = self.data.get(input_name)
 
         default_value = prop_schema.get("default", "")
+        fallback_key = prop_schema.get("x-fallback")
+        default_display = f"{{{fallback_key}}}" if fallback_key else default_value
         is_sensitive = bool(prop_schema.get("x-sensitive"))
         input_value = "" if is_sensitive else _jsonish(current_value)
         field_kind = "text"
@@ -348,8 +357,9 @@ class PluginConfigFormMixin:
             "checked": bool(current_value),
             "options": options,
             "description": str(prop_schema.get("description") or "").strip(),
-            "default": _jsonish(default_value),
+            "default": _jsonish(default_display),
             "current": "configured" if is_sensitive and current_value else _jsonish(current_value),
+            "current_url": self.plugin_config_binary_urls.get(config_key, "") if str(config_key).endswith("_BINARY") else "",
             "is_sensitive": is_sensitive,
             "minimum": prop_schema.get("minimum"),
             "maximum": prop_schema.get("maximum"),
@@ -418,6 +428,38 @@ class PluginConfigFormMixin:
         }
 
 
+def get_plugin_config_binary_urls(runtime_config: Mapping[str, Any]) -> dict[str, str]:
+    from archivebox.config.views import get_environment_binary_url, get_installed_binary_change_url
+    from archivebox.machine.models import Binary, Machine
+
+    binary_keys = {
+        str(config_key)
+        for schema in discover_plugin_configs().values()
+        for config_key, prop_schema in (schema.get("properties") or {}).items()
+        if isinstance(prop_schema, dict) and str(config_key).endswith("_BINARY")
+    }
+    urls: dict[str, str] = {}
+    machine = Machine.current()
+    for key in binary_keys:
+        value = str(runtime_config.get(key) or "").strip()
+        if not value:
+            continue
+        name = Path(value).name if "/" in value else value
+        binary = Binary.objects.get_valid_binary(value, machine=machine)
+        if binary is None and "/" in value:
+            binary = (
+                Binary.objects.exclude(abspath="")
+                .exclude(abspath__isnull=True)
+                .filter(machine=machine, abspath=value)
+                .order_by("-modified_at")
+                .first()
+            )
+        if binary is None and name != value:
+            binary = Binary.objects.get_valid_binary(name, machine=machine)
+        urls[key] = get_installed_binary_change_url(getattr(binary, "name", name), binary) or get_environment_binary_url(name)
+    return urls
+
+
 class AddLinkForm(PluginConfigFormMixin, forms.Form):
     # Basic fields
     url = forms.CharField(
@@ -455,8 +497,18 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
             },
         ),
     )
-    max_size = forms.CharField(
-        label="Max size",
+    crawl_max_size = forms.CharField(
+        label="Max crawl size",
+        required=False,
+        initial="0",
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "0 = unlimited, or e.g. 45mb / 1gb",
+            },
+        ),
+    )
+    snapshot_max_size = forms.CharField(
+        label="Max snapshot size",
         required=False,
         initial="0",
         widget=forms.TextInput(
@@ -562,7 +614,10 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
         self.fields["persona"].queryset = Persona.objects.order_by("name")
         self.fields["persona"].initial = default_persona.name
 
-        self.build_plugin_groups()
+        selected_persona = default_persona
+        if self.is_bound:
+            selected_persona = Persona.objects.filter(name=str(self.data.get(self.add_prefix("persona")) or "")).first() or default_persona
+        self.build_plugin_groups(get_config(persona=selected_persona))
 
     def clean(self):
         cleaned_data = super().clean() or {}
@@ -596,10 +651,12 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
 
     def clean_url(self):
         value = self.cleaned_data.get("url") or ""
-        urls = "\n".join(find_all_urls(value))
-        if not urls:
+        valid_urls = []
+        for url in find_all_urls(value):
+            valid_urls.append(url)
+        if not valid_urls:
             raise forms.ValidationError("Enter at least one valid URL.")
-        return urls
+        return "\n".join(valid_urls)
 
     def clean_url_filters(self):
         from archivebox.crawls.models import Crawl
@@ -615,8 +672,8 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
         value = self.cleaned_data.get("max_urls")
         return int(value or 0)
 
-    def clean_max_size(self):
-        raw_value = str(self.cleaned_data.get("max_size") or "").strip()
+    def clean_crawl_max_size(self):
+        raw_value = str(self.cleaned_data.get("crawl_max_size") or "").strip()
         if not raw_value:
             return 0
         try:
@@ -624,7 +681,19 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
         except ValueError as err:
             raise forms.ValidationError(str(err))
         if value < 0:
-            raise forms.ValidationError("Max size must be 0 or a positive number of bytes.")
+            raise forms.ValidationError("Max crawl size must be 0 or a positive number of bytes.")
+        return value
+
+    def clean_snapshot_max_size(self):
+        raw_value = str(self.cleaned_data.get("snapshot_max_size") or "").strip()
+        if not raw_value:
+            return 0
+        try:
+            value = parse_filesize_to_bytes(raw_value)
+        except ValueError as err:
+            raise forms.ValidationError(str(err))
+        if value < 0:
+            raise forms.ValidationError("Max snapshot size must be 0 or a positive number of bytes.")
         return value
 
     def clean_schedule(self):

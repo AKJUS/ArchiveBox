@@ -5,6 +5,7 @@ import socket
 import hashlib
 import tempfile
 import platform
+import subprocess
 from pathlib import Path
 from functools import cache
 from datetime import datetime
@@ -68,9 +69,9 @@ def _get_collection_id(DATA_DIR=DATA_DIR, force_create=False) -> str:
             if IS_ROOT:
                 with SudoPermission(uid=0):
                     if ARCHIVEBOX_USER == 0:
-                        os.system(f'chmod 777 "{collection_id_file}"')
+                        subprocess.run(["chmod", "777", str(collection_id_file)])
                     else:
-                        os.system(f'chown {ARCHIVEBOX_USER} "{collection_id_file}"')
+                        subprocess.run(["chown", str(ARCHIVEBOX_USER), str(collection_id_file)])
     except (OSError, FileNotFoundError, PermissionError):
         pass
     return collection_id
@@ -128,7 +129,7 @@ def dir_is_writable(dir_path: Path, uid: int | None = None, gid: int | None = No
         if chown:
             # try fixing it using sudo permissions
             with SudoPermission(uid=uid, fallback=fallback):
-                os.system(f'chown {uid}:{gid} "{dir_path}" 2>/dev/null')
+                subprocess.run(["chown", f"{uid}:{gid}", str(dir_path)], stderr=subprocess.DEVNULL)
             return dir_is_writable(dir_path, uid=uid, gid=gid, fallback=fallback, chown=False)
     return False
 
@@ -159,8 +160,9 @@ def assert_dir_can_contain_unix_sockets(dir_path: Path) -> bool:
 def create_and_chown_dir(dir_path: Path) -> None:
     with SudoPermission(uid=0, fallback=True):
         dir_path.mkdir(parents=True, exist_ok=True)
-        os.system(f'chown {ARCHIVEBOX_USER} "{dir_path}" 2>/dev/null')
-        os.system(f'chown {ARCHIVEBOX_USER} "{dir_path}"/* 2>/dev/null &')
+        subprocess.run(["chown", str(ARCHIVEBOX_USER), str(dir_path)], stderr=subprocess.DEVNULL)
+        for child in dir_path.iterdir():
+            subprocess.run(["chown", str(ARCHIVEBOX_USER), str(child)], stderr=subprocess.DEVNULL)
 
 
 def tmp_dir_socket_path_is_short_enough(dir_path: Path) -> bool:

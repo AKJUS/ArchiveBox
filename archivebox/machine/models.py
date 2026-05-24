@@ -3,6 +3,7 @@ from __future__ import annotations
 __package__ = "archivebox.machine"
 
 import os
+import shlex
 import sys
 import uuid
 import socket
@@ -1817,12 +1818,8 @@ class Process(models.Model):
         if self.cmd and self.cmd_file:
             self.cmd_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Escape shell arguments (quote if contains space, ", or $)
-            def escape(arg: str) -> str:
-                return f'"{arg.replace(chr(34), chr(92) + chr(34))}"' if any(c in arg for c in ' "$') else arg
-
             # Write executable shell script
-            script = "#!/bin/bash\n" + " ".join(escape(arg) for arg in self.cmd) + "\n"
+            script = "#!/bin/bash\n" + shlex.join(self.cmd) + "\n"
             self.cmd_file.write_text(script)
             try:
                 self.cmd_file.chmod(0o755)

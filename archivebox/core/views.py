@@ -47,7 +47,7 @@ from archivebox.core.host_utils import (
     get_web_host,
     host_matches,
 )
-from archivebox.core.forms import AddLinkForm
+from archivebox.core.forms import AddLinkForm, get_plugin_config_binary_urls
 from archivebox.crawls.models import Crawl
 from archivebox.hooks import (
     BUILTIN_PLUGINS_DIR,
@@ -1019,15 +1019,14 @@ class AddView(UserPassesTestMixin, FormView):
             for config_key, prop_schema in (schema.get("properties") or {}).items()
             if isinstance(prop_schema, dict) and prop_schema.get("x-sensitive")
         }
-        base_config = get_config()
         persona_config_map = {}
         for persona in Persona.objects.order_by("name"):
             raw_config = {str(key): value for key, value in (persona.config or {}).items() if str(key) not in sensitive_keys}
+            effective_config = get_config(persona=persona)
             persona_config_map[persona.name] = {
                 "config": raw_config,
-                "effective_config": {
-                    str(key): value for key, value in {**base_config, **raw_config}.items() if str(key) not in sensitive_keys
-                },
+                "effective_config": {str(key): value for key, value in effective_config.items() if str(key) not in sensitive_keys},
+                "binary_urls": get_plugin_config_binary_urls(effective_config),
             }
         plugin_dependency_map = {
             plugin_name: [
@@ -1057,7 +1056,8 @@ class AddView(UserPassesTestMixin, FormView):
         tag = form.cleaned_data["tag"]
         depth = int(form.cleaned_data["depth"])
         max_urls = int(form.cleaned_data.get("max_urls") or 0)
-        max_size = int(form.cleaned_data.get("max_size") or 0)
+        crawl_max_size = int(form.cleaned_data.get("crawl_max_size") or 0)
+        snapshot_max_size = int(form.cleaned_data.get("snapshot_max_size") or 0)
         plugins = ",".join(form.cleaned_data.get("plugins", []))
         schedule = form.cleaned_data.get("schedule", "").strip()
         persona = form.cleaned_data.get("persona")
@@ -1113,7 +1113,8 @@ class AddView(UserPassesTestMixin, FormView):
             urls=urls_content,
             max_depth=depth,
             max_urls=max_urls,
-            max_size=max_size,
+            crawl_max_size=crawl_max_size,
+            snapshot_max_size=snapshot_max_size,
             tags_str=tag,
             notes=notes,
             label=f"{created_by_name}@{HOSTNAME}{self.request.path} {timestamp}",
@@ -1229,7 +1230,8 @@ class WebAddView(AddView):
                 "url": add_url,
                 "depth": defaults_form.fields["depth"].initial or "0",
                 "max_urls": defaults_form.fields["max_urls"].initial or 0,
-                "max_size": defaults_form.fields["max_size"].initial or "0",
+                "crawl_max_size": defaults_form.fields["crawl_max_size"].initial or "0",
+                "snapshot_max_size": defaults_form.fields["snapshot_max_size"].initial or "0",
                 "persona": defaults_form.fields["persona"].initial or "Default",
                 "config": "{}",
             },

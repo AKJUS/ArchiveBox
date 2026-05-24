@@ -33,10 +33,6 @@ from archivebox.machine.env_utils import env_to_shell_exports
 from archivebox.core.models import ArchiveResult, Snapshot
 
 
-def _quote_shell_string(value: str) -> str:
-    return "'" + str(value).replace("'", "'\"'\"'") + "'"
-
-
 def _get_replay_source_url(result: ArchiveResult) -> str:
     process = getattr(result, "process", None)
     return str(getattr(process, "url", None) or result.snapshot.url or "")
@@ -45,11 +41,12 @@ def _get_replay_source_url(result: ArchiveResult) -> str:
 def build_abx_dl_display_command(result: ArchiveResult) -> str:
     source_url = _get_replay_source_url(result)
     plugin_name = str(result.plugin or "").strip()
-    if not plugin_name and not source_url:
-        return "abx-dl"
-    if not source_url:
-        return f"abx-dl --plugins={plugin_name}"
-    return f"abx-dl --plugins={plugin_name} {_quote_shell_string(source_url)}"
+    cmd = ["abx-dl"]
+    if plugin_name:
+        cmd.append(f"--plugins={plugin_name}")
+    if source_url:
+        cmd.append(source_url)
+    return shlex.join(cmd)
 
 
 def build_abx_dl_replay_command(result: ArchiveResult, config=None) -> str:

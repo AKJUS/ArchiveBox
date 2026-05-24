@@ -1,11 +1,13 @@
 __package__ = "archivebox.machine"
 
 import json
+import re
 import shlex
 from typing import Any
 
 
 SENSITIVE_ENV_KEY_PARTS = ("KEY", "TOKEN", "SECRET")
+SHELL_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def stringify_env_value(value: Any) -> str:
@@ -31,9 +33,17 @@ def redact_env(env: dict[str, Any] | None) -> dict[str, Any]:
 
 def env_to_dotenv_text(env: dict[str, Any] | None) -> str:
     redacted_env = redact_env(env)
-    return "\n".join(f"{key}={shlex.quote(stringify_env_value(value))}" for key, value in sorted(redacted_env.items()) if value is not None)
+    return "\n".join(
+        f"{key}={shlex.quote(stringify_env_value(value))}"
+        for key, value in sorted(redacted_env.items())
+        if value is not None and SHELL_ENV_KEY_RE.fullmatch(str(key))
+    )
 
 
 def env_to_shell_exports(env: dict[str, Any] | None) -> str:
     redacted_env = redact_env(env)
-    return " ".join(f"{key}={shlex.quote(stringify_env_value(value))}" for key, value in sorted(redacted_env.items()) if value is not None)
+    return " ".join(
+        f"{key}={shlex.quote(stringify_env_value(value))}"
+        for key, value in sorted(redacted_env.items())
+        if value is not None and SHELL_ENV_KEY_RE.fullmatch(str(key))
+    )

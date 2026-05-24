@@ -2,6 +2,7 @@ __package__ = "archivebox.config"
 
 import os
 import sys
+import subprocess
 
 from datetime import datetime, timezone
 
@@ -55,8 +56,10 @@ def setup_django(check_db=False, in_memory_db=False) -> None:
         with SudoPermission(uid=0):
             # running as root is a special case where it's ok to be a bit slower
             # make sure data dir is always owned by the correct user
-            os.system(f'chown {ARCHIVEBOX_USER}:{ARCHIVEBOX_GROUP} "{CONSTANTS.DATA_DIR}" 2>/dev/null')
-            os.system(f'chown {ARCHIVEBOX_USER}:{ARCHIVEBOX_GROUP} "{CONSTANTS.DATA_DIR}"/* 2>/dev/null')
+            subprocess.run(["chown", f"{ARCHIVEBOX_USER}:{ARCHIVEBOX_GROUP}", str(CONSTANTS.DATA_DIR)], stderr=subprocess.DEVNULL)
+            if CONSTANTS.DATA_DIR.exists():
+                for child in CONSTANTS.DATA_DIR.iterdir():
+                    subprocess.run(["chown", f"{ARCHIVEBOX_USER}:{ARCHIVEBOX_GROUP}", str(child)], stderr=subprocess.DEVNULL)
 
     # Suppress the "database access during app initialization" warning
     # This warning can be triggered during django.setup() but is safe to ignore

@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.conf import settings
 from django.urls import reverse_lazy
@@ -28,6 +29,7 @@ from archivebox.base_models.models import (
 )
 from archivebox.workers.models import ModelWithStateMachine, BaseStateMachine
 from archivebox.crawls.schedule_utils import next_run_for_schedule, validate_schedule
+from archivebox.misc.util import validate_url_length
 
 if TYPE_CHECKING:
     from archivebox.core.models import Snapshot
@@ -96,7 +98,8 @@ class CrawlSchedule(ModelWithUUID, ModelWithNotes):
             config=template.config or {},
             max_depth=template.max_depth,
             max_urls=template.max_urls,
-            max_size=template.max_size,
+            crawl_max_size=template.crawl_max_size,
+            snapshot_max_size=template.snapshot_max_size,
             tags_str=template.tags_str,
             persona_id=template.persona_id,
             label=label,
@@ -122,10 +125,15 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
         validators=[MinValueValidator(0)],
         help_text="Maximum number of URLs to snapshot for this crawl (0 = unlimited).",
     )
-    max_size = models.BigIntegerField(
+    crawl_max_size = models.BigIntegerField(
         default=0,
         validators=[MinValueValidator(0)],
         help_text="Maximum total archived output size in bytes for this crawl (0 = unlimited).",
+    )
+    snapshot_max_size = models.BigIntegerField(
+        default=0,
+        validators=[MinValueValidator(0)],
+        help_text="Maximum archived output size in bytes for each snapshot (0 = unlimited).",
     )
     tags_str = models.CharField(max_length=1024, blank=True, null=False, default="")
     persona_id = models.UUIDField(null=True, blank=True)
@@ -172,14 +180,19 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
     def save(self, *args, **kwargs):
         config = dict(self.config or {})
         if self.max_urls > 0:
-            config["MAX_URLS"] = self.max_urls
+            config["CRAWL_MAX_URLS"] = self.max_urls
         else:
-            config.pop("MAX_URLS", None)
+            config.pop("CRAWL_MAX_URLS", None)
 
-        if self.max_size > 0:
-            config["MAX_SIZE"] = self.max_size
+        if self.crawl_max_size > 0:
+            config["CRAWL_MAX_SIZE"] = self.crawl_max_size
         else:
-            config.pop("MAX_SIZE", None)
+            config.pop("CRAWL_MAX_SIZE", None)
+
+        if self.snapshot_max_size > 0:
+            config["SNAPSHOT_MAX_SIZE"] = self.snapshot_max_size
+        else:
+            config.pop("SNAPSHOT_MAX_SIZE", None)
 
         if config != (self.config or {}):
             self.config = config
@@ -221,7 +234,8 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
             "status": self.status,
             "max_depth": self.max_depth,
             "max_urls": self.max_urls,
-            "max_size": self.max_size,
+            "crawl_max_size": self.crawl_max_size,
+            "snapshot_max_size": self.snapshot_max_size,
             "tags_str": self.tags_str,
             "label": self.label,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -264,7 +278,8 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
             urls=urls,
             max_depth=record.get("max_depth", record.get("depth", 0)),
             max_urls=record.get("max_urls", 0),
-            max_size=record.get("max_size", 0),
+            crawl_max_size=record.get("crawl_max_size", 0),
+            snapshot_max_size=record.get("snapshot_max_size", 0),
             tags_str=record.get("tags_str", record.get("tags", "")),
             label=record.get("label", ""),
             status=Crawl.StatusChoices.QUEUED,
@@ -587,6 +602,10 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
         url = sanitize_extracted_url(fix_url_from_markdown(str(entry.get("url", "") or "").strip()))
         if not url:
             return False
+        try:
+            validate_url_length(url)
+        except ValueError:
+            return False
         if not self.url_passes_filters(url):
             return False
 
@@ -654,6 +673,11 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
 
             if not url:
                 continue
+            try:
+                validate_url_length(url)
+            except ValueError as err:
+                print(f"[yellow][!] Skipping over-long snapshot URL: {url[:120]}... ({err})[/yellow]")
+                continue
             if not self.url_passes_filters(url):
                 continue
 
@@ -673,21 +697,25 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
                 "retry_at": timezone.now(),
                 # Note: created_by removed in 0.9.0 - Snapshot inherits from Crawl
             }
-            if snapshot_id:
-                snapshot, created = Snapshot.objects.update_or_create(
-                    id=snapshot_id,
-                    defaults={
-                        **defaults,
-                        "url": url,
-                        "crawl": self,
-                    },
-                )
-            else:
-                snapshot, created = Snapshot.objects.get_or_create(
-                    url=url,
-                    crawl=self,
-                    defaults=defaults,
-                )
+            try:
+                if snapshot_id:
+                    snapshot, created = Snapshot.objects.update_or_create(
+                        id=snapshot_id,
+                        defaults={
+                            **defaults,
+                            "url": url,
+                            "crawl": self,
+                        },
+                    )
+                else:
+                    snapshot, created = Snapshot.objects.get_or_create(
+                        url=url,
+                        crawl=self,
+                        defaults=defaults,
+                    )
+            except ValidationError as err:
+                print(f"[yellow][!] Skipping blocked snapshot URL: {url} ({err})[/yellow]")
+                continue
 
             if created:
                 created_snapshots.append(snapshot)
@@ -722,6 +750,11 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
         url = sanitize_extracted_url(fix_url_from_markdown(str(url or "").strip()))
         if not url:
             return None
+        try:
+            validate_url_length(url)
+        except ValueError as err:
+            print(f"[yellow][!] Skipping over-long discovered snapshot URL: {url[:120]}... ({err})[/yellow]")
+            return None
         if depth > self.max_depth:
             return None
         if not self.url_passes_filters(url, snapshot=parent_snapshot):
@@ -731,22 +764,26 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
         if not self.has_remaining_snapshot_capacity():
             return None
 
-        snapshot = Snapshot.from_json(
-            {
-                "url": url,
-                "depth": depth,
-                "title": title,
-                "tags": tags,
-                "parent_snapshot_id": str(parent_snapshot.id),
-                "crawl_id": str(self.id),
-            },
-            overrides={
-                "crawl": self,
-                "snapshot": parent_snapshot,
-                "created_by_id": created_by_id or self.created_by_id,
-            },
-            queue_for_extraction=False,
-        )
+        try:
+            snapshot = Snapshot.from_json(
+                {
+                    "url": url,
+                    "depth": depth,
+                    "title": title,
+                    "tags": tags,
+                    "parent_snapshot_id": str(parent_snapshot.id),
+                    "crawl_id": str(self.id),
+                },
+                overrides={
+                    "crawl": self,
+                    "snapshot": parent_snapshot,
+                    "created_by_id": created_by_id or self.created_by_id,
+                },
+                queue_for_extraction=False,
+            )
+        except ValidationError as err:
+            print(f"[yellow][!] Skipping blocked discovered snapshot URL: {url} ({err})[/yellow]")
+            return None
         if snapshot is None or snapshot.status == Snapshot.StatusChoices.SEALED:
             return None
 

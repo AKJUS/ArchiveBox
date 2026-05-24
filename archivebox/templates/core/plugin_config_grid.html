@@ -400,10 +400,14 @@
                     </div>
                     <div class="plugin-checkboxes"{% if group.dom_id %} id="{{ group.dom_id }}"{% endif %}>
                         {% for plugin in group.plugins %}
-                            <div class="plugin-card">
+                            <div
+                                class="plugin-card"
+                                data-plugin-name="{{ plugin.name }}"
+                                {% if plugin.enabled_config_key %}data-plugin-enabled-key="{{ plugin.enabled_config_key }}"{% endif %}
+                            >
                                 <div class="plugin-card-main{% if not group.show_selectors %} plugin-card-main--static{% endif %}">
                                     {% if group.show_selectors %}
-                                        <input type="checkbox" name="{{ group.field_name }}" value="{{ plugin.name }}" id="{{ plugin.checkbox_id }}" {% if plugin.checked %}checked{% endif %}>
+                                        <input type="checkbox" name="{{ group.field_name }}" value="{{ plugin.name }}" id="{{ plugin.checkbox_id }}" class="plugin-section-toggle" {% if plugin.checked %}checked{% endif %}>
                                         <label for="{{ plugin.checkbox_id }}" class="plugin-card-label">
                                             {{ plugin.label }}
                                         </label>
@@ -481,7 +485,17 @@
                                                         {% if field.description %}
                                                             <div class="plugin-config-help">{{ field.description }}</div>
                                                         {% endif %}
-                                                        <div class="plugin-config-default">Current: <code>{{ field.current }}</code> · Default: <code>{{ field.default }}</code></div>
+                                                        <div class="plugin-config-default">
+                                                            Current:
+                                                            <span class="plugin-config-current" data-config-key="{{ field.key }}">
+                                                                {% if field.current_url %}
+                                                                    <a href="{{ field.current_url }}" target="_blank" rel="noopener"><code>{{ field.current }}</code></a>
+                                                                {% else %}
+                                                                    <code>{{ field.current }}</code>
+                                                                {% endif %}
+                                                            </span>
+                                                            · Default: <code>{{ field.default }}</code>
+                                                        </div>
                                                     </div>
                                                 {% endfor %}
                                             </div>
@@ -532,22 +546,100 @@
         syncing = false;
     }
 
-    window.archiveboxSetPluginConfigValues = function(values) {
+    function dispatchPluginInputChange(input) {
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function setChecked(input, checked, shouldDispatch = true) {
+        if (!input || input.checked === checked) return;
+        input.checked = checked;
+        if (shouldDispatch) dispatchPluginInputChange(input);
+    }
+
+    function getCardEnabledInput(card) {
+        if (!card || !card.dataset.pluginEnabledKey) return null;
+        return card.querySelector(`.plugin-config-input[data-config-key="${CSS.escape(card.dataset.pluginEnabledKey)}"]`);
+    }
+
+    function getCardSectionToggle(card) {
+        return card ? card.querySelector('.plugin-section-toggle') : null;
+    }
+
+    function closeCardConfig(card) {
+        const details = card ? card.querySelector('.plugin-config-details') : null;
+        if (details) details.open = false;
+    }
+
+    function syncEnabledInputFromSectionToggle(sectionToggle) {
+        const card = sectionToggle ? sectionToggle.closest('.plugin-card') : null;
+        const enabledInput = getCardEnabledInput(card);
+        if (!enabledInput) return;
+        setChecked(enabledInput, sectionToggle.checked);
+        if (!sectionToggle.checked) closeCardConfig(card);
+    }
+
+    function syncSectionToggleFromEnabledInput(enabledInput) {
+        const card = enabledInput ? enabledInput.closest('.plugin-card') : null;
+        if (!card || enabledInput.dataset.configKey !== card.dataset.pluginEnabledKey) return;
+        setChecked(getCardSectionToggle(card), enabledInput.checked);
+        if (!enabledInput.checked) closeCardConfig(card);
+    }
+
+    function setPluginCurrentValue(key, value, currentUrl) {
+        document.querySelectorAll(`.plugin-config-current[data-config-key="${CSS.escape(key)}"]`).forEach((container) => {
+            let code = container.querySelector('code');
+            if (!code) {
+                code = document.createElement('code');
+                container.textContent = '';
+                container.appendChild(code);
+            }
+            code.textContent = valueToFieldString(value);
+            const existingLink = container.querySelector('a');
+            if (currentUrl && existingLink) {
+                existingLink.href = currentUrl;
+            } else if (currentUrl && !existingLink) {
+                const link = document.createElement('a');
+                link.href = currentUrl;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                container.textContent = '';
+                link.appendChild(code);
+                container.appendChild(link);
+            } else if (!currentUrl && existingLink) {
+                container.textContent = '';
+                container.appendChild(code);
+            }
+        });
+    }
+
+    window.archiveboxSetPluginConfigValues = function(values, binaryUrls) {
         if (!values || typeof values !== 'object') return;
         syncing = true;
         document.querySelectorAll('.plugin-config-input[data-config-key]').forEach((input) => {
             if (Object.prototype.hasOwnProperty.call(values, input.dataset.configKey)) {
                 setPluginInputValue(input, values[input.dataset.configKey]);
+                setPluginCurrentValue(input.dataset.configKey, values[input.dataset.configKey], binaryUrls ? binaryUrls[input.dataset.configKey] : '');
             }
         });
         syncing = false;
     };
 
     document.addEventListener('input', function(event) {
-        if (event.target && event.target.matches('.plugin-config-input')) syncMatchingPluginInputs(event.target);
+        if (!event.target || !event.target.matches('.plugin-config-input')) return;
+        syncMatchingPluginInputs(event.target);
+        syncSectionToggleFromEnabledInput(event.target);
     });
     document.addEventListener('change', function(event) {
-        if (event.target && event.target.matches('.plugin-config-input')) syncMatchingPluginInputs(event.target);
+        if (!event.target) return;
+        if (event.target.matches('.plugin-section-toggle')) {
+            syncEnabledInputFromSectionToggle(event.target);
+            return;
+        }
+        if (event.target.matches('.plugin-config-input')) {
+            syncMatchingPluginInputs(event.target);
+            syncSectionToggleFromEnabledInput(event.target);
+        }
     });
 })();
 </script>

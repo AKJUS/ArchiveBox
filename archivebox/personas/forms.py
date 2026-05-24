@@ -114,8 +114,7 @@ class PersonaAdminForm(PluginConfigFormMixin, forms.ModelForm):
                 "Use the custom path/CDP option if the browser data lives elsewhere."
             )
 
-        persona_config = self.instance.config if self.instance and self.instance.pk and isinstance(self.instance.config, dict) else {}
-        self.build_plugin_groups({**get_config(), **persona_config})
+        self.build_plugin_groups(get_config(persona=self.instance) if self.instance and self.instance.pk else get_config())
 
     def clean_name(self) -> str:
         name = str(self.cleaned_data.get("name") or "").strip()

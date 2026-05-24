@@ -23,6 +23,7 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(tmp_path, pro
     ]
     chrome_url = "https://example.com/?archivebox-chrome-flow=1"
     env = os.environ.copy()
+    env.pop("CHROME_BINARY", None)
     env.update(
         {
             "USE_COLOR": "false",
@@ -51,7 +52,7 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(tmp_path, pro
             "add",
             "--depth=0",
             "--max-urls=2",
-            "--max-size=10mb",
+            "--crawl-max-size=10mb",
             "--tag=real-flow,challenge",
             "--parser=url_list",
             "--plugins=wget",
@@ -94,7 +95,7 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(tmp_path, pro
             "add",
             "--depth=0",
             "--max-urls=1",
-            "--max-size=10mb",
+            "--crawl-max-size=10mb",
             "--tag=chrome-flow",
             "--parser=url_list",
             "--plugins=chrome,wget,headers,title",
@@ -123,10 +124,10 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(tmp_path, pro
     conn = sqlite3.connect(tmp_path / "index.sqlite3")
     try:
         crawl = conn.execute(
-            "SELECT max_depth, max_urls, max_size, tags_str, config FROM crawls_crawl ORDER BY created_at DESC LIMIT 1",
+            "SELECT max_depth, max_urls, crawl_max_size, snapshot_max_size, tags_str, config FROM crawls_crawl ORDER BY created_at DESC LIMIT 1",
         ).fetchone()
         real_flow_crawl = conn.execute(
-            "SELECT max_depth, max_urls, max_size, tags_str, config FROM crawls_crawl WHERE tags_str = 'real-flow,challenge'",
+            "SELECT max_depth, max_urls, crawl_max_size, snapshot_max_size, tags_str, config FROM crawls_crawl WHERE tags_str = 'real-flow,challenge'",
         ).fetchone()
         snapshots = conn.execute(
             "SELECT id, url, depth, status, title FROM core_snapshot ORDER BY url",
@@ -147,11 +148,12 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(tmp_path, pro
     assert real_flow_crawl[0] == 0
     assert real_flow_crawl[1] == 2
     assert real_flow_crawl[2] == 10 * 1024 * 1024
-    assert real_flow_crawl[3] == "real-flow,challenge"
-    assert "wget" in real_flow_crawl[4]
+    assert real_flow_crawl[3] == 0
+    assert real_flow_crawl[4] == "real-flow,challenge"
+    assert "wget" in real_flow_crawl[5]
     assert crawl is not None
-    assert crawl[3] == "chrome-flow"
-    assert "wget,headers,title" in crawl[4]
+    assert crawl[4] == "chrome-flow"
+    assert "wget,headers,title" in crawl[5]
 
     snapshot_urls = {url for _id, url, _depth, _status, _title in snapshots}
     assert snapshot_urls >= {*wget_urls, chrome_url}
@@ -224,7 +226,7 @@ def test_cli_recursive_crawl_processes_discovered_html_urls(tmp_path, process):
             "add",
             "--depth=2",
             "--max-urls=2",
-            "--max-size=50mb",
+            "--crawl-max-size=50mb",
             "--tag=recursive-flow",
             "--parser=url_list",
             "--plugins=wget,parse_html_urls",
@@ -241,7 +243,7 @@ def test_cli_recursive_crawl_processes_discovered_html_urls(tmp_path, process):
     conn = sqlite3.connect(tmp_path / "index.sqlite3")
     try:
         crawl = conn.execute(
-            "SELECT max_depth, max_urls, max_size, tags_str FROM crawls_crawl ORDER BY created_at DESC LIMIT 1",
+            "SELECT max_depth, max_urls, crawl_max_size, snapshot_max_size, tags_str FROM crawls_crawl ORDER BY created_at DESC LIMIT 1",
         ).fetchone()
         snapshots = conn.execute(
             "SELECT url, depth, status FROM core_snapshot ORDER BY depth, url",
@@ -255,7 +257,7 @@ def test_cli_recursive_crawl_processes_discovered_html_urls(tmp_path, process):
     finally:
         conn.close()
 
-    assert crawl == (2, 2, 50 * 1024 * 1024, "recursive-flow")
+    assert crawl == (2, 2, 50 * 1024 * 1024, 0, "recursive-flow")
     assert ("https://example.com", 0, "sealed") in snapshots
     assert any(url == "https://iana.org/domains/example" and depth == 1 and status == "sealed" for url, depth, status in snapshots)
 

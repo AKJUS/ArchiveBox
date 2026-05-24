@@ -357,14 +357,24 @@ def test_add_help_shows_depth_and_tag_options(tmp_path, process):
     assert result.returncode == 0
     assert "--depth" in result.stdout
     assert "--max-urls" in result.stdout
-    assert "--max-size" in result.stdout
+    assert "--crawl-max-size" in result.stdout
+    assert "--snapshot-max-size" in result.stdout
     assert "--tag" in result.stdout
 
 
 def test_add_records_max_url_and_size_limits_on_crawl(tmp_path, process, disable_extractors_dict):
     os.chdir(tmp_path)
     result = subprocess.run(
-        ["archivebox", "add", "--index-only", "--depth=1", "--max-urls=3", "--max-size=45mb", "https://example.com"],
+        [
+            "archivebox",
+            "add",
+            "--index-only",
+            "--depth=1",
+            "--max-urls=3",
+            "--crawl-max-size=45mb",
+            "--snapshot-max-size=5mb",
+            "https://example.com",
+        ],
         capture_output=True,
         env=disable_extractors_dict,
     )
@@ -373,15 +383,17 @@ def test_add_records_max_url_and_size_limits_on_crawl(tmp_path, process, disable
 
     conn = sqlite3.connect("index.sqlite3")
     c = conn.cursor()
-    max_urls, max_size, config_max_urls, config_max_size = c.execute(
-        "SELECT max_urls, max_size, json_extract(config, '$.MAX_URLS'), json_extract(config, '$.MAX_SIZE') FROM crawls_crawl LIMIT 1",
+    max_urls, crawl_max_size, snapshot_max_size, config_max_urls, config_crawl_max_size, config_snapshot_max_size = c.execute(
+        "SELECT max_urls, crawl_max_size, snapshot_max_size, json_extract(config, '$.CRAWL_MAX_URLS'), json_extract(config, '$.CRAWL_MAX_SIZE'), json_extract(config, '$.SNAPSHOT_MAX_SIZE') FROM crawls_crawl LIMIT 1",
     ).fetchone()
     conn.close()
 
     assert max_urls == 3
-    assert max_size == 45 * 1024 * 1024
+    assert crawl_max_size == 45 * 1024 * 1024
+    assert snapshot_max_size == 5 * 1024 * 1024
     assert config_max_urls == 3
-    assert config_max_size == 45 * 1024 * 1024
+    assert config_crawl_max_size == 45 * 1024 * 1024
+    assert config_snapshot_max_size == 5 * 1024 * 1024
 
 
 def test_add_without_args_shows_usage(tmp_path, process):

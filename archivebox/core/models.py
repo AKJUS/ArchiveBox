@@ -9,6 +9,7 @@ from datetime import datetime
 import os
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 from statemachine import State, registry
 
@@ -21,13 +22,23 @@ from django.core.cache import cache
 from django.urls import reverse_lazy
 from django.contrib import admin
 from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.utils.safestring import mark_safe
 
 from archivebox.config import CONSTANTS
 from archivebox.config.common import get_config
 from archivebox.misc.system import get_dir_size, atomic_write
-from archivebox.misc.util import parse_date, domain as url_domain, to_json, ts_to_date_str, urlencode, htmlencode, urldecode
+from archivebox.misc.util import (
+    MAX_URL_LENGTH,
+    parse_date,
+    domain as url_domain,
+    to_json,
+    ts_to_date_str,
+    urlencode,
+    htmlencode,
+    urldecode,
+    validate_url_length,
+)
 from archivebox.hooks import (
     get_plugins,
     get_plugin_name,
@@ -299,7 +310,7 @@ class Snapshot(ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHea
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     modified_at = models.DateTimeField(auto_now=True)
 
-    url = models.URLField(unique=False, db_index=True)  # URLs can appear in multiple crawls
+    url = models.CharField(max_length=MAX_URL_LENGTH, unique=False, db_index=True)  # URLs can appear in multiple crawls
     timestamp = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
     bookmarked_at = models.DateTimeField(default=timezone.now, db_index=True)
     crawl: Crawl = models.ForeignKey(Crawl, on_delete=models.CASCADE, null=False, related_name="snapshot_set", db_index=True)  # type: ignore[assignment]
@@ -374,6 +385,38 @@ class Snapshot(ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHea
     def __str__(self):
         return f"[{self.id}] {self.url[:64]}"
 
+    @classmethod
+    def is_archivebox_internal_url(cls, url: str) -> bool:
+        parsed = urlparse((url or "").strip())
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+
+        from archivebox.core.host_utils import get_admin_host, get_api_host, get_listen_host, get_public_host, get_web_host, split_host_port
+
+        config = get_config()
+        host = parsed.hostname.lower().strip(".")
+        protected_hosts = {
+            split_host_port(host_value)[0].strip(".")
+            for host_value in (
+                get_listen_host(config=config),
+                get_admin_host(config=config),
+                get_web_host(config=config),
+                get_api_host(config=config),
+                get_public_host(config=config),
+            )
+            if host_value
+        }
+        if host in protected_hosts:
+            return True
+
+        listen_host, _ = split_host_port(get_listen_host(config=config))
+        listen_host = listen_host.strip(".")
+        if config.USES_SUBDOMAIN_ROUTING and listen_host and host.endswith(f".{listen_host}"):
+            subdomain = host[: -(len(listen_host) + 1)]
+            return subdomain in {"admin", "web", "api", "public"} or subdomain.startswith("snap-")
+
+        return False
+
     @property
     def created_by(self):
         """Convenience property to access the user who created this snapshot via its crawl."""
@@ -394,6 +437,14 @@ class Snapshot(ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHea
         return Binary.objects.filter(process_set__archiveresult__snapshot_id=self.id).distinct()
 
     def save(self, *args, **kwargs):
+        try:
+            validate_url_length(self.url or "")
+        except ValueError as err:
+            raise ValidationError({"url": str(err)}) from err
+
+        if self.is_archivebox_internal_url(self.url):
+            raise ValidationError({"url": "ArchiveBox cannot archive its own admin, web, api, or snapshot URLs."})
+
         if not self.bookmarked_at:
             self.bookmarked_at = self.created_at or timezone.now()
         if not self.timestamp:

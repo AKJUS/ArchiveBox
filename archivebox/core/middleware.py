@@ -32,6 +32,21 @@ from archivebox.core.host_utils import (
 from archivebox.core.views import SnapshotHostView, OriginalDomainHostView
 
 
+ADMIN_LOGIN_HINT_COOKIE = "archivebox_admin_logged_in"
+
+
+def _admin_login_hint_cookie_domain(config) -> str | None:
+    if not config.USES_SUBDOMAIN_ROUTING:
+        return None
+    listen_host, _listen_port = split_host_port(get_listen_host(config=config))
+    try:
+        ipaddress.ip_address(listen_host)
+    except ValueError:
+        if listen_host and listen_host != "localhost":
+            return listen_host
+    return None
+
+
 def detect_timezone(request, activate: bool = True):
     gmt_offset = (request.COOKIES.get("GMT_OFFSET") or "").strip()
     tz = None
@@ -174,7 +189,21 @@ def HostRoutingMiddleware(get_response):
                 if request.META.get("QUERY_STRING"):
                     target = f"{target}?{request.META['QUERY_STRING']}"
                 return redirect(target)
-            return get_response(request)
+            response = get_response(request)
+            hint_cookie_domain = _admin_login_hint_cookie_domain(config)
+            if request.user.is_authenticated and not request.path.startswith("/admin/logout"):
+                response.set_cookie(
+                    ADMIN_LOGIN_HINT_COOKIE,
+                    "1",
+                    max_age=1209600,
+                    domain=hint_cookie_domain,
+                    secure=request.is_secure(),
+                    httponly=True,
+                    samesite="Lax",
+                )
+            else:
+                response.delete_cookie(ADMIN_LOGIN_HINT_COOKIE, domain=hint_cookie_domain, samesite="Lax")
+            return response
 
         if host_matches(request_host, api_host):
             request.user = AnonymousUser()
@@ -192,11 +221,17 @@ def HostRoutingMiddleware(get_response):
             return get_response(request)
 
         if host_matches(request_host, web_host):
+            if request.COOKIES.get(ADMIN_LOGIN_HINT_COOKIE) == "1" and (request.path == "/public" or request.path.startswith("/public/")):
+                target = build_admin_url("/admin/core/snapshot/", request=request)
+                return redirect(target)
             request.user = AnonymousUser()
             request._cached_user = request.user
             return get_response(request)
 
         if host_matches(request_host, public_host):
+            if request.COOKIES.get(ADMIN_LOGIN_HINT_COOKIE) == "1" and (request.path == "/public" or request.path.startswith("/public/")):
+                target = build_admin_url("/admin/core/snapshot/", request=request)
+                return redirect(target)
             return get_response(request)
 
         if subdomain:

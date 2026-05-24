@@ -723,7 +723,7 @@ def test_load_run_state_uses_enabled_plugins_when_plugins_key_missing(monkeypatc
 
 
 @pytest.mark.django_db(transaction=True)
-def test_run_snapshot_skips_descendant_when_max_size_already_reached(monkeypatch, tmp_path):
+def test_run_snapshot_skips_descendant_when_crawl_max_size_already_reached(monkeypatch, tmp_path):
     from archivebox.base_models.models import get_or_create_system_user_pk
     from archivebox.crawls.models import Crawl
     from archivebox.services import runner as runner_module
@@ -731,7 +731,7 @@ def test_run_snapshot_skips_descendant_when_max_size_already_reached(monkeypatch
     crawl = Crawl.objects.create(
         urls="https://example.com",
         created_by_id=get_or_create_system_user_pk(),
-        max_size=16,
+        crawl_max_size=16,
     )
 
     monkeypatch.setattr(runner_module, "discover_plugins", lambda: {})
@@ -749,9 +749,9 @@ def test_run_snapshot_skips_descendant_when_max_size_already_reached(monkeypatch
         json.dumps(
             {
                 "admitted_snapshot_ids": ["child-1"],
-                "counted_process_ids": ["proc-1"],
+                "counted_event_ids": ["proc-1"],
                 "total_size": 32,
-                "stop_reason": "max_size",
+                "stop_reason": "crawl_max_size",
             },
         ),
         encoding="utf-8",
@@ -768,7 +768,7 @@ def test_run_snapshot_skips_descendant_when_max_size_already_reached(monkeypatch
         "depth": 1,
         "status": "queued",
         "output_dir": "/tmp/child",
-        "config": {"CRAWL_DIR": str(tmp_path), "MAX_SIZE": 16},
+        "config": {"CRAWL_DIR": str(tmp_path), "CRAWL_MAX_SIZE": 16},
     }
     crawl_runner.seal_snapshot_due_to_limit = lambda snapshot_id: cancelled.append(snapshot_id)
 
@@ -795,7 +795,7 @@ def test_run_snapshot_skips_descendant_when_max_size_already_reached(monkeypatch
 
 
 @pytest.mark.django_db(transaction=True)
-def test_seal_snapshot_cancels_queued_descendants_after_max_size():
+def test_seal_snapshot_cancels_queued_descendants_after_crawl_max_size():
     from archivebox.base_models.models import get_or_create_system_user_pk
     from archivebox.crawls.models import Crawl
     from archivebox.core.models import Snapshot
@@ -806,7 +806,7 @@ def test_seal_snapshot_cancels_queued_descendants_after_max_size():
     crawl = Crawl.objects.create(
         urls="https://example.com",
         created_by_id=get_or_create_system_user_pk(),
-        max_size=16,
+        crawl_max_size=16,
     )
     root = Snapshot.objects.create(
         url="https://example.com",
@@ -827,9 +827,9 @@ def test_seal_snapshot_cancels_queued_descendants_after_max_size():
         json.dumps(
             {
                 "admitted_snapshot_ids": [str(root.id), str(child.id)],
-                "counted_process_ids": ["proc-1"],
+                "counted_event_ids": ["proc-1"],
                 "total_size": 32,
-                "stop_reason": "max_size",
+                "stop_reason": "crawl_max_size",
             },
         ),
         encoding="utf-8",

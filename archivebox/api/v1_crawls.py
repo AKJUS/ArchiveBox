@@ -36,7 +36,8 @@ class CrawlSchema(Schema):
     urls: str
     max_depth: int
     max_urls: int
-    max_size: int
+    crawl_max_size: int
+    snapshot_max_size: int
     tags_str: str
     config: dict
 
@@ -71,7 +72,8 @@ class CrawlCreateSchema(Schema):
     urls: list[str]
     max_depth: int = 0
     max_urls: int = 0
-    max_size: int = 0
+    crawl_max_size: int = 0
+    snapshot_max_size: int = 0
     tags: list[str] | None = None
     tags_str: str = ""
     label: str = ""
@@ -106,15 +108,18 @@ def create_crawl(request: HttpRequest, data: CrawlCreateSchema):
         raise HttpError(400, "max_depth must be between 0 and 4")
     if data.max_urls < 0:
         raise HttpError(400, "max_urls must be >= 0")
-    if data.max_size < 0:
-        raise HttpError(400, "max_size must be >= 0")
+    if data.crawl_max_size < 0:
+        raise HttpError(400, "crawl_max_size must be >= 0")
+    if data.snapshot_max_size < 0:
+        raise HttpError(400, "snapshot_max_size must be >= 0")
 
     tags = normalize_tag_list(data.tags, data.tags_str)
     crawl = Crawl.objects.create(
         urls="\n".join(urls),
         max_depth=data.max_depth,
         max_urls=data.max_urls,
-        max_size=data.max_size,
+        crawl_max_size=data.crawl_max_size,
+        snapshot_max_size=data.snapshot_max_size,
         tags_str=",".join(tags),
         label=data.label,
         notes=data.notes,

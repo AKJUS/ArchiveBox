@@ -5,14 +5,16 @@ import json
 import mimetypes
 import re
 from collections import defaultdict
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from uuid import UUID
 from typing import Union, Any, Annotated
 from datetime import datetime, time
 
+from django.db import transaction
 from django.db.models import Model, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, HttpResponse
+from django.http.multipartparser import MultiPartParser, MultiPartParserError
 from django.core.exceptions import ValidationError
 from django.core.files.storage import FileSystemStorage
 from django.contrib.auth import get_user_model
@@ -30,6 +32,7 @@ from archivebox.core.models import Snapshot, ArchiveResult, Tag
 from archivebox.api.auth import auth_using_token
 from archivebox.config.common import get_config
 from archivebox.core.host_utils import build_web_url
+from archivebox.misc.util import validate_url_length
 from archivebox.core.tag_utils import (
     add_snapshot_counts,
     build_tag_cards,
@@ -210,10 +213,28 @@ def get_archiveresults(request: HttpRequest, filters: Query[ArchiveResultFilterS
     return filters.filter(ArchiveResult.objects.all()).distinct()
 
 
+def _uuid_ref_query(field_name: str, ref: str) -> Q:
+    raw_ref = str(ref or "").strip()
+    query = Q(**{f"{field_name}__startswith": raw_ref})
+    if raw_ref:
+        query |= Q(**{f"{field_name}__icontains": raw_ref})
+    try:
+        parsed_uuid = UUID(raw_ref)
+    except (TypeError, ValueError):
+        normalized_ref = raw_ref.replace("-", "")
+        if normalized_ref and normalized_ref != raw_ref:
+            query |= Q(**{f"{field_name}__startswith": normalized_ref})
+            query |= Q(**{f"{field_name}__icontains": normalized_ref})
+    else:
+        query |= Q(**{field_name: parsed_uuid})
+        query |= Q(**{f"{field_name}__startswith": parsed_uuid.hex})
+    return query
+
+
 @router.get("/archiveresult/{archiveresult_id}", response=ArchiveResultSchema, url_name="get_archiveresult")
 def get_archiveresult(request: HttpRequest, archiveresult_id: str):
     """Get a specific ArchiveResult by id."""
-    return ArchiveResult.objects.get(Q(id__icontains=archiveresult_id))
+    return ArchiveResult.objects.get(_uuid_ref_query("id", archiveresult_id))
 
 
 def _normalize_uploaded_archiveresult_plugin(plugin: str) -> str:
@@ -249,17 +270,36 @@ def _parse_archiveresult_output_json(output_json: str | None) -> dict[str, Any] 
     return parsed
 
 
-def _get_archiveresult_upload_files(request: HttpRequest) -> list[UploadedFile]:
-    files = [*request.FILES.getlist("files"), *request.FILES.getlist("file")]
-    if not files:
+def _get_archiveresult_upload_data(request: HttpRequest):
+    cached = getattr(request, "_archiveresult_upload_data", None)
+    if cached is not None:
+        return cached
+
+    if request.method.upper() == "PATCH" and request.content_type.startswith("multipart/"):
+        try:
+            data = MultiPartParser(request.META, request, request.upload_handlers, request.encoding).parse()
+        except MultiPartParserError as err:
+            raise HttpError(400, f"Invalid ArchiveResult multipart upload: {err}") from err
+    else:
+        data = (request.POST, request.FILES)
+
+    setattr(request, "_archiveresult_upload_data", data)
+    return data
+
+
+def _get_archiveresult_upload_files(request: HttpRequest, *, allow_empty: bool = False) -> list[UploadedFile]:
+    _post, request_files = _get_archiveresult_upload_data(request)
+    files = [*request_files.getlist("files"), *request_files.getlist("file")]
+    if not files and not allow_empty:
         raise HttpError(400, "At least one ArchiveResult file is required")
     return files
 
 
 def _get_archiveresult_upload_form_values(request: HttpRequest, *field_names: str) -> list[str]:
+    request_post, _files = _get_archiveresult_upload_data(request)
     values: list[str] = []
     for field_name in field_names:
-        values.extend(str(value) for value in request.POST.getlist(field_name))
+        values.extend(str(value) for value in request_post.getlist(field_name))
     if len(values) == 1:
         value = values[0].strip()
         if value.startswith("["):
@@ -270,6 +310,27 @@ def _get_archiveresult_upload_form_values(request: HttpRequest, *field_names: st
             if isinstance(parsed, list):
                 return [str(item) for item in parsed]
     return values
+
+
+def _get_archiveresult_upload_form_value(request: HttpRequest, *field_names: str) -> str:
+    request_post, _files = _get_archiveresult_upload_data(request)
+    for field_name in field_names:
+        value = request_post.get(field_name)
+        if value is not None:
+            return str(value)
+    return ""
+
+
+def _parse_archiveresult_upload_int(value: str, field_name: str, *, default: int | None = None) -> int:
+    if value == "" and default is not None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as err:
+        raise HttpError(400, f"ArchiveResult {field_name} must be an integer") from err
+    if parsed < 0:
+        raise HttpError(400, f"ArchiveResult {field_name} must be non-negative")
+    return parsed
 
 
 def _summarize_archiveresult_output_files(output_files: dict[str, dict[str, Any]]) -> tuple[int, str]:
@@ -293,9 +354,9 @@ def _summarize_archiveresult_output_files(output_files: dict[str, dict[str, Any]
 def _get_snapshot_by_ref(snapshot_id: str):
     queryset = Snapshot.objects.select_related("crawl__created_by")
     try:
-        return queryset.get(Q(id__startswith=snapshot_id) | Q(timestamp__startswith=snapshot_id))
+        return queryset.get(_uuid_ref_query("id", snapshot_id) | Q(timestamp__startswith=snapshot_id))
     except Snapshot.DoesNotExist:
-        return queryset.get(Q(id__icontains=snapshot_id))
+        return queryset.get(_uuid_ref_query("id", snapshot_id))
 
 
 def _touch_archiveresult_snapshot(snapshot: Snapshot) -> None:
@@ -317,21 +378,111 @@ def _touch_archiveresult_snapshot(snapshot: Snapshot) -> None:
         pass
 
 
+def _merge_archiveresult_output_file_maps(results: list[ArchiveResult]) -> dict[str, dict[str, Any]]:
+    output_files: dict[str, dict[str, Any]] = {}
+    for result in results:
+        output_files.update(result.output_file_map())
+    return output_files
+
+
 def _write_archiveresult_files(
     request: HttpRequest,
     snapshot: Snapshot,
     plugin_name: str,
     *,
     existing_output_files: dict[str, dict[str, Any]] | None = None,
+    allow_empty: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    files = _get_archiveresult_upload_files(request)
+    files = _get_archiveresult_upload_files(request, allow_empty=allow_empty)
     output_paths = _get_archiveresult_upload_form_values(request, "output_paths", "output_path")
     mime_types = _get_archiveresult_upload_form_values(request, "mime_types", "mime_type")
+    chunk_output_path = _get_archiveresult_upload_form_value(request, "chunk_output_path")
 
     snapshot_dir = snapshot.output_dir
     plugin_dir = snapshot_dir / plugin_name
     storage = FileSystemStorage(location=str(plugin_dir))
     output_files = dict(existing_output_files or {})
+
+    if not files:
+        return output_files
+
+    if chunk_output_path:
+        if len(files) != 1:
+            raise HttpError(400, "Exactly one ArchiveResult file chunk is required")
+
+        uploaded_file = files[0]
+        relative_output_path = _normalize_uploaded_archiveresult_output_path(
+            chunk_output_path,
+            filename=uploaded_file.name,
+        )
+        chunk_index = _parse_archiveresult_upload_int(
+            _get_archiveresult_upload_form_value(request, "chunk_index"),
+            "chunk_index",
+        )
+        chunk_count = _parse_archiveresult_upload_int(
+            _get_archiveresult_upload_form_value(request, "chunk_count"),
+            "chunk_count",
+        )
+        chunk_offset = _parse_archiveresult_upload_int(
+            _get_archiveresult_upload_form_value(request, "chunk_offset"),
+            "chunk_offset",
+        )
+        chunk_total_size = _parse_archiveresult_upload_int(
+            _get_archiveresult_upload_form_value(request, "chunk_total_size"),
+            "chunk_total_size",
+        )
+
+        if chunk_count < 1:
+            raise HttpError(400, "ArchiveResult chunk_count must be at least 1")
+        if chunk_index >= chunk_count:
+            raise HttpError(400, "ArchiveResult chunk_index must be less than chunk_count")
+        if chunk_total_size and chunk_offset > chunk_total_size:
+            raise HttpError(400, "ArchiveResult chunk_offset cannot exceed chunk_total_size")
+
+        if chunk_index == 0 and chunk_offset == 0 and storage.exists(relative_output_path):
+            storage.delete(relative_output_path)
+
+        current_size = storage.size(relative_output_path) if storage.exists(relative_output_path) else 0
+        if current_size != chunk_offset:
+            raise HttpError(
+                409,
+                f"ArchiveResult chunk offset mismatch for {relative_output_path}: expected {current_size}, got {chunk_offset}",
+            )
+
+        Path(storage.path(relative_output_path)).parent.mkdir(parents=True, exist_ok=True)
+        with storage.open(relative_output_path, "ab") as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+
+        size = storage.size(relative_output_path)
+        upload_complete = chunk_index + 1 == chunk_count
+        if upload_complete and size != chunk_total_size:
+            raise HttpError(
+                409,
+                f"ArchiveResult chunk size mismatch for {relative_output_path}: expected {chunk_total_size}, got {size}",
+            )
+
+        guessed_mime = mimetypes.guess_type(relative_output_path)[0]
+        output_mime_type = (
+            (mime_types[0] if mime_types else "")
+            or getattr(uploaded_file, "content_type", None)
+            or guessed_mime
+            or "application/octet-stream"
+        )
+        output_files[relative_output_path] = {
+            "extension": PurePosixPath(relative_output_path).suffix.lower().lstrip("."),
+            "mimetype": output_mime_type,
+            "size": size,
+            "upload": {
+                "chunked": True,
+                "chunk_index": chunk_index,
+                "chunk_count": chunk_count,
+                "chunks_received": chunk_index + 1,
+                "complete": upload_complete,
+            },
+        }
+
+        return output_files
 
     for index, uploaded_file in enumerate(files):
         relative_output_path = _normalize_uploaded_archiveresult_output_path(
@@ -377,27 +528,60 @@ def create_archiveresult(
     plugin_name = _normalize_uploaded_archiveresult_plugin(plugin)
     normalized_status = ArchiveResult.normalize_status(status)
     parsed_output_json = _parse_archiveresult_output_json(output_json)
-    output_files = _write_archiveresult_files(request, snapshot, plugin_name)
+    hook = hook_name or ARCHIVERESULT_UPLOAD_HOOK_NAME
+    matching_results = list(
+        ArchiveResult.objects.select_for_update()
+        .filter(
+            snapshot=snapshot,
+            plugin=plugin_name,
+            hook_name=hook,
+        )
+        .order_by("created_at", "id"),
+    )
+    existing_result = matching_results[0] if matching_results else None
+    existing_output_files = _merge_archiveresult_output_file_maps(matching_results)
+    output_files = _write_archiveresult_files(
+        request,
+        snapshot,
+        plugin_name,
+        existing_output_files=existing_output_files,
+        allow_empty=True,
+    )
     output_size, output_mimetypes = _summarize_archiveresult_output_files(output_files)
     output_file_paths = list(output_files.keys())
     now = timezone.now()
+    if (
+        existing_result
+        and normalized_status == ArchiveResult.StatusChoices.STARTED
+        and existing_result.status != ArchiveResult.StatusChoices.STARTED
+    ):
+        normalized_status = existing_result.status
 
-    result, _created = ArchiveResult.objects.update_or_create(
-        snapshot=snapshot,
-        plugin=plugin_name,
-        hook_name=hook_name or ARCHIVERESULT_UPLOAD_HOOK_NAME,
-        defaults={
-            "status": normalized_status,
-            "output_str": output_str or (output_file_paths[0] if output_file_paths else ""),
-            "output_json": parsed_output_json,
-            "output_files": output_files,
-            "output_size": output_size,
-            "output_mimetypes": output_mimetypes,
-            "start_ts": now,
-            "end_ts": now,
-        },
-    )
-    _touch_archiveresult_snapshot(snapshot)
+    with transaction.atomic():
+        if existing_result:
+            duplicate_ids = [result.id for result in matching_results[1:]]
+            if duplicate_ids:
+                ArchiveResult.objects.filter(id__in=duplicate_ids).delete()
+            result = existing_result
+        else:
+            result = ArchiveResult(
+                snapshot=snapshot,
+                plugin=plugin_name,
+                hook_name=hook,
+            )
+
+        result.status = normalized_status
+        result.output_str = output_str or (output_file_paths[0] if output_file_paths else "")
+        result.output_json = parsed_output_json
+        result.output_files = output_files
+        result.output_size = output_size
+        result.output_mimetypes = output_mimetypes
+        result.start_ts = result.start_ts or now
+        result.end_ts = now
+        result.save()
+
+    if result.status != ArchiveResult.StatusChoices.STARTED:
+        _touch_archiveresult_snapshot(snapshot)
     return result
 
 
@@ -405,18 +589,20 @@ def create_archiveresult(
 def patch_archiveresult(
     request: HttpRequest,
     archiveresult_id: str,
-    output_str: str = Form(""),
-    status: str = Form(""),
-    output_json: str = Form(""),
 ):
     """Append or replace files on an existing ArchiveResult."""
-    result = ArchiveResult.objects.select_related("snapshot__crawl__created_by").get(Q(id__icontains=archiveresult_id))
+    result = ArchiveResult.objects.select_related("snapshot__crawl__created_by").get(_uuid_ref_query("id", archiveresult_id))
     output_files = _write_archiveresult_files(
         request,
         result.snapshot,
         result.plugin,
         existing_output_files=result.output_file_map(),
     )
+    latest_result = ArchiveResult.objects.only("output_files", "status").get(pk=result.pk)
+    output_files = {
+        **latest_result.output_file_map(),
+        **output_files,
+    }
     output_size, output_mimetypes = _summarize_archiveresult_output_files(output_files)
 
     update_fields = ["output_files", "output_size", "output_mimetypes", "end_ts", "modified_at"]
@@ -424,18 +610,25 @@ def patch_archiveresult(
     result.output_size = output_size
     result.output_mimetypes = output_mimetypes
     result.end_ts = timezone.now()
+    output_str = _get_archiveresult_upload_form_value(request, "output_str")
+    status = _get_archiveresult_upload_form_value(request, "status")
+    output_json = _get_archiveresult_upload_form_value(request, "output_json")
     if output_str:
         result.output_str = output_str
         update_fields.append("output_str")
     if status:
-        result.status = ArchiveResult.normalize_status(status)
+        normalized_status = ArchiveResult.normalize_status(status)
+        if normalized_status == ArchiveResult.StatusChoices.STARTED and latest_result.status != ArchiveResult.StatusChoices.STARTED:
+            normalized_status = latest_result.status
+        result.status = normalized_status
         update_fields.append("status")
     if output_json:
         result.output_json = _parse_archiveresult_output_json(output_json)
         update_fields.append("output_json")
 
     result.save(update_fields=update_fields)
-    _touch_archiveresult_snapshot(result.snapshot)
+    if result.status != ArchiveResult.StatusChoices.STARTED:
+        _touch_archiveresult_snapshot(result.snapshot)
 
     return result
 
@@ -690,9 +883,9 @@ def get_snapshot(request: HttpRequest, snapshot_id: str, with_archiveresults: bo
     setattr(request, "with_archiveresults", with_archiveresults)
     queryset = Snapshot.objects.annotate(output_size_sum=Coalesce(Sum("archiveresult__output_size"), 0))
     try:
-        return queryset.get(Q(id__startswith=snapshot_id) | Q(timestamp__startswith=snapshot_id))
+        return queryset.get(_uuid_ref_query("id", snapshot_id) | Q(timestamp__startswith=snapshot_id))
     except Snapshot.DoesNotExist:
-        return queryset.get(Q(id__icontains=snapshot_id))
+        return queryset.get(_uuid_ref_query("id", snapshot_id))
 
 
 @router.post("/snapshots", response=SnapshotSchema, url_name="create_snapshot")
@@ -702,6 +895,10 @@ def create_snapshot(request: HttpRequest, data: SnapshotCreateSchema):
         raise HttpError(400, f"Invalid status: {data.status}")
     if not data.url.strip():
         raise HttpError(400, "URL is required")
+    try:
+        validate_url_length(data.url.strip())
+    except ValueError as err:
+        raise HttpError(400, str(err)) from err
     if data.depth not in (0, 1, 2, 3, 4):
         raise HttpError(400, "depth must be between 0 and 4")
 

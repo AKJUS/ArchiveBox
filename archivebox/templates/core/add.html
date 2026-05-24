@@ -112,12 +112,21 @@
                                 </div>
 
                                 <div class="crawl-limit-field">
-                                    {{ form.max_size.label_tag }}
-                                    {{ form.max_size }}
-                                    {% if form.max_size.errors %}
-                                        <div class="error">{{ form.max_size.errors }}</div>
+                                    {{ form.crawl_max_size.label_tag }}
+                                    {{ form.crawl_max_size }}
+                                    {% if form.crawl_max_size.errors %}
+                                        <div class="error">{{ form.crawl_max_size.errors }}</div>
                                     {% endif %}
-                                    <div class="help-text">0 means unlimited. Accepts bytes or units like <code>45mb</code> and <code>1gb</code>.</div>
+                                    <div class="help-text">0 means unlimited across the whole crawl. Accepts bytes or units like <code>45mb</code> and <code>1gb</code>.</div>
+                                </div>
+
+                                <div class="crawl-limit-field">
+                                    {{ form.snapshot_max_size.label_tag }}
+                                    {{ form.snapshot_max_size }}
+                                    {% if form.snapshot_max_size.errors %}
+                                        <div class="error">{{ form.snapshot_max_size.errors }}</div>
+                                    {% endif %}
+                                    <div class="help-text">0 means unlimited per snapshot. Accepts bytes or units like <code>45mb</code> and <code>1gb</code>.</div>
                                 </div>
                             </div>
                         </div>
@@ -379,7 +388,7 @@
                     const personaData = personaConfigMap[personaName];
                     if (!personaData) return;
                     if (typeof window.archiveboxSetPluginConfigValues === 'function') {
-                        window.archiveboxSetPluginConfigValues(personaData.effective_config || {});
+                        window.archiveboxSetPluginConfigValues(personaData.effective_config || {}, personaData.binary_urls || {});
                     }
                     replaceConfigRows(personaData.config || {});
                     updateURLPreview();
@@ -397,6 +406,7 @@
                             return;
                         }
                         requiredCheckbox.checked = true;
+                        dispatchChange(requiredCheckbox);
                         ensureRequiredPluginsChecked(requiredPlugin, visited);
                     });
                 }
@@ -413,6 +423,7 @@
                             return;
                         }
                         dependentCheckbox.checked = false;
+                        dispatchChange(dependentCheckbox);
                         uncheckDependentPlugins(dependentPlugin, visited);
                     });
                 }

@@ -309,11 +309,10 @@ def start_new_supervisord_process(daemonize=False):
     if daemonize:
         # Start supervisord in background (daemon mode)
         subprocess.Popen(
-            f"supervisord --configuration={CONFIG_FILE}",
+            ["supervisord", f"--configuration={CONFIG_FILE}"],
             stdin=None,
             stdout=log_handle,
             stderr=log_handle,
-            shell=True,
             start_new_session=True,
         )
         return wait_for_supervisord_ready()
@@ -322,11 +321,10 @@ def start_new_supervisord_process(daemonize=False):
         # supervisord with nodaemon=true will run in foreground and handle signals properly
         # When supervisord gets SIGINT/SIGTERM, it will stop all child processes before exiting
         proc = subprocess.Popen(
-            f"supervisord --configuration={CONFIG_FILE}",
+            ["supervisord", f"--configuration={CONFIG_FILE}"],
             stdin=None,
             stdout=log_handle,
             stderr=log_handle,
-            shell=True,
             start_new_session=False,  # Keep in same process group so signals propagate
         )
 

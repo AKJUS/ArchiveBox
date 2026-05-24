@@ -69,6 +69,7 @@ def _build_script(body: str) -> str:
         build_snapshot_url,
         build_original_url,
     )
+    from archivebox.core.middleware import ADMIN_LOGIN_HINT_COOKIE
 
     def response_body(resp):
         if getattr(resp, "streaming", False):
@@ -769,6 +770,16 @@ class TestUrlRouting:
             assert resp.status_code == 200
             public_html = response_body(resp).decode("utf-8", "ignore")
             assert "http://web.archivebox.localhost:8000" in public_html
+
+            ensure_admin_user()
+            assert client.login(username="testadmin", password="testpassword")
+            resp = client.get("/admin/", HTTP_HOST=admin_host)
+            assert resp.status_code == 200
+            assert client.cookies[ADMIN_LOGIN_HINT_COOKIE].value == "1"
+
+            resp = client.get("/public/", HTTP_HOST=web_host)
+            assert resp.status_code in (301, 302)
+            assert resp["Location"] == "http://admin.archivebox.localhost:8000/admin/core/snapshot/"
 
             resp = client.get(f"/{snapshot.url_path}/index.html", HTTP_HOST=web_host)
             assert resp.status_code == 200

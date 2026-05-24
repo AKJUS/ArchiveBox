@@ -25,7 +25,7 @@ class SnapshotService(BaseService):
         if depth > crawl.max_depth:
             return None
         stop_reason = await sync_to_async(self._crawl_limit_stop_reason, thread_sensitive=True)(crawl)
-        if stop_reason == "max_size":
+        if stop_reason == "crawl_max_size":
             return None
         snapshot = await sync_to_async(crawl.create_discovered_snapshot, thread_sensitive=True)(
             parent_snapshot,
@@ -91,7 +91,7 @@ class SnapshotService(BaseService):
             snapshot.downloaded_at = snapshot.downloaded_at or timezone.now()
             await snapshot.asave(update_fields=["status", "retry_at", "downloaded_at", "modified_at"])
             stop_reason = await sync_to_async(self._crawl_limit_stop_reason, thread_sensitive=True)(snapshot.crawl)
-            if snapshot.crawl_id and stop_reason == "max_size":
+            if snapshot.crawl_id and stop_reason == "crawl_max_size":
                 await (
                     Snapshot.objects.filter(
                         crawl_id=snapshot.crawl_id,
@@ -113,7 +113,7 @@ class SnapshotService(BaseService):
                     await sync_to_async(snapshot.write_json_details, thread_sensitive=True)()
                     await sync_to_async(snapshot.write_html_details, thread_sensitive=True)()
                     stop_reason = await sync_to_async(self._crawl_limit_stop_reason, thread_sensitive=True)(snapshot.crawl)
-                    if snapshot.depth < snapshot.crawl.max_depth and stop_reason != "max_size":
+                    if snapshot.depth < snapshot.crawl.max_depth and stop_reason != "crawl_max_size":
                         from archivebox.hooks import collect_urls_from_plugins
 
                         discovered_urls = await sync_to_async(collect_urls_from_plugins, thread_sensitive=True)(Path(snapshot.output_dir))

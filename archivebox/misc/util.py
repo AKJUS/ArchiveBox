@@ -91,6 +91,8 @@ URL_REGEX = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+MAX_URL_LENGTH = 65535
+
 QUOTE_DELIMITERS = (
     '"',
     "'",
@@ -165,6 +167,12 @@ def sanitize_extracted_url(url: str) -> str:
     cleaned = cleaned.rstrip('"')
 
     return cleaned
+
+
+def validate_url_length(url: str) -> str:
+    if len(url) > MAX_URL_LENGTH:
+        raise ValueError(f"URL is too long ({len(url)} characters). Maximum length is {MAX_URL_LENGTH} characters.")
+    return url
 
 
 def parens_are_matched(string: str, open_char="(", close_char=")"):

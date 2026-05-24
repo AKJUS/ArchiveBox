@@ -356,7 +356,7 @@ def test_recursive_crawl_respects_max_urls(tmp_path, process, disable_extractors
     c = conn.cursor()
 
     crawl = c.execute(
-        "SELECT max_depth, max_urls, json_extract(config, '$.MAX_URLS') FROM crawls_crawl ORDER BY created_at DESC LIMIT 1",
+        "SELECT max_depth, max_urls, json_extract(config, '$.CRAWL_MAX_URLS') FROM crawls_crawl ORDER BY created_at DESC LIMIT 1",
     ).fetchone()
     snapshot_rows = c.execute("SELECT url, depth, parent_snapshot_id FROM core_snapshot ORDER BY depth, url").fetchall()
     depth_counts = dict(c.execute("SELECT depth, COUNT(*) FROM core_snapshot GROUP BY depth ORDER BY depth").fetchall())

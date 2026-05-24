@@ -22,6 +22,8 @@ clear
 
 ARCHIVEBOX_BRANCH="${ARCHIVEBOX_BRANCH:-dev}"
 ARCHIVEBOX_IMAGE="${ARCHIVEBOX_IMAGE:-archivebox/archivebox:dev}"
+ARCHIVEBOX_PYTHON="${ARCHIVEBOX_PYTHON:-3.13}"
+ARCHIVEBOX_PACKAGE="${ARCHIVEBOX_PACKAGE:-archivebox @ https://github.com/ArchiveBox/ArchiveBox/archive/refs/heads/${ARCHIVEBOX_BRANCH}.zip}"
 ARCHIVEBOX_PLATFORM="${ARCHIVEBOX_PLATFORM:-}"
 ARCHIVEBOX_COMPOSE_URL="${ARCHIVEBOX_COMPOSE_URL:-https://raw.githubusercontent.com/ArchiveBox/ArchiveBox/${ARCHIVEBOX_BRANCH}/docker-compose.yml}"
 DOCKER_PLATFORM_ARGS=()
@@ -51,6 +53,49 @@ open_archivebox() {
     if command -v open > /dev/null; then
         open "http://127.0.0.1:8000" || true
     fi
+}
+
+ensure_uv() {
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+    if command -v uv > /dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "[+] Installing uv..."
+    if command -v curl > /dev/null 2>&1; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+    elif command -v wget > /dev/null 2>&1; then
+        wget -qO- https://astral.sh/uv/install.sh | sh
+    else
+        echo "[X] curl or wget is required to install uv."
+        exit 1
+    fi
+
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    if ! command -v uv > /dev/null 2>&1; then
+        echo "[X] uv was installed, but the uv command was not found in PATH."
+        echo "    Add ~/.local/bin to PATH, then run this script again."
+        exit 1
+    fi
+}
+
+install_archivebox_with_uv() {
+    local uv_tool_bin_dir
+
+    ensure_uv
+
+    echo
+    echo "[+] Installing ArchiveBox python tool using uv from $ARCHIVEBOX_PACKAGE..."
+    if uv --no-config tool add --help > /dev/null 2>&1; then
+        uv --no-config tool add --python "$ARCHIVEBOX_PYTHON" --upgrade "$ARCHIVEBOX_PACKAGE"
+    else
+        uv --no-config tool install --python "$ARCHIVEBOX_PYTHON" --upgrade "$ARCHIVEBOX_PACKAGE"
+    fi
+
+    uv_tool_bin_dir="$(uv --no-config tool dir --bin)"
+    export PATH="$uv_tool_bin_dir:$PATH"
+    uv --no-config tool update-shell || true
 }
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -127,7 +172,7 @@ echo "    ⚠️ If you want to use Docker, press [Ctrl-C] to cancel now. ⚠️
 echo "        Get Docker: https://docs.docker.com/get-docker/"
 echo "        After you've installed Docker, run this script again."
 echo
-echo "Otherwise, install will continue with apt/brew/pkg + pip in 12s... (press [Ctrl+C] to cancel)"
+echo "Otherwise, install will continue with apt/brew/pkg + uv in 12s... (press [Ctrl+C] to cancel)"
 echo
 sleep 12 || exit 1
 echo "Proceeding with system package manager..."
@@ -139,7 +184,7 @@ echo "    This is a helper script which installs ArchiveBox and bootstraps its P
 echo "    You may be prompted for a sudo password in order to install the following:"
 echo
 echo "        - archivebox"
-echo "        - python3, pip, nodejs, npm            (languages used by ArchiveBox and plugin installers)"
+echo "        - python3, uv, nodejs, npm             (languages used by ArchiveBox and plugin installers)"
 echo "        - curl, wget                           (used to bootstrap package installation)"
 echo "        - extractor/plugin dependencies        (installed/discovered by archivebox init --install)"
 echo
@@ -156,10 +201,8 @@ echo
 if which apt-get > /dev/null; then
     echo "[+] Installing ArchiveBox system dependencies using apt..."
     sudo apt-get update -qq
-    sudo apt-get install -y python3 python3-pip python3-venv wget curl nodejs npm
-    echo
-    echo "[+] Installing ArchiveBox python dependencies using pip3..."
-    sudo python3 -m pip install --upgrade --ignore-installed archivebox
+    sudo apt-get install -y python3 python3-venv wget curl nodejs npm
+    install_archivebox_with_uv
 # On Mac:
 elif which brew > /dev/null; then
     echo "[+] Installing ArchiveBox using Homebrew..."
@@ -167,12 +210,9 @@ elif which brew > /dev/null; then
     brew update
     brew install archivebox
 elif which pkg > /dev/null; then
-    echo "[+] Installing ArchiveBox system dependencies using pkg and pip (python3.9)..."
-    sudo pkg install -y python3 py39-pip py39-sqlite3 npm wget curl
-    echo
-    echo "[+] Installing ArchiveBox python dependencies using pip..."
-    # don't use sudo here so that pip installs in $HOME/.local instead of into /usr/local
-    python3 -m pip install --upgrade --ignore-installed archivebox
+    echo "[+] Installing ArchiveBox system dependencies using pkg and uv..."
+    sudo pkg install -y python3 py39-sqlite3 npm wget curl
+    install_archivebox_with_uv
 else
     echo "[!] Warning: Could not find aptitude/homebrew/pkg! May not be able to install all dependencies automatically."
     echo
@@ -186,22 +226,8 @@ fi
 echo
 
 if ! which archivebox > /dev/null 2>&1; then
-    # If archivebox isn't in PATH (e.g. pip install), check python modules directly
-    if ! (python3 --version && python3 -m pip --version && python3 -m django --version) 2>/dev/null; then
-        echo "[X] Python 3 pip was not found on your system!"
-        echo "    You must first install Python >= 3.7 (and pip3):"
-        echo "      https://www.python.org/downloads/"
-        echo "      https://wiki.python.org/moin/BeginnersGuide/Download"
-        echo "    After installing, run this script again."
-        exit 1
-    fi
-
-    if ! (python3 -m django --version && python3 -m pip show archivebox) 2>/dev/null; then
-        echo "[X] Django and ArchiveBox were not found after installing!"
-        echo "    Check to see if a previous step failed."
-        echo
-        exit 1
-    fi
+    ensure_uv
+    export PATH="$(uv --no-config tool dir --bin):$PATH"
 fi
 
 if ! which archivebox > /dev/null 2>&1; then
@@ -209,11 +235,6 @@ if ! which archivebox > /dev/null 2>&1; then
     echo "    Check to see if a previous step failed."
     exit 1
 fi
-
-# echo
-# echo "[+] Upgrading npm and pip..."
-# sudo npm i -g npm || true
-# sudo python3 -m pip install --upgrade pip setuptools || true
 
 echo
 echo "[+] Initializing ArchiveBox data folder at ~/archivebox/data..."
@@ -223,11 +244,11 @@ if [ -f "./index.sqlite3" ]; then
     mv -i ~/archivebox/* ~/archivebox/data/
 fi
 cd ./data
-: | python3 -m archivebox init --install   # pipe in empty command to make sure stdin is closed
+: | archivebox init --install   # pipe in empty command to make sure stdin is closed
 # init shows version output at the end too
 echo
 echo "[+] Starting ArchiveBox server using: nohup archivebox server &..."
-nohup python3 -m archivebox server 0.0.0.0:8000 > ./logs/server.log 2>&1 &
+nohup archivebox server 0.0.0.0:8000 > ./logs/server.log 2>&1 &
 wait_for_archivebox
 open_archivebox
 echo
@@ -237,7 +258,7 @@ echo "    archivebox server --quick-init 0.0.0.0:8000        # start server proc
 echo "    archivebox manage createsuperuser                  # add an admin user+pass"
 echo "    ps aux | grep archivebox                           # see server process pid"
 echo "    pkill -f archivebox                                # stop the server"
-echo "    pip install --upgrade archivebox; archivebox init  # update versions"
+echo "    uv tool install --python $ARCHIVEBOX_PYTHON --upgrade '$ARCHIVEBOX_PACKAGE'; archivebox init  # update versions"
 echo "    archivebox add 'https://example.com'"              # archive a new URL
 echo "    archivebox list                                    # see URLs archived"
 echo "    archivebox help                                    # see more help & examples"

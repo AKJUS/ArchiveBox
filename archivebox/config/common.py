@@ -249,8 +249,9 @@ class ArchivingConfig(BaseConfigSet):
     TIMEOUT: int = Field(default=60)
     MAX_URL_ATTEMPTS: int = Field(default=50)
     MAX_DEPTH: int = Field(default=0)
-    MAX_URLS: int = Field(default=0)
-    MAX_SIZE: int = Field(default=0)
+    CRAWL_MAX_URLS: int = Field(default=0)
+    CRAWL_MAX_SIZE: int = Field(default=0)
+    SNAPSHOT_MAX_SIZE: int = Field(default=0)
 
     RESOLUTION: str = Field(default="1440,2000")
     CHECK_SSL_VALIDITY: bool = Field(default=True)

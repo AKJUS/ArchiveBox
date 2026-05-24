@@ -498,7 +498,7 @@ class CrawlRunner:
         await sync_to_async(self.crawl.refresh_from_db, thread_sensitive=True)()
         if int(snapshot_payload["depth"]) >= self.crawl.max_depth:
             return
-        if CrawlLimitState.from_config(snapshot_payload["config"]).get_stop_reason() == "max_size":
+        if CrawlLimitState.from_config(snapshot_payload["config"]).get_stop_reason() == "crawl_max_size":
             return
 
         discovered_urls = await sync_to_async(collect_urls_from_plugins, thread_sensitive=True)(Path(snapshot_payload["output_dir"]))
@@ -641,18 +641,16 @@ class CrawlRunner:
                             crawl_setup_phase_timeout,
                         )
                     if not await self.crawl_is_cancelled():
-                        crawl_start_event = event.emit(
-                            CrawlStartEvent(
-                                url=snapshot["url"],
-                                snapshot_id=snapshot["id"],
-                                output_dir=str(output_dir),
-                                event_timeout=0,
-                                event_handler_timeout=0,
-                                event_handler_slow_timeout=slow_warning_timeout(snapshot_phase_timeout),
-                            ),
+                        crawl_start_event = CrawlStartEvent(
+                            url=snapshot["url"],
+                            snapshot_id=snapshot["id"],
+                            output_dir=str(output_dir),
+                            event_timeout=snapshot_phase_timeout,
+                            event_handler_timeout=snapshot_phase_timeout + 30.0,
+                            event_handler_slow_timeout=slow_warning_timeout(snapshot_phase_timeout),
                         )
                         self.root_crawl_start_event_id = crawl_start_event.event_id
-                        await _run_event_now(crawl_start_event, None)
+                        await _run_event_now(event.emit(crawl_start_event), None)
                 finally:
                     await _run_event_now(
                         event.emit(
@@ -689,13 +687,12 @@ class CrawlRunner:
             url=snapshot["url"],
             snapshot_id=snapshot["id"],
             output_dir=str(output_dir),
-            event_timeout=0,
-            event_handler_timeout=0,
+            event_timeout=crawl_lifecycle_timeout,
+            event_handler_timeout=crawl_lifecycle_timeout + 30.0,
             event_handler_slow_timeout=slow_warning_timeout(crawl_lifecycle_timeout),
         )
         self.root_crawl_event_id = crawl_event.event_id
-        emitted_crawl_event = self.bus.emit(crawl_event)
-        await _run_event_now(emitted_crawl_event, None)
+        await _run_event_now(self.bus.emit(crawl_event), None)
         if await self.crawl_is_cancelled():
             self._skip_wait_until_idle = True
             return
@@ -736,7 +733,7 @@ class CrawlRunner:
             snapshot = await sync_to_async(self.load_snapshot_payload, thread_sensitive=True)(snapshot_id)
             if snapshot["status"] == "sealed":
                 return
-            if snapshot["depth"] > 0 and CrawlLimitState.from_config(snapshot["config"]).get_stop_reason() == "max_size":
+            if snapshot["depth"] > 0 and CrawlLimitState.from_config(snapshot["config"]).get_stop_reason() == "crawl_max_size":
                 await sync_to_async(self.seal_snapshot_due_to_limit, thread_sensitive=True)(snapshot_id)
                 return
             config = _normalize_runtime_config(snapshot["config"])

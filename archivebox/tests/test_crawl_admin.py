@@ -72,7 +72,8 @@ def test_crawl_admin_form_saves_tags_editor_to_tags_str(crawl, admin_user):
             "config": "{}",
             "max_depth": "0",
             "max_urls": "3",
-            "max_size": str(45 * 1024 * 1024),
+            "crawl_max_size": str(45 * 1024 * 1024),
+            "snapshot_max_size": str(5 * 1024 * 1024),
             "tags_editor": "alpha, beta, Alpha, gamma",
             "url_filters_allowlist": "example.com\n*.example.com",
             "url_filters_denylist": "static.example.com",
@@ -95,9 +96,11 @@ def test_crawl_admin_form_saves_tags_editor_to_tags_str(crawl, admin_user):
     updated.refresh_from_db()
     assert updated.tags_str == "alpha,beta,gamma"
     assert updated.max_urls == 3
-    assert updated.max_size == 45 * 1024 * 1024
-    assert updated.config["MAX_URLS"] == 3
-    assert updated.config["MAX_SIZE"] == 45 * 1024 * 1024
+    assert updated.crawl_max_size == 45 * 1024 * 1024
+    assert updated.snapshot_max_size == 5 * 1024 * 1024
+    assert updated.config["CRAWL_MAX_URLS"] == 3
+    assert updated.config["CRAWL_MAX_SIZE"] == 45 * 1024 * 1024
+    assert updated.config["SNAPSHOT_MAX_SIZE"] == 5 * 1024 * 1024
     assert updated.config["URL_ALLOWLIST"] == "example.com\n*.example.com"
     assert updated.config["URL_DENYLIST"] == "static.example.com"
 

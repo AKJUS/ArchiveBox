@@ -467,7 +467,8 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
         "created_by",
         "max_depth",
         "max_urls",
-        "max_size",
+        "crawl_max_size",
+        "snapshot_max_size",
         "label",
         "notes",
         "urls_preview",
@@ -483,14 +484,27 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
         "created_by",
         "max_depth",
         "max_urls",
-        "max_size",
+        "crawl_max_size",
+        "snapshot_max_size",
         "label",
         "notes",
         "schedule_str",
         "status",
         "retry_at",
     )
-    search_fields = ("id", "created_by__username", "max_depth", "max_urls", "max_size", "label", "notes", "schedule_id", "status", "urls")
+    search_fields = (
+        "id",
+        "created_by__username",
+        "max_depth",
+        "max_urls",
+        "crawl_max_size",
+        "snapshot_max_size",
+        "label",
+        "notes",
+        "schedule_id",
+        "status",
+        "urls",
+    )
 
     readonly_fields = ("created_at", "modified_at", "snapshots")
 
@@ -512,7 +526,7 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
         (
             "Settings",
             {
-                "fields": (("max_depth", "max_urls", "max_size"), "url_filters", "config"),
+                "fields": (("max_depth", "max_urls", "crawl_max_size", "snapshot_max_size"), "url_filters", "config"),
                 "classes": ("card",),
             },
         ),
@@ -563,7 +577,7 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
         (
             "Settings",
             {
-                "fields": (("max_depth", "max_urls", "max_size"), "url_filters", "config"),
+                "fields": (("max_depth", "max_urls", "crawl_max_size", "snapshot_max_size"), "url_filters", "config"),
                 "classes": ("card",),
             },
         ),
@@ -657,7 +671,8 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
             urls=obj.urls,
             max_depth=obj.max_depth,
             max_urls=obj.max_urls,
-            max_size=obj.max_size,
+            crawl_max_size=obj.crawl_max_size,
+            snapshot_max_size=obj.snapshot_max_size,
             tags_str=obj.tags_str,
             config=obj.config,
             schedule=obj.schedule,

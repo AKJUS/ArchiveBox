@@ -1,3 +1,4 @@
+import json
 import re
 
 import pytest
@@ -43,7 +44,8 @@ def test_add_view_renders_tag_editor_and_url_filter_fields(client, admin_user, m
     assert "Index only dry run (add crawl but don&#x27;t archive yet)" in body
     assert 'name="notes"' in body
     assert 'name="max_urls"' in body
-    assert 'name="max_size"' in body
+    assert 'name="crawl_max_size"' in body
+    assert 'name="snapshot_max_size"' in body
     assert '<input type="text" name="notes"' in body
     assert body.index('name="persona"') < body.index("<h3>Crawl Plugins</h3>")
     assert "data-url-regex=" in body
@@ -60,10 +62,16 @@ def test_add_view_renders_tag_editor_and_url_filter_fields(client, admin_user, m
 
 def test_add_view_embeds_selected_persona_config_for_ui_hydration(client, admin_user, monkeypatch):
     monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
+    default_persona = Persona.get_or_create_default()
+    default_persona.config = {
+        "COOKIES_FILE": "/tmp/archivebox-default-cookies.txt",
+        "USER_AGENT": "ArchiveBox Default Persona UA",
+    }
+    default_persona.save(update_fields=["config"])
     Persona.objects.create(
         name="Private",
         created_by=admin_user,
-        config={"WGET_TIMEOUT": 88, "CHROME_HEADLESS": False},
+        config={"WGET_TIMEOUT": 88, "CHROME_HEADLESS": False, "COOKIES_FILE": "/tmp/archivebox-private-cookies.txt"},
     )
 
     response = client.get(reverse("add"), HTTP_HOST=WEB_HOST)
@@ -74,6 +82,13 @@ def test_add_view_embeds_selected_persona_config_for_ui_hydration(client, admin_
     assert "WGET_TIMEOUT" in body
     assert "88" in body
     assert "CHROME_HEADLESS" in body
+    assert "YTDLP_COOKIES_FILE" in body
+    assert "/tmp/archivebox-default-cookies.txt" in body
+    assert "Default: <code>{COOKIES_FILE}</code>" in body
+    assert "/admin/environment/binaries/yt-dlp/" in body or "/admin/machine/binary/" in body
+    persona_config_map = json.loads(response.context["persona_config_map_json"])
+    assert persona_config_map["Default"]["effective_config"]["YTDLP_COOKIES_FILE"] == "/tmp/archivebox-default-cookies.txt"
+    assert persona_config_map["Private"]["effective_config"]["YTDLP_COOKIES_FILE"] == "/tmp/archivebox-private-cookies.txt"
 
 
 def test_add_view_checks_configured_search_backend_by_default(client, monkeypatch):
@@ -102,7 +117,8 @@ def test_add_view_creates_crawl_with_tag_and_url_filter_overrides(client, admin_
             "tag": "alpha,beta",
             "depth": "1",
             "max_urls": "3",
-            "max_size": "45mb",
+            "crawl_max_size": "45mb",
+            "snapshot_max_size": "5mb",
             "url_filters_allowlist": "example.com\n*.example.com",
             "url_filters_denylist": "cdn.example.com",
             "notes": "Created from /add/",
@@ -121,10 +137,12 @@ def test_add_view_creates_crawl_with_tag_and_url_filter_overrides(client, admin_
     assert crawl.tags_str == "alpha,beta"
     assert crawl.notes == "Created from /add/"
     assert crawl.max_urls == 3
-    assert crawl.max_size == 45 * 1024 * 1024
+    assert crawl.crawl_max_size == 45 * 1024 * 1024
+    assert crawl.snapshot_max_size == 5 * 1024 * 1024
     assert crawl.config.get("DEFAULT_PERSONA") == "Default"
-    assert crawl.config["MAX_URLS"] == 3
-    assert crawl.config["MAX_SIZE"] == 45 * 1024 * 1024
+    assert crawl.config["CRAWL_MAX_URLS"] == 3
+    assert crawl.config["CRAWL_MAX_SIZE"] == 45 * 1024 * 1024
+    assert crawl.config["SNAPSHOT_MAX_SIZE"] == 5 * 1024 * 1024
     assert crawl.config["URL_ALLOWLIST"] == "example.com\n*.example.com"
     assert crawl.config["URL_DENYLIST"] == "cdn.example.com"
     assert "OVERWRITE" not in crawl.config
@@ -146,7 +164,8 @@ def test_add_view_selected_persona_wins_over_stale_config_override(client, admin
             "tag": "",
             "depth": "0",
             "max_urls": "0",
-            "max_size": "0",
+            "crawl_max_size": "0",
+            "snapshot_max_size": "0",
             "url_filters_allowlist": "",
             "url_filters_denylist": "",
             "notes": "",
@@ -181,7 +200,8 @@ def test_add_view_applies_plugin_config_overrides(client, admin_user, monkeypatc
             "tag": "",
             "depth": "0",
             "max_urls": "0",
-            "max_size": "0",
+            "crawl_max_size": "0",
+            "snapshot_max_size": "0",
             "url_filters_allowlist": "",
             "url_filters_denylist": "",
             "notes": "",
@@ -219,7 +239,8 @@ def test_add_view_starts_background_runner_after_creating_crawl(client, admin_us
             "tag": "",
             "depth": "0",
             "max_urls": "0",
-            "max_size": "0",
+            "crawl_max_size": "0",
+            "snapshot_max_size": "0",
             "url_filters_allowlist": "",
             "url_filters_denylist": "",
             "notes": "",
@@ -254,7 +275,8 @@ def test_add_view_extracts_urls_from_mixed_text_input(client, admin_user, monkey
             "tag": "",
             "depth": "0",
             "max_urls": "0",
-            "max_size": "0",
+            "crawl_max_size": "0",
+            "snapshot_max_size": "0",
             "url_filters_allowlist": "",
             "url_filters_denylist": "",
             "notes": "",
@@ -299,7 +321,8 @@ def test_add_view_trims_trailing_punctuation_from_markdown_urls(client, admin_us
             "tag": "",
             "depth": "0",
             "max_urls": "0",
-            "max_size": "0",
+            "crawl_max_size": "0",
+            "snapshot_max_size": "0",
             "url_filters_allowlist": "",
             "url_filters_denylist": "",
             "notes": "",
