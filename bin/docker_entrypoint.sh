@@ -144,7 +144,7 @@ ensure_runtime_tree() {
 
 run_as_archivebox() {
     if [[ "$(id -u)" == "0" ]]; then
-        gosu "$PUID:$PGID" "$@"
+        gosu "$ARCHIVEBOX_USER" "$@"
     else
         "$@"
     fi
@@ -169,6 +169,8 @@ ensure_dir "$DATA_DIR/sources"
 ensure_dir "$DATA_DIR/archive"
 ensure_dir "$DATA_DIR/archive/users"
 ensure_dir "$PERSONAS_DIR"
+ensure_dir "$PERSONAS_DIR/Default"
+ensure_dir "$PERSONAS_DIR/Default/chrome_profile"
 [[ -e "$DATA_DIR/users" ]] && ensure_dir "$DATA_DIR/users"
 ensure_file_owner "$DATA_DIR/index.sqlite3"
 ensure_file_owner "$DATA_DIR/ArchiveBox.conf"
@@ -177,6 +179,8 @@ run_as_archivebox touch "$DATA_DIR/logs/.permissions_test_safe_to_delete" 2>/dev
 rm -f "$DATA_DIR/logs/.permissions_test_safe_to_delete"
 run_as_archivebox touch "$DATA_DIR/archive/.permissions_test_safe_to_delete" 2>/dev/null || permission_error "$DATA_DIR/archive"
 rm -f "$DATA_DIR/archive/.permissions_test_safe_to_delete"
+run_as_archivebox touch "$PERSONAS_DIR/Default/chrome_profile/.permissions_test_safe_to_delete" 2>/dev/null || permission_error "$PERSONAS_DIR/Default/chrome_profile"
+rm -f "$PERSONAS_DIR/Default/chrome_profile/.permissions_test_safe_to_delete"
 
 # check if novnc x11 $DISPLAY is available
 export DISPLAY="${DISPLAY:-"novnc:0.0"}"
@@ -279,7 +283,7 @@ if [[ "$1" == /* || "$1" == "bash" || "$1" == "sh" || "$1" == "echo" || "$1" == 
     #      "docker run archivebox /bin/bash -c '...'"
     #      "docker run archivebox cat /VERSION.txt"
     if [[ "$(id -u)" == "0" ]]; then
-        exec gosu "$PUID:$PGID" /bin/bash -c "exec $(printf ' %q' "$@")"
+        exec gosu "$ARCHIVEBOX_USER" /bin/bash -c "exec $(printf ' %q' "$@")"
     else
         exec /bin/bash -c "exec $(printf ' %q' "$@")"
     fi
@@ -293,7 +297,7 @@ else
     #      "docker run archivebox manage createsupseruser"
     #      "docker run archivebox server 0.0.0.0:8000"
     if [[ "$(id -u)" == "0" ]]; then
-        exec gosu "$PUID:$PGID" "$ARCHIVEBOX_BIN_PATH" "$@"
+        exec gosu "$ARCHIVEBOX_USER" "$ARCHIVEBOX_BIN_PATH" "$@"
     else
         exec "$ARCHIVEBOX_BIN_PATH" "$@"
     fi

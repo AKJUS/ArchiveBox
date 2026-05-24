@@ -331,7 +331,7 @@ RUN (echo -e "\n\n[√] Finished Docker build successfully. Saving build summary
 
 # Verify ArchiveBox is installed and write full version/dependency info.
 RUN chmod +x "$CODE_DIR"/bin/*.sh \
-    && gosu "$DEFAULT_PUID" archivebox version 2>&1 | tee -a /VERSION.txt
+    && gosu "$ARCHIVEBOX_USER" archivebox version 2>&1 | tee -a /VERSION.txt
 
 ####################################################
 

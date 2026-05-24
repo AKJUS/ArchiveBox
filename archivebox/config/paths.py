@@ -232,7 +232,7 @@ def get_or_create_working_lib_dir(autofix=True, quiet=False, config: "ArchiveBox
     CANDIDATES = [
         config.LIB_DIR,  # <user-specified>
         CONSTANTS.DEFAULT_LIB_DIR,  # ./data/lib/arm64-linux-docker
-        Path("/usr/local/share/archivebox") / get_collection_id(),  # /usr/local/share/archivebox/abc5
+        Path("/opt/archivebox/lib") if IN_DOCKER else Path("/opt/archivebox/lib") / get_collection_id(),
         *(
             [Path("/opt/homebrew/share/archivebox") / get_collection_id()] if os.path.isfile("/opt/homebrew/bin/archivebox") else []
         ),  # /opt/homebrew/share/archivebox/abc5
@@ -408,8 +408,8 @@ def get_code_locations(config: "ArchiveBoxConfig | None" = None, **config_kwargs
 #             with SudoPermission(uid=ARCHIVEBOX_USER, fallback=True):
 #                 lib_dir = HOST_DIRS.site_data_path
 
-#         # Docker: /usr/local/share/archivebox/0.8.5
-#         # Ubuntu: /usr/local/share/archivebox/0.8.5
+#         # Docker: /opt/archivebox/lib
+#         # Ubuntu: /opt/archivebox/lib/0.8.5
 #         # macOS: /Library/Application Support/archivebox
 #         try:
 #             with SudoPermission(uid=0, fallback=True):

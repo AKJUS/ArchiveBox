@@ -87,8 +87,56 @@ docker_setup() {
             $setup_script"
 }
 
-default_cmd='printf "ABX_UID=%s\nABX_GID=%s\nABX_USER=%s\n" "$(id -u)" "$(id -g)" "$(whoami 2>/dev/null || true)"; touch /data/logs/probe /data/archive/probe "$LIB_DIR/probe"; stat -c "ABX_STAT %u:%g:%a %n" /data /data/logs /data/archive "$LIB_DIR"; echo ABX_OK'
-version_cmd='printf "ABX_UID=%s\nABX_GID=%s\nABX_USER=%s\n" "$(id -u)" "$(id -g)" "$(whoami 2>/dev/null || true)"; archivebox version >/tmp/archivebox-version.out; tail -n 12 /tmp/archivebox-version.out; echo ABX_OK'
+default_cmd='printf "ABX_UID=%s\nABX_GID=%s\nABX_USER=%s\nABX_GROUPS=%s\n" "$(id -u)" "$(id -g)" "$(whoami 2>/dev/null || true)" "$(id -Gn)"; touch /data/logs/probe /data/archive/probe "$LIB_DIR/probe" "$PERSONAS_DIR/Default/chrome_profile/probe"; stat -c "ABX_STAT %u:%g:%a %n" /data /data/logs /data/archive "$LIB_DIR" "$PERSONAS_DIR" "$PERSONAS_DIR/Default" "$PERSONAS_DIR/Default/chrome_profile"; echo ABX_PERSONA_PROFILE_OK; echo ABX_OK'
+version_cmd='printf "ABX_UID=%s\nABX_GID=%s\nABX_USER=%s\nABX_GROUPS=%s\n" "$(id -u)" "$(id -g)" "$(whoami 2>/dev/null || true)" "$(id -Gn)"; archivebox version >/tmp/archivebox-version.out; tail -n 12 /tmp/archivebox-version.out; echo ABX_OK'
+full_flow_cmd='set -Eeuo pipefail
+printf "ABX_UID=%s\nABX_GID=%s\nABX_USER=%s\nABX_GROUPS=%s\n" "$(id -u)" "$(id -g)" "$(whoami 2>/dev/null || true)" "$(id -Gn)"
+id -Gn | grep -qw audio
+id -Gn | grep -qw video
+mkdir -p "$PERSONAS_DIR/Default/chrome_profile"
+touch "$PERSONAS_DIR/Default/chrome_profile/probe"
+rm -f "$PERSONAS_DIR/Default/chrome_profile/probe"
+archivebox init
+archivebox install 2>&1 | tee /tmp/archivebox-install.log
+if grep -E "(/[[:alnum:]_.-]+/)?pip install|npm install|uv pip install" /tmp/archivebox-install.log; then
+    echo "ABX_UNEXPECTED_RUNTIME_INSTALL"
+    exit 1
+fi
+archivebox version 2>&1 | tee /tmp/archivebox-version.log
+grep -Eq "/opt/archivebox/lib/(pip/venv/bin|env/bin)/trafilatura" /tmp/archivebox-version.log
+grep -Eq "/opt/archivebox/lib/(npm/node_modules/.bin|env/bin)/defuddle" /tmp/archivebox-version.log
+grep -Eq "/opt/archivebox/lib/env/bin/sonic" /tmp/archivebox-version.log
+archivebox add --depth=0 https://example.com/ 2>&1 | tee /tmp/archivebox-add.log
+archivebox update --index-only 2>&1 | tee /tmp/archivebox-update.log
+snapshot_dir="$(find /data/archive/users/system/snapshots -mindepth 3 -maxdepth 3 -type d | head -n 1)"
+test -n "$snapshot_dir"
+test -s "$snapshot_dir/index.html"
+test -s "$snapshot_dir/wget/example.com/index.html"
+test -s "$snapshot_dir/dom/output.html"
+test -s "$snapshot_dir/screenshot/screenshot.png"
+test -s "$snapshot_dir/pdf/output.pdf"
+test -s "$snapshot_dir/singlefile/singlefile.html"
+test -s "$snapshot_dir/headers/headers.json"
+test -s "$snapshot_dir/readability/content.txt"
+test -s "$snapshot_dir/trafilatura/content.txt"
+test -s "$snapshot_dir/defuddle/content.txt"
+test -s "$snapshot_dir/liteparse/content.txt"
+test -s "$snapshot_dir/responses/index.jsonl"
+test -s "$snapshot_dir/search_backend_sonic/on_Snapshot__91_index_sonic."*.sh
+test -s "$snapshot_dir/search_backend_sqlite/on_Snapshot__90_index_sqlite."*.sh
+grep -R "Example Domain" \
+    "$snapshot_dir/wget/example.com/index.html" \
+    "$snapshot_dir/dom/output.html" \
+    "$snapshot_dir/readability/content.txt" \
+    "$snapshot_dir/trafilatura/content.txt" \
+    "$snapshot_dir/defuddle/content.txt" \
+    "$snapshot_dir/liteparse/content.txt"
+if grep -R "Permission denied\\|Operation not permitted" /tmp/archivebox-add.log /tmp/archivebox-update.log /data/logs 2>/dev/null; then
+    echo "ABX_PERMISSION_ERROR_IN_FULL_FLOW"
+    exit 1
+fi
+find "$snapshot_dir" -maxdepth 2 -type f | sort | sed "s#^#ABX_OUTPUT #"
+echo ABX_OK'
 
 run_case() {
     local name="$1"
@@ -161,6 +209,11 @@ run_case() {
         if ! grep -q '^ABX_OK$' "$log_file"; then
             ok=0
         fi
+        if [[ "$user_spec" == "-" ]]; then
+            grep '^ABX_GROUPS=' "$log_file" | grep -qw audio || ok=0
+            grep '^ABX_GROUPS=' "$log_file" | grep -qw video || ok=0
+            grep -q '^ABX_PERSONA_PROFILE_OK$' "$log_file" || ok=0
+        fi
     fi
 
     if [[ "$post_assert" == "nested-root-stays" ]]; then
@@ -185,6 +238,132 @@ run_case() {
         failed=$((failed + 1))
         log "FAIL $name (status=$status expected=$expected_status log=$log_file)"
         sed -n '1,160p' "$log_file"
+    fi
+}
+
+run_readonly_case() {
+    local name="$1"
+    local setup_script="$2"
+    local env_string="$3"
+    local user_spec="$4"
+
+    total=$((total + 1))
+    local slug case_dir log_file status ok
+    slug="$(safe_name "$name")"
+    case_dir="$VALIDATION_ROOT/$slug"
+    log_file="$case_dir/output.log"
+    docker_setup "$case_dir" "$setup_script"
+
+    local run_args=("${docker_base[@]}")
+    if [[ "$user_spec" != "-" ]]; then
+        run_args+=(--user "$user_spec")
+    fi
+    run_args+=(
+        -e DATA_DIR=/data
+        -e LIB_DIR=/libdir
+        -e ABXPKG_LIB_DIR=/libdir
+        -e PLAYWRIGHT_BROWSERS_PATH=/browsers
+    )
+    if [[ -n "$env_string" && "$env_string" != "-" ]]; then
+        local env_parts=()
+        read -r -a env_parts <<< "$env_string"
+        local env_pair
+        for env_pair in "${env_parts[@]}"; do
+            run_args+=(-e "$env_pair")
+        done
+    fi
+    run_args+=(
+        -v "$ENTRYPOINT_PATH:/app/bin/docker_entrypoint.sh:ro"
+        -v "$case_dir/data:/data:ro"
+        -v "$case_dir/lib:/libdir:ro"
+        -v "$case_dir/browsers:/browsers:ro"
+        --entrypoint /app/bin/docker_entrypoint.sh
+        "$IMAGE"
+        sh -c "$default_cmd"
+    )
+
+    set +e
+    "${run_args[@]}" >"$log_file" 2>&1
+    status=$?
+    set -e
+
+    ok=0
+    if [[ "$status" != "0" ]] && grep -q "cannot write to /data" "$log_file"; then
+        ok=1
+    fi
+    if [[ "$ok" == "1" ]]; then
+        passed=$((passed + 1))
+        log "PASS $name"
+    else
+        failed=$((failed + 1))
+        log "FAIL $name (status=$status expected=readonly failure log=$log_file)"
+        sed -n '1,160p' "$log_file"
+    fi
+}
+
+run_full_flow_case() {
+    local name="$1"
+    local setup_script="$2"
+    local env_string="$3"
+    local user_spec="$4"
+    local expected_uid="$5"
+    local expected_gid="$6"
+
+    total=$((total + 1))
+    local slug case_dir log_file status ok
+    slug="$(safe_name "$name")"
+    case_dir="$VALIDATION_ROOT/$slug"
+    log_file="$case_dir/output.log"
+    docker_setup "$case_dir" "$setup_script"
+
+    local run_args=("${docker_base[@]}")
+    if [[ "$user_spec" != "-" ]]; then
+        run_args+=(--user "$user_spec")
+    fi
+    run_args+=(
+        -e DATA_DIR=/data
+    )
+    if [[ -n "$env_string" && "$env_string" != "-" ]]; then
+        local env_parts=()
+        read -r -a env_parts <<< "$env_string"
+        local env_pair
+        for env_pair in "${env_parts[@]}"; do
+            run_args+=(-e "$env_pair")
+        done
+    fi
+    run_args+=(
+        -v "$ENTRYPOINT_PATH:/app/bin/docker_entrypoint.sh:ro"
+        -v "$case_dir/data:/data"
+        --entrypoint /app/bin/docker_entrypoint.sh
+        "$IMAGE"
+        bash -lc "$full_flow_cmd"
+    )
+
+    set +e
+    "${run_args[@]}" >"$log_file" 2>&1
+    status=$?
+    set -e
+
+    ok=1
+    [[ "$status" == "0" ]] || ok=0
+    grep -q "^ABX_UID=$expected_uid$" "$log_file" || ok=0
+    grep -q "^ABX_GID=$expected_gid$" "$log_file" || ok=0
+    grep '^ABX_GROUPS=' "$log_file" | grep -qw audio || ok=0
+    grep '^ABX_GROUPS=' "$log_file" | grep -qw video || ok=0
+    grep -q '^ABX_OK$' "$log_file" || ok=0
+    grep -q 'total urls snapshotted: 1' "$log_file" || ok=0
+    grep -q 'Search Reindex Complete' "$log_file" || ok=0
+    grep -q 'ABX_OUTPUT .*/wget/example.com/index.html' "$log_file" || ok=0
+    grep -q 'ABX_OUTPUT .*/screenshot/screenshot.png' "$log_file" || ok=0
+    grep -q 'ABX_OUTPUT .*/trafilatura/content.txt' "$log_file" || ok=0
+
+    if [[ "$ok" == "1" ]]; then
+        passed=$((passed + 1))
+        log "PASS $name"
+    else
+        failed=$((failed + 1))
+        log "FAIL $name (status=$status expected=full-flow success log=$log_file)"
+        sed -n '1,220p' "$log_file"
     fi
 }
 
@@ -264,9 +443,9 @@ run_case "non-root start writable root-owned data succeeds" \
     "chown 0:0 /case/data /case/lib && chmod 777 /case/data /case/lib" \
     "-" "501:911" pass 501 911
 
-run_case "non-root start unwritable root-owned data hard-errors" \
+run_case "non-root start root-owned data with mapped write access succeeds" \
     "chown 0:0 /case/data /case/lib && chmod 700 /case/data /case/lib" \
-    "-" "501:911" fail "" ""
+    "-" "501:911" pass 501 911
 
 run_case "root start fixes read-only top-level data when chmod works" \
     "chown 0:0 /case/data && chmod 555 /case/data" \
@@ -288,9 +467,9 @@ run_case "non-root user 501 can run archivebox version with root-owned LIB_DIR" 
     "chown 0:0 /case/data /case/lib && chmod 777 /case/data && chmod 755 /case/lib" \
     "-" "501:911" pass 501 911 "$version_cmd"
 
-run_case "non-root user 501 cannot write root-owned LIB_DIR" \
+run_case "non-root user 501 can write root-owned mapped LIB_DIR when access is granted" \
     "chown 0:0 /case/data /case/lib && chmod 777 /case/data && chmod 755 /case/lib" \
-    "-" "501:911" fail "" ""
+    "-" "501:911" pass 501 911
 
 run_case "non-root user 501 can write forced-owner style LIB_DIR when permissions allow" \
     "chown 0:0 /case/data /case/lib && chmod 777 /case/data /case/lib" \
@@ -307,6 +486,14 @@ run_case "invalid nonnumeric PUID hard-errors" \
 run_case "root-owned ArchiveBox.conf only is repaired" \
     "chown 911:911 /case/data && chmod 755 /case/data && touch /case/data/ArchiveBox.conf /case/data/index.sqlite3 && chown 0:0 /case/data/ArchiveBox.conf /case/data/index.sqlite3" \
     "PUID=911 PGID=911" "-" pass 911 911 "$default_cmd" config-files-repaired
+
+run_readonly_case "readonly bind mount hard-errors only when truly unwritable" \
+    "chown 911:911 /case/data /case/lib /case/browsers && chmod 755 /case/data /case/lib /case/browsers" \
+    "PUID=911 PGID=911" "-"
+
+run_full_flow_case "prebuilt image init install version add update example.com" \
+    "chown 0:0 /case/data && chmod 755 /case/data" \
+    "PUID=911 PGID=911" "-" 911 911
 
 run_mount_case "NFS" "${NFS_TEST_DIR:-}"
 run_mount_case "SMB" "${SMB_TEST_DIR:-}"

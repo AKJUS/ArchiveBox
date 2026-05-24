@@ -121,10 +121,10 @@ build_and_prek() {
     (
         cd "$repo"
         rm -rf dist
-        uv build --out-dir dist
-        uv run prek run --all-files
+        uv --no-cache build --out-dir dist
+        uv --no-cache run prek run --all-files
         rm -rf dist
-        uv build --out-dir dist
+        uv --no-cache build --out-dir dist
     )
 }
 
@@ -146,7 +146,7 @@ commit_push_publish() {
             echo "[*] No staged changes in ${package}; reusing existing commit."
         fi
         git push origin "$branch"
-        uv publish --username="${PYPI_USERNAME}" dist/*
+        uv --no-cache publish --username="${PYPI_USERNAME}" dist/*
     )
 }
 
