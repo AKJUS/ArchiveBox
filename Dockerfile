@@ -247,10 +247,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
 
 
 # Runtime config used by plugin hooks. Plugin binaries and npm packages are
-# installed into LIB_DIR below by archivebox init --install.
-ENV PATH="$LIB_DIR/bin:$LIB_DIR/env/bin:$LIB_DIR/pip/venv/bin:$LIB_DIR/npm/node_modules/.bin:$LIB_DIR/puppeteer/bin:$PATH" \
-    PERSONAS_DIR=/data/personas \
-    NODE_PATH="$LIB_DIR/npm/node_modules:/data/personas/Default/node_modules" \
+# installed into LIB_DIR below by archivebox init --install and resolved from
+# LIB_DIR by ArchiveBox/abxpkg, not by mutating the container PATH.
+ENV PERSONAS_DIR=/data/personas \
     CHROME_USER_DATA_DIR=/data/personas/Default/chrome_profile \
     CHROME_HEADLESS=true \
     CHROME_SANDBOX=false \
