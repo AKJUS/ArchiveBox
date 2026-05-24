@@ -1,3 +1,387 @@
+<style>
+.plugin-config-form {
+    min-width: 0;
+}
+
+.plugin-config-form,
+.plugin-config-form * {
+    box-sizing: border-box;
+}
+
+.plugin-groups-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+
+.plugin-group {
+    min-width: 0;
+    padding: 14px 16px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}
+
+.plugin-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #004882;
+}
+
+.plugin-group-header label {
+    margin: 0;
+    color: #004882;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.plugin-group-note {
+    color: #7a7a7a;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.select-all-btn {
+    padding: 4px 12px;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.select-all-btn:hover {
+    background-color: #e0e0e0;
+}
+
+.plugin-checkboxes {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    min-width: 0;
+}
+
+.plugin-card {
+    min-width: 0;
+    overflow: hidden;
+    background-color: #fff;
+    border: 1px solid #e3e8ef;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+
+.plugin-card:hover {
+    background-color: #f5f5f5;
+}
+
+.plugin-card-main {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    min-width: 0;
+    padding: 8px 10px;
+}
+
+.plugin-card-main--static {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.plugin-card-main > input[type="checkbox"] {
+    grid-column: 1;
+    grid-row: 1;
+    width: auto;
+    margin: 3px 0 0;
+}
+
+.plugin-config-form .plugin-card-label {
+    grid-column: 2;
+    grid-row: 1;
+    display: grid !important;
+    grid-template-columns: 20px minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 3px;
+    align-items: start;
+    min-width: 0;
+    width: 100%;
+    margin: 0;
+    font-size: 14px;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.plugin-config-form .plugin-card-label-static {
+    grid-column: 1;
+}
+
+.plugin-choice-name {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    color: #1f2937;
+    font-weight: 500;
+}
+
+.plugin-config-form .plugin-choice-icon {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    color: #7a7a7a;
+}
+
+.plugin-config-form .plugin-choice-icon .abx-output-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-config-form .plugin-choice-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.plugin-config-form .plugin-choice-description {
+    grid-column: 2;
+    grid-row: 2;
+    display: inline-block;
+    min-width: 0;
+    margin-left: 0;
+    color: #7a7a7a !important;
+    font-size: 12px;
+    text-align: left;
+    text-decoration: none !important;
+}
+
+.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:link,
+.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:visited,
+.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:active {
+    color: #7a7a7a !important;
+    text-decoration: none !important;
+}
+
+.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:hover,
+.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:focus {
+    color: #4b5563 !important;
+    text-decoration: underline !important;
+}
+
+.plugin-config-details {
+    grid-column: 3;
+    grid-row: 1;
+    min-width: 0;
+}
+
+.plugin-card-main--static .plugin-config-details {
+    grid-column: 2;
+}
+
+.plugin-config-details summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 3px 8px;
+    border: 1px solid #d7e2eb;
+    border-radius: 999px;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.plugin-config-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.plugin-config-details summary:before {
+    content: "▶";
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+
+.plugin-config-details[open] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+    padding-top: 8px;
+}
+
+.plugin-config-details[open] summary {
+    margin-bottom: 8px;
+}
+
+.plugin-config-details[open] summary:before {
+    transform: rotate(90deg);
+}
+
+.plugin-config-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 11px;
+}
+
+.plugin-config-meta,
+.plugin-config-empty {
+    margin-bottom: 8px;
+    padding: 7px 9px;
+    border: 1px solid #e5edf5;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.plugin-config-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    max-width: 100%;
+    max-height: 360px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid #e5edf5;
+    border-radius: 6px;
+    background: #fbfdff;
+}
+
+.plugin-config-field {
+    min-width: 0;
+}
+
+.plugin-config-form .plugin-config-field > label {
+    display: flex !important;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: #24303b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.plugin-config-field code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plugin-config-type {
+    flex: 0 0 auto;
+    color: #7a8794;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.plugin-config-field input[type="text"],
+.plugin-config-field input[type="password"],
+.plugin-config-field input[type="number"],
+.plugin-config-field select,
+.plugin-config-field textarea {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    box-shadow: none;
+    background: #fff;
+    font-family: inherit;
+    font-size: 12px;
+}
+
+.plugin-config-field textarea {
+    min-height: 70px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.plugin-config-form .plugin-config-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 34px;
+    margin: 0;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.plugin-config-toggle input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.plugin-config-help,
+.plugin-config-default {
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.plugin-config-default code {
+    color: #475569;
+    white-space: normal;
+    word-break: break-word;
+}
+
+@media (max-width: 768px) {
+    .plugin-checkboxes,
+    .plugin-groups-grid,
+    .plugin-config-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .plugin-card-main {
+        grid-template-columns: 18px minmax(0, 1fr);
+    }
+
+    .plugin-card-main--static {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .plugin-config-details,
+    .plugin-card-main--static .plugin-config-details {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
+    .plugin-group-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+}
+</style>
 <div class="plugin-config-form">
     <div class="plugin-groups-grid">
         {% for group in plugin_groups %}
@@ -17,7 +401,7 @@
                     <div class="plugin-checkboxes"{% if group.dom_id %} id="{{ group.dom_id }}"{% endif %}>
                         {% for plugin in group.plugins %}
                             <div class="plugin-card">
-                                <div class="plugin-card-main">
+                                <div class="plugin-card-main{% if not group.show_selectors %} plugin-card-main--static{% endif %}">
                                     {% if group.show_selectors %}
                                         <input type="checkbox" name="{{ group.field_name }}" value="{{ plugin.name }}" id="{{ plugin.checkbox_id }}" {% if plugin.checked %}checked{% endif %}>
                                         <label for="{{ plugin.checkbox_id }}" class="plugin-card-label">
