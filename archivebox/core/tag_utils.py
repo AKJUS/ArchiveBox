@@ -11,6 +11,7 @@ from django.db.models.functions import Lower
 from django.http import HttpRequest
 from django.urls import reverse
 
+from archivebox.config.common import get_config
 from archivebox.core.host_utils import build_snapshot_url, build_web_url
 from archivebox.core.models import Snapshot, SnapshotTag, Tag
 
@@ -184,14 +185,14 @@ def _display_snapshot_title(snapshot: Snapshot) -> str:
     return title
 
 
-def _build_snapshot_preview(snapshot: Snapshot, request: HttpRequest | None = None) -> dict[str, Any]:
+def _build_snapshot_preview(snapshot: Snapshot, request: HttpRequest | None = None, config: Any | None = None) -> dict[str, Any]:
     return {
         "id": str(snapshot.pk),
         "title": _display_snapshot_title(snapshot),
         "url": snapshot.url,
-        "favicon_url": build_snapshot_url(str(snapshot.pk), "favicon.ico", request=request),
+        "favicon_url": build_snapshot_url(str(snapshot.pk), "favicon.ico", request=request, config=config),
         "admin_url": reverse("admin:core_snapshot_change", args=[snapshot.pk]),
-        "archive_url": build_web_url(f"/{snapshot.archive_path_from_db}/index.html", request=request),
+        "archive_url": build_web_url(f"/{snapshot.archive_path_from_db}/index.html", request=request, config=config),
         "downloaded_at": snapshot.downloaded_at.isoformat() if snapshot.downloaded_at else None,
     }
 
@@ -202,7 +203,7 @@ def _build_snapshot_preview_map(
     preview_limit: int = TAG_SNAPSHOT_PREVIEW_LIMIT,
 ) -> dict[int, list[dict[str, Any]]]:
     tag_ids = [tag.pk for tag in tags]
-    if not tag_ids:
+    if not tag_ids or preview_limit <= 0:
         return {}
 
     snapshot_tags = (
@@ -217,16 +218,19 @@ def _build_snapshot_preview_map(
     )
 
     preview_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    config = get_config()
     for snapshot_tag in snapshot_tags:
         previews = preview_map[snapshot_tag.tag_id]
         if len(previews) >= preview_limit:
             continue
-        previews.append(_build_snapshot_preview(snapshot_tag.snapshot, request=request))
+        previews.append(_build_snapshot_preview(snapshot_tag.snapshot, request=request, config=config))
     return preview_map
 
 
 def build_tag_card(tag: Tag, snapshot_previews: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    count = getattr(tag, "num_snapshots", tag.snapshot_set.count())
+    count = getattr(tag, "num_snapshots", None)
+    if count is None:
+        count = tag.snapshot_set.count()
     return {
         "id": tag.pk,
         "name": tag.name,

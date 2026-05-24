@@ -308,10 +308,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     --mount=type=cache,target=/root/.cache/puppeteer,sharing=locked,id=puppeteer-$TARGETARCH$TARGETVARIANT \
     --mount=type=cache,target=/root/.cache/ms-playwright,sharing=locked,id=browsers-$TARGETARCH$TARGETVARIANT \
     echo "[+] Installing plugin runtime dependencies into $LIB_DIR..." \
+    && apt-get update -qq \
     && PUID=0 PGID=0 abx-dl plugins --install \
     && find "$LIB_DIR" "$DATA_DIR"/personas -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find "$LIB_DIR" "$DATA_DIR"/personas -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
-    && rm -rf /root/.cache /var/cache/apt/* /var/lib/apt/lists/* \
+    && rm -rf /var/lib/apt/lists/* \
     && (chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$DATA_DIR"/personas 2>/dev/null || true) \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR"
 
@@ -348,6 +349,7 @@ RUN (echo -e "\n\n[√] Finished Docker build successfully. Saving build summary
 
 # Verify ArchiveBox is installed and write full version/dependency info.
 RUN chmod +x "$CODE_DIR"/bin/*.sh \
+    && chmod g+w "$TMP_DIR" "$LIB_DIR" "$LIB_DIR"/bin "$PLAYWRIGHT_BROWSERS_PATH" \
     && gosu "$ARCHIVEBOX_USER" archivebox version 2>&1 | tee -a /VERSION.txt \
     && find /venv "$CODE_DIR" "$LIB_DIR" "$DATA_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /venv "$CODE_DIR" "$LIB_DIR" "$DATA_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \

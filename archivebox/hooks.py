@@ -437,14 +437,13 @@ def run_hook(
         except Exception:
             pass
 
-    # Get LIB_DIR and LIB_BIN_DIR from config
+    # Export runtime library roots; abx-dl/abxpkg own executable lookup env.
     lib_dir = resolved_config.LIB_DIR
     lib_bin_dir = resolved_config.LIB_BIN_DIR
     if lib_dir:
         env["LIB_DIR"] = str(lib_dir)
-    if not lib_bin_dir and lib_dir:
-        # Derive LIB_BIN_DIR from LIB_DIR if not set
-        lib_bin_dir = Path(lib_dir) / "bin"
+    if lib_bin_dir:
+        env["LIB_BIN_DIR"] = str(lib_bin_dir)
 
     # Set Node.js module resolution paths.
     # NODE_PATH may be a path list, but NODE_MODULES_DIR is a single canonical directory.
@@ -490,41 +489,6 @@ def run_hook(
             env[key] = json.dumps(value)
         else:
             env[key] = str(value)
-
-    # Build PATH with proper precedence:
-    # 1. path-like *_BINARY parents (explicit binary overrides / cached abspaths)
-    # 2. LIB_BIN_DIR (local symlinked binaries)
-    # 3. existing PATH
-    runtime_bin_dirs: list[str] = []
-    if lib_bin_dir:
-        lib_bin_dir = str(lib_bin_dir)
-        env["LIB_BIN_DIR"] = lib_bin_dir
-    for key, raw_value in env.items():
-        if not key.endswith("_BINARY"):
-            continue
-        value = str(raw_value or "").strip()
-        if not value:
-            continue
-        path_value = Path(value).expanduser()
-        if not (path_value.is_absolute() or "/" in value or "\\" in value):
-            continue
-        binary_dir = str(path_value.resolve(strict=False).parent)
-        if binary_dir and binary_dir not in runtime_bin_dirs:
-            runtime_bin_dirs.append(binary_dir)
-    if lib_bin_dir and lib_bin_dir not in runtime_bin_dirs:
-        runtime_bin_dirs.append(lib_bin_dir)
-    uv_value = str(env.get("UV") or "").strip()
-    if uv_value:
-        uv_bin_dir = str(Path(uv_value).expanduser().resolve(strict=False).parent)
-        if uv_bin_dir and uv_bin_dir not in runtime_bin_dirs:
-            runtime_bin_dirs.append(uv_bin_dir)
-
-    current_path = env.get("PATH", "")
-    path_parts = [part for part in current_path.split(os.pathsep) if part]
-    for extra_dir in reversed(runtime_bin_dirs):
-        if extra_dir not in path_parts:
-            path_parts.insert(0, extra_dir)
-    env["PATH"] = os.pathsep.join(path_parts)
 
     # Create output directory if needed
     output_dir.mkdir(parents=True, exist_ok=True)

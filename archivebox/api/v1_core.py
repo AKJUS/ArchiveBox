@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from uuid import UUID
 from typing import Union, Any, Annotated
-from datetime import datetime
+from datetime import datetime, time
 
 from django.db.models import Model, Q, Sum
 from django.db.models.functions import Coalesce
@@ -14,6 +14,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 from django.shortcuts import redirect
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.feedgenerator import Rss201rev2Feed
 
 from ninja import Router, Schema, FilterLookup, FilterSchema, Query
 from ninja.pagination import paginate, PaginationBase
@@ -22,6 +24,7 @@ from ninja.errors import HttpError
 from archivebox.core.models import Snapshot, ArchiveResult, Tag
 from archivebox.api.auth import auth_using_token
 from archivebox.config.common import get_config
+from archivebox.core.host_utils import build_web_url
 from archivebox.core.tag_utils import (
     build_tag_cards,
     delete_tag as delete_tag_record,
@@ -285,6 +288,119 @@ def normalize_tag_list(tags: list[str] | None = None) -> list[str]:
     return [tag.strip() for tag in (tags or []) if tag and tag.strip()]
 
 
+def _parse_rss_before(before: str | None) -> datetime:
+    if not before:
+        return timezone.now()
+
+    value = before.strip()
+    parsed_dt = None
+
+    if len(value) == 8 and value.isdigit():
+        parsed_date = datetime.strptime(value, "%Y%m%d").date()
+    else:
+        parsed_dt = parse_datetime(value)
+        parsed_date = None if parsed_dt else parse_date(value)
+
+    if parsed_dt is None:
+        if parsed_date is None:
+            raise HttpError(400, "before must be an ISO datetime, YYYY-MM-DD, or YYYYMMDD")
+        parsed_dt = datetime.combine(parsed_date, time.max)
+
+    if timezone.is_naive(parsed_dt):
+        parsed_dt = timezone.make_aware(parsed_dt, timezone.get_current_timezone())
+    return parsed_dt
+
+
+def _filter_snapshots_for_rss(
+    *,
+    crawl_id: str = "",
+    created_by: str = "",
+    before: str | None = None,
+    limit: int = 50,
+):
+    limit = max(1, min(int(limit or 50), 500))
+    before_dt = _parse_rss_before(before)
+    queryset = (
+        Snapshot.objects.select_related("crawl__created_by")
+        .prefetch_related("tags")
+        .only(
+            "id",
+            "url",
+            "title",
+            "timestamp",
+            "bookmarked_at",
+            "created_at",
+            "modified_at",
+            "fs_version",
+            "crawl_id",
+            "crawl__id",
+            "crawl__created_by_id",
+            "crawl__created_by__id",
+            "crawl__created_by__username",
+        )
+        .filter(bookmarked_at__lte=before_dt)
+    )
+
+    crawl_id = crawl_id.strip()
+    if crawl_id:
+        queryset = queryset.filter(crawl__id__icontains=crawl_id)
+
+    created_by = created_by.strip()
+    if created_by:
+        created_by_query = Q(crawl__created_by__username__iexact=created_by)
+        user_model = get_user_model()
+        try:
+            prepared_pk = user_model._meta.pk.get_prep_value(created_by)
+        except (TypeError, ValueError, ValidationError):
+            prepared_pk = None
+        if prepared_pk not in (None, ""):
+            created_by_query |= Q(crawl__created_by_id=prepared_pk)
+        queryset = queryset.filter(created_by_query)
+
+    return queryset.order_by("-bookmarked_at", "-created_at", "-id")[:limit]
+
+
+def _snapshots_rss_response(
+    request: HttpRequest,
+    *,
+    snapshots,
+    title: str = "ArchiveBox Snapshots",
+) -> HttpResponse:
+    web_base_url = build_web_url("/", request=request).rstrip("/")
+    feed_query = request.GET.copy()
+    for sensitive_param in ("api_key", "token", "password"):
+        feed_query.pop(sensitive_param, None)
+    feed_path = request.path
+    feed_url = request.build_absolute_uri(f"{feed_path}?{feed_query.urlencode()}" if feed_query else feed_path)
+
+    feed = Rss201rev2Feed(
+        title=title,
+        link=build_web_url("/public/", request=request),
+        description="Recently added ArchiveBox snapshots.",
+        language="en",
+        feed_url=feed_url,
+    )
+
+    for snapshot in snapshots:
+        archived_url = build_web_url(f"/{snapshot.archive_path_from_db}", request=request)
+        tags = [tag.name for tag in snapshot.tags.all()]
+        crawl_user = snapshot.crawl.created_by if snapshot.crawl_id else None
+        description = f"Original URL: {snapshot.url}\nArchived snapshot: {archived_url}"
+        feed.add_item(
+            title=snapshot.title or snapshot.url,
+            link=archived_url or web_base_url,
+            description=description,
+            unique_id=str(snapshot.id),
+            unique_id_is_permalink=False,
+            pubdate=snapshot.bookmarked_at or snapshot.created_at,
+            updateddate=snapshot.modified_at,
+            author_name=crawl_user.username if crawl_user else None,
+            categories=tags,
+        )
+
+    return HttpResponse(feed.writeString("utf-8"), content_type="application/rss+xml; charset=utf-8")
+
+
 class SnapshotFilterSchema(FilterSchema):
     id: Annotated[str | None, FilterLookup(["id__icontains", "timestamp__startswith"])] = None
     created_by_id: Annotated[str | None, FilterLookup("crawl__created_by_id")] = None
@@ -314,6 +430,25 @@ def get_snapshots(request: HttpRequest, filters: Query[SnapshotFilterSchema], wi
     setattr(request, "with_archiveresults", with_archiveresults)
     queryset = Snapshot.objects.annotate(output_size_sum=Coalesce(Sum("archiveresult__output_size"), 0))
     return filters.filter(queryset).distinct()
+
+
+@router.get("/snapshots.rss", url_name="get_snapshots_rss")
+@router.get("/snapshot.rss", url_name="get_snapshot_rss")
+def get_snapshots_rss(
+    request: HttpRequest,
+    crawl_id: str = "",
+    created_by: str = "",
+    limit: int = 50,
+    before: str | None = None,
+):
+    """Return matching snapshots as an RSS feed, newest first."""
+    snapshots = _filter_snapshots_for_rss(
+        crawl_id=crawl_id,
+        created_by=created_by,
+        limit=limit,
+        before=before,
+    )
+    return _snapshots_rss_response(request, snapshots=snapshots)
 
 
 @router.get("/snapshot/{snapshot_id}", response=SnapshotSchema, url_name="get_snapshot")

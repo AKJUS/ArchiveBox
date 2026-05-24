@@ -1228,6 +1228,16 @@ class TestArchiveResultAdminListView:
 
         assert response.status_code == 200
         assert b"Select user to change" in response.content
+        assert b"/api/v1/core/snapshots.rss?created_by=testadmin&amp;limit=50&amp;api_key=" in response.content
+        assert b"RSS" in response.content
+
+    def test_user_admin_change_view_renders_rss_feed_link(self, client, admin_user):
+        client.login(username="testadmin", password="testpassword")
+        response = client.get(reverse("admin:auth_user_change", args=[admin_user.pk]), HTTP_HOST=ADMIN_HOST)
+
+        assert response.status_code == 200
+        assert b"Snapshot Feed" in response.content
+        assert b"/api/v1/core/snapshots.rss?created_by=testadmin&amp;limit=50&amp;api_key=" in response.content
 
     def test_archiveresult_model_has_no_retry_at_field(self):
         from archivebox.core.models import ArchiveResult

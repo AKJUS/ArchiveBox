@@ -1,4 +1,4 @@
-{% extends "admin/change_list.html" %}
+{% extends "admin/base_site.html" %}
 
 {% block bodyclass %}{{ block.super }} app-core model-tag change-list tag-admin-page{% endblock %}
 
@@ -471,54 +471,7 @@
 
         <div id="tag-toast" class="tag-toast" aria-live="polite"></div>
         <div id="tag-card-grid" class="tag-grid">
-            {% if initial_tag_cards %}
-                {% for card in initial_tag_cards %}
-                    <article
-                        class="tag-card"
-                        data-id="{{ card.id }}"
-                        data-slug="{{ card.slug }}"
-                        data-filter-url="{{ card.filter_url }}"
-                        data-rename-url="{{ card.rename_url }}"
-                        data-delete-url="{{ card.delete_url }}"
-                        data-export-urls-url="{{ card.export_urls_url }}"
-                        data-export-jsonl-url="{{ card.export_jsonl_url }}"
-                    >
-                        <div class="tag-card__header">
-                            <div class="tag-card__title">
-                                <div class="tag-card__display">
-                                    <strong><a href="{{ card.filter_url }}" style="color:inherit;text-decoration:none;">{{ card.name }}</a></strong>
-                                </div>
-                                <div class="tag-card__rename">
-                                    <input type="text" value="{{ card.name }}" aria-label="Rename tag {{ card.name }}">
-                                    <button type="button" class="tag-chip-button" data-action="save-edit">Save</button>
-                                    <button type="button" class="tag-chip-button" data-action="cancel-edit">Cancel</button>
-                                </div>
-                            </div>
-                            <div class="tag-card__actions">
-                                <button type="button" class="tag-chip-button" data-action="edit" aria-label="Rename tag" title="Rename tag">✎</button>
-                                <button type="button" class="tag-chip-button" data-action="copy-urls">Copy URLs</button>
-                                <button type="button" class="tag-chip-button" data-action="download-jsonl">JSONL</button>
-                                <button type="button" class="tag-chip-button is-danger" data-action="delete">Delete</button>
-                                <span class="tag-card__count">{{ card.num_snapshots }}</span>
-                            </div>
-                        </div>
-                        <div class="tag-card__snapshots">
-                            {% if card.snapshots %}
-                                {% for snapshot in card.snapshots %}
-                                    <a class="tag-snapshot-badge" href="{{ snapshot.admin_url }}" title="{{ snapshot.url }}">
-                                        <img src="{{ snapshot.favicon_url }}" alt="" onerror="this.style.display='none'">
-                                        <span>{{ snapshot.title }}</span>
-                                    </a>
-                                {% endfor %}
-                            {% else %}
-                                <div class="tag-card__empty">No snapshots attached yet.</div>
-                            {% endif %}
-                        </div>
-                    </article>
-                {% endfor %}
-            {% else %}
-                <div class="tag-empty-state">No tags.</div>
-            {% endif %}
+            <div class="tag-empty-state">Loading tags...</div>
         </div>
     </div>
 </div>

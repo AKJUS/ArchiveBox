@@ -734,12 +734,12 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
 
     def symlink_to_lib_bin(self, lib_bin_dir: str | Path) -> Path | None:
         """
-        Symlink this binary into LIB_BIN_DIR for unified PATH management.
+        Symlink this binary into LIB_BIN_DIR for shared runtime lookup.
 
         After a binary is installed by any binprovider (pip, npm, brew, apt, etc),
         we symlink it into LIB_BIN_DIR so that:
         1. All binaries can be found in a single directory
-        2. PATH only needs LIB_BIN_DIR prepended (not multiple provider-specific paths)
+        2. abxpkg/abx-dl can include the shared bin dir when constructing exec envs
         3. Binary priorities are clear (symlink points to the canonical install location)
 
         Args:

@@ -3,6 +3,7 @@ __package__ = "archivebox.api"
 from uuid import UUID
 from datetime import datetime
 from django.http import HttpRequest
+from django.shortcuts import redirect
 from django.utils import timezone
 
 from django.contrib.auth import get_user_model
@@ -126,7 +127,7 @@ def create_crawl(request: HttpRequest, data: CrawlCreateSchema):
     return crawl
 
 
-@router.get("/crawl/{crawl_id}", response=CrawlSchema | str, url_name="get_crawl")
+@router.get("/crawl/{crawl_id}", response=CrawlSchema, url_name="get_crawl")
 def get_crawl(request: HttpRequest, crawl_id: str, as_rss: bool = False, with_snapshots: bool = False, with_archiveresults: bool = False):
     """Get a specific Crawl by id."""
     setattr(request, "with_snapshots", with_snapshots)
@@ -134,16 +135,10 @@ def get_crawl(request: HttpRequest, crawl_id: str, as_rss: bool = False, with_sn
     crawl = Crawl.objects.get(id__icontains=crawl_id)
 
     if crawl and as_rss:
-        # return snapshots as XML rss feed
-        urls = [
-            {"url": snapshot.url, "title": snapshot.title, "bookmarked_at": snapshot.bookmarked_at, "tags": snapshot.tags_str}
-            for snapshot in crawl.snapshot_set.all()
-        ]
-        xml = '<rss version="2.0"><channel>'
-        for url in urls:
-            xml += f"<item><url>{url['url']}</url><title>{url['title']}</title><bookmarked_at>{url['bookmarked_at']}</bookmarked_at><tags>{url['tags']}</tags></item>"
-        xml += "</channel></rss>"
-        return xml
+        query = request.GET.copy()
+        query.pop("as_rss", None)
+        query["crawl_id"] = str(crawl.id)
+        return redirect(f"/api/v1/core/snapshots.rss?{query.urlencode()}")
 
     return crawl
 

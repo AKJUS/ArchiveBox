@@ -6,6 +6,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.options import IS_POPUP_VAR
 from django.http import HttpRequest, HttpResponseRedirect
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -117,8 +118,11 @@ class TagAdmin(BaseModelAdmin):
         created_by = normalize_created_by_filter((request.GET.get("created_by") or "").strip())
         year = normalize_created_year_filter((request.GET.get("year") or "").strip())
         has_snapshots = normalize_has_snapshots_filter((request.GET.get("has_snapshots") or "all").strip())
-        extra_context = {
+        context = {
+            **self.admin_site.each_context(request),
             **(extra_context or {}),
+            "title": "Tags",
+            "opts": self.model._meta,
             "initial_query": query,
             "initial_sort": sort,
             "initial_created_by": created_by,
@@ -131,6 +135,7 @@ class TagAdmin(BaseModelAdmin):
             "initial_tag_cards": build_tag_cards(
                 query=query,
                 request=request,
+                preview_limit=0,
                 sort=sort,
                 created_by=created_by,
                 year=year,
@@ -139,7 +144,7 @@ class TagAdmin(BaseModelAdmin):
             "tag_search_api_url": reverse("api-1:search_tags"),
             "tag_create_api_url": reverse("api-1:tags_create"),
         }
-        return super().changelist_view(request, extra_context=extra_context)
+        return TemplateResponse(request, self.change_list_template, context)
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         current_name = (request.POST.get("name") or "").strip()
@@ -147,7 +152,9 @@ class TagAdmin(BaseModelAdmin):
             current_name = obj.name
 
         similar_tag_cards = (
-            build_tag_cards(query=current_name, request=request, limit=12) if current_name else build_tag_cards(request=request, limit=12)
+            build_tag_cards(query=current_name, request=request, limit=12, preview_limit=0)
+            if current_name
+            else build_tag_cards(request=request, limit=12, preview_limit=0)
         )
         if obj:
             similar_tag_cards = [card for card in similar_tag_cards if card["id"] != obj.pk]

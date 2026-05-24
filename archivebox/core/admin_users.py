@@ -1,5 +1,7 @@
 __package__ = "archivebox.core"
 
+from urllib.parse import urlencode
+
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth import get_user_model
@@ -11,6 +13,7 @@ class CustomUserAdmin(UserAdmin):
     sort_fields = ["id", "email", "username", "is_superuser", "last_login", "date_joined"]
     list_display = ["username", "id", "email", "is_superuser", "last_login", "date_joined"]
     readonly_fields = ("snapshot_set", "archiveresult_set", "tag_set", "apitoken_set", "outboundwebhook_set")
+    change_form_template = "admin/auth/user/change_form.html"
 
     # Preserve Django's default user creation form and fieldsets
     # This ensures passwords are properly hashed and permissions are set correctly
@@ -18,6 +21,37 @@ class CustomUserAdmin(UserAdmin):
 
     # Extend fieldsets for change form only (not user creation)
     fieldsets = [*(UserAdmin.fieldsets or ()), ("Data", {"fields": readonly_fields})]
+
+    def snapshot_rss_badge(self, obj, api_token: str = ""):
+        params = {"created_by": obj.username, "limit": 50}
+        if api_token:
+            params["api_key"] = api_token
+        url = f"/api/v1/core/snapshots.rss?{urlencode(params)}"
+        return format_html(
+            (
+                '<a href="{}" title="Snapshot RSS feed for {}" '
+                'style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:4px;'
+                "background:#fff3e0;border:1px solid #f59e0b;color:#7c2d12;font-weight:700;"
+                'font-size:12px;line-height:1.2;text-decoration:none;white-space:nowrap;">'
+                '<span aria-hidden="true" style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+                'background:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,.18);"></span>'
+                "RSS</a>"
+            ),
+            url,
+            obj.username,
+        )
+
+    def get_list_display(self, request):
+        from archivebox.api.auth import get_or_create_api_token
+
+        api_token = get_or_create_api_token(request.user)
+        token = api_token.token if api_token else ""
+
+        @admin.display(description="Feed")
+        def snapshot_rss_feed(obj):
+            return self.snapshot_rss_badge(obj, api_token=token)
+
+        return ["username", snapshot_rss_feed, "id", "email", "is_superuser", "last_login", "date_joined"]
 
     @admin.display(description="Snapshots")
     def snapshot_set(self, obj):
