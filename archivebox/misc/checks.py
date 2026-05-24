@@ -138,20 +138,25 @@ def check_data_dir_permissions(config=None, **config_kwargs):
     # data_owned_by_default_user = data_dir_uid == DEFAULT_PUID or data_dir_gid == DEFAULT_PGID
     data_owner_doesnt_match = (data_dir_uid != ARCHIVEBOX_USER and data_dir_gid != ARCHIVEBOX_GROUP) if not IS_ROOT else False
     data_not_writable = not (os.path.isdir(DATA_DIR) and os.access(DATA_DIR, os.W_OK))
-    if data_owned_by_root:
+    if data_not_writable:
         STDERR.print(
-            "\n[yellow]:warning: Warning: ArchiveBox [blue]DATA_DIR[/blue] is currently owned by [red]root[/red], it must be changed before archiving can run![/yellow]",
+            f"\n[yellow]:warning: Warning: ArchiveBox [blue]DATA_DIR[/blue] is not writable by ArchiveBox user [blue]{ARCHIVEBOX_USER}:{ARCHIVEBOX_GROUP}[/blue] ({USER}).[/yellow]",
         )
-    elif data_owner_doesnt_match or data_not_writable:
+    elif data_owned_by_root:
+        STDERR.print(
+            "\n[yellow]:warning: Warning: ArchiveBox [blue]DATA_DIR[/blue] appears to be owned by [red]root[/red]. If this is an NFS or mapped volume and writes work, no change is required.[/yellow]",
+        )
+    elif data_owner_doesnt_match:
         STDERR.print(
             f"\n[yellow]:warning: Warning: ArchiveBox [blue]DATA_DIR[/blue] is currently owned by [red]{data_dir_uid}:{data_dir_gid}[/red], but ArchiveBox user is [blue]{ARCHIVEBOX_USER}:{ARCHIVEBOX_GROUP}[/blue] ({USER})! (ArchiveBox may not be able to write to the data dir)[/yellow]",
         )
 
-    if data_owned_by_root or data_owner_doesnt_match or data_not_writable:
+    if data_not_writable:
         STDERR.print(
-            f"[violet]Hint:[/violet] Change the current ownership [red]{data_dir_uid}[/red]:{data_dir_gid} (PUID:PGID) to a non-root user & group that will run ArchiveBox, e.g.:",
+            f"[violet]Hint:[/violet] Change the current ownership [red]{data_dir_uid}[/red]:{data_dir_gid} (PUID:PGID) to the user & group that will run ArchiveBox, e.g.:",
         )
         STDERR.print(f"    [grey53]sudo[/grey53] chown -R [blue]{DEFAULT_PUID}:{DEFAULT_PGID}[/blue] {DATA_DIR.resolve()}")
+        STDERR.print("    Avoid recursive chown on very large archives unless you know the full tree needs repair.")
         STDERR.print()
         STDERR.print("[blue]More info:[/blue]")
         STDERR.print(

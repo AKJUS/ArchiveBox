@@ -60,6 +60,8 @@ export DETECTED_PUID="${DETECTED_OWNER%%:*}"
 export DETECTED_PGID="${DETECTED_OWNER##*:}"
 export PUID="${PUID:-$DETECTED_PUID}"
 export PGID="${PGID:-$DETECTED_PGID}"
+export REQUESTED_PUID="$PUID"
+export REQUESTED_PGID="$PGID"
 
 if [[ ! "$PUID" =~ ^[0-9]+$ || ! "$PGID" =~ ^[0-9]+$ ]]; then
     echo -e "\n[X] Error: PUID and PGID must be numeric, got PUID=$PUID PGID=$PGID." > /dev/stderr
@@ -67,11 +69,14 @@ if [[ ! "$PUID" =~ ^[0-9]+$ || ! "$PGID" =~ ^[0-9]+$ ]]; then
     exit 3
 fi
 
-# If user tries to set PUID or PGID to root values manually, warn but allow it.
+# If user tries to set PUID or PGID to root values, keep root only for entrypoint
+# setup and run ArchiveBox/Chrome as the default non-root user instead.
 if [[ "$PUID" == "0" || "$PGID" == "0" ]]; then
-    echo -e "\n[!] Warning: Got PUID=$PUID and PGID=$PGID, ArchiveBox/Chrome will run as root." > /dev/stderr
-    echo -e "    This is not recommended because root-owned DATA_DIR files may be inaccessible to non-root users later." > /dev/stderr
-    echo -e "    Default is $DEFAULT_PUID:$DEFAULT_PGID. See https://docs.linuxserver.io/general/understanding-puid-and-pgid" > /dev/stderr
+    [[ "$PUID" == "0" ]] && export PUID="$DEFAULT_PUID"
+    [[ "$PGID" == "0" ]] && export PGID="$DEFAULT_PGID"
+    echo -e "\n[!] Warning: Got PUID=$REQUESTED_PUID PGID=$REQUESTED_PGID, but ArchiveBox/Chrome should not run as root." > /dev/stderr
+    echo -e "    The entrypoint will use root only for startup permission repair, then run ArchiveBox as a non-root user." > /dev/stderr
+    echo -e "    Using PUID=$PUID PGID=$PGID. See https://docs.linuxserver.io/general/understanding-puid-and-pgid" > /dev/stderr
 fi
 
 if [[ "$(id -u)" == "0" ]]; then
@@ -193,7 +198,7 @@ find "$PERSONAS_DIR" -type f \( \
 find /tmp "$TMP_DIR" -maxdepth 1 -type d -name "archivebox-chrome-profile.*" -mmin +30 -exec rm -rf {} + >/dev/null 2>&1 || true
     
 
-ensure_runtime_tree "/home/$ARCHIVEBOX_USER"
+ensure_dir "/home/$ARCHIVEBOX_USER"
 ensure_runtime_tree "$PLAYWRIGHT_BROWSERS_PATH"
 ensure_runtime_tree "$TMP_DIR"
 ensure_runtime_tree "$LIB_DIR"
