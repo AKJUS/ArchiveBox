@@ -1,0 +1,546 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static log %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static "admin/css/dashboard.css" %}">
+<style>
+    body.dashboard #content {
+        max-width: none;
+    }
+
+    body.dashboard #content-main {
+        float: none;
+        width: auto;
+    }
+
+    .abx-admin-dashboard {
+        --abx-paper: #fbf9f4;
+        --abx-vellum: #fdfcf8;
+        --abx-paper-2: #f3f0e8;
+        --abx-paper-3: #e4dfd3;
+        --abx-rule-strong: #d4cdbd;
+        --abx-ink: #1c1814;
+        --abx-ink-2: #3a332a;
+        --abx-ink-3: #6b6253;
+        --abx-ink-4: #9a907c;
+        --abx-oxblood: #8b2a2a;
+        --abx-oxblood-wash: #f0dfdf;
+        --abx-moss: #5a6b3c;
+        --abx-slate: #3e4a55;
+        --abx-ochre: #b5832a;
+        --abx-font-serif: "Source Serif 4", "Source Serif Pro", "Iowan Old Style", "Charter", Georgia, serif;
+        --abx-font-sans: "Inter Tight", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+        --abx-font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+        max-width: 1220px;
+        margin: 0 auto;
+        color: var(--abx-ink);
+        font-family: var(--abx-font-sans);
+    }
+
+    .abx-admin-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 24px;
+        align-items: end;
+        margin: 0 0 26px;
+        padding: 18px 0 22px;
+        border-bottom: 1px solid var(--abx-paper-3);
+    }
+
+    .abx-admin-kicker {
+        margin: 0 0 6px;
+        color: var(--abx-ink-3);
+        font-family: var(--abx-font-mono);
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    .abx-admin-hero h1,
+    .abx-admin-section h2 {
+        margin: 0;
+        color: var(--abx-ink);
+        font-family: var(--abx-font-serif);
+        font-weight: 600;
+        letter-spacing: 0;
+    }
+
+    .abx-admin-hero h1 {
+        font-size: clamp(30px, 3vw, 44px);
+        line-height: 1.05;
+    }
+
+    .abx-admin-hero p:last-child,
+    .abx-admin-section__intro {
+        margin: 8px 0 0;
+        max-width: 68ch;
+        color: var(--abx-ink-3);
+        font-size: 14px;
+        line-height: 1.55;
+    }
+
+    .abx-admin-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+        gap: 28px;
+        align-items: start;
+    }
+
+    .abx-admin-sections {
+        display: grid;
+        gap: 34px;
+    }
+
+    .abx-admin-section {
+        padding: 0;
+    }
+
+    .abx-admin-section__head {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: end;
+        margin-bottom: 14px;
+    }
+
+    .abx-admin-section h2 {
+        font-size: 22px;
+        line-height: 1.2;
+    }
+
+    .abx-admin-flow {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+
+    .abx-admin-flow__row,
+    .abx-admin-card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 10px;
+    }
+
+    .abx-admin-flow__row--child {
+        padding-left: 18px;
+        border-left: 2px solid var(--abx-paper-3);
+    }
+
+    .abx-admin-flow__row--grandchild {
+        padding-left: 36px;
+        border-left: 2px solid var(--abx-paper-3);
+    }
+
+    .abx-admin-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        min-height: 86px;
+        padding: 14px;
+        background: var(--abx-vellum);
+        border: 1px solid var(--abx-paper-3);
+        border-radius: 6px;
+        box-shadow: 0 1px 0 rgba(28, 24, 20, .04), 0 1px 2px rgba(28, 24, 20, .06);
+    }
+
+    .abx-admin-card:hover {
+        border-color: var(--abx-rule-strong);
+        box-shadow: 0 2px 4px rgba(28, 24, 20, .06), 0 8px 18px rgba(28, 24, 20, .07);
+    }
+
+    .abx-admin-card__main {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        min-width: 0;
+    }
+
+    .abx-admin-card__icon {
+        display: inline-flex;
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
+        align-items: center;
+        justify-content: center;
+        color: var(--abx-oxblood);
+        background: var(--abx-oxblood-wash);
+        border: 1px solid rgba(139, 42, 42, .12);
+        border-radius: 6px;
+    }
+
+    .abx-admin-card--machine .abx-admin-card__icon,
+    .abx-admin-card--networkinterface .abx-admin-card__icon,
+    .abx-admin-card--binary .abx-admin-card__icon,
+    .abx-admin-card--process .abx-admin-card__icon {
+        color: var(--abx-slate);
+        background: #e5eaed;
+        border-color: rgba(62, 74, 85, .14);
+    }
+
+    .abx-admin-card--configuration .abx-admin-card__icon,
+    .abx-admin-card--dependencies .abx-admin-card__icon,
+    .abx-admin-card--plugins .abx-admin-card__icon,
+    .abx-admin-card--workers .abx-admin-card__icon,
+    .abx-admin-card--logs .abx-admin-card__icon {
+        color: var(--abx-moss);
+        background: #e7ebdf;
+        border-color: rgba(90, 107, 60, .16);
+    }
+
+    .abx-admin-card svg {
+        width: 19px;
+        height: 19px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .abx-admin-card__copy {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+    }
+
+    .abx-admin-card__title {
+        color: var(--abx-ink);
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.25;
+        text-decoration: none;
+    }
+
+    .abx-admin-card__title:hover {
+        color: var(--abx-oxblood);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }
+
+    .abx-admin-card__text {
+        color: var(--abx-ink-3);
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    .abx-admin-card__actions {
+        display: inline-flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .abx-admin-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 28px;
+        padding: 0 10px;
+        color: var(--abx-ink-2);
+        background: var(--abx-paper);
+        border: 1px solid var(--abx-paper-3);
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .abx-admin-action:hover {
+        color: var(--abx-ink);
+        background: var(--abx-paper-2);
+        border-color: var(--abx-rule-strong);
+    }
+
+    .abx-admin-action--add {
+        color: #fff;
+        background: var(--abx-oxblood);
+        border-color: var(--abx-oxblood);
+    }
+
+    .abx-admin-action--add:hover {
+        color: #fff;
+        background: #6e1f1f;
+        border-color: #6e1f1f;
+    }
+
+    .abx-admin-aside {
+        display: grid;
+        gap: 14px;
+        position: sticky;
+        top: 18px;
+    }
+
+    .abx-admin-panel {
+        background: var(--abx-vellum);
+        border: 1px solid var(--abx-paper-3);
+        border-radius: 6px;
+        padding: 14px;
+        box-shadow: 0 1px 0 rgba(28, 24, 20, .04), 0 1px 2px rgba(28, 24, 20, .06);
+    }
+
+    .abx-admin-panel h2 {
+        margin: 0 0 10px;
+        color: var(--abx-ink);
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .abx-admin-recent {
+        display: grid;
+        gap: 9px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .abx-admin-recent li {
+        display: grid;
+        gap: 3px;
+        padding-bottom: 9px;
+        border-bottom: 1px dashed var(--abx-paper-3);
+        color: var(--abx-ink-3);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .abx-admin-recent li:last-child {
+        padding-bottom: 0;
+        border-bottom: 0;
+    }
+
+    .abx-admin-recent a {
+        color: var(--abx-ink);
+        font-weight: 650;
+        text-decoration: none;
+    }
+
+    .abx-admin-recent a:hover {
+        color: var(--abx-oxblood);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }
+
+    .abx-admin-recent__meta,
+    .abx-admin-empty {
+        color: var(--abx-ink-4);
+        font-family: var(--abx-font-mono);
+        font-size: 11px;
+    }
+
+    .abx-admin-all-models summary {
+        cursor: pointer;
+        color: var(--abx-ink-2);
+        font-weight: 700;
+    }
+
+    .abx-admin-all-models .app-list {
+        margin-top: 12px;
+    }
+
+    .abx-admin-app-index {
+        max-width: 980px;
+    }
+
+    @media (max-width: 980px) {
+        .abx-admin-hero,
+        .abx-admin-layout {
+            grid-template-columns: 1fr;
+        }
+
+        .abx-admin-aside {
+            position: static;
+        }
+    }
+
+    @media (max-width: 680px) {
+        .abx-admin-card {
+            grid-template-columns: 1fr;
+        }
+
+        .abx-admin-card__actions {
+            justify-content: flex-start;
+        }
+
+        .abx-admin-flow__row--child,
+        .abx-admin-flow__row--grandchild {
+            padding-left: 12px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block coltype %}colMS{% endblock %}
+{% block bodyclass %}{{ block.super }} dashboard abx-admin-dashboard-page{% endblock %}
+{% block nav-breadcrumbs %}{% endblock %}
+{% block nav-sidebar %}{% endblock %}
+
+{% block content %}
+{% if app_label %}
+    <div id="content-main" class="app-list abx-admin-app-index">
+        {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+    </div>
+{% else %}
+    <div class="abx-admin-dashboard">
+        <header class="abx-admin-hero">
+            <div>
+                <p class="abx-admin-kicker">{% translate "ArchiveBox Admin" %}</p>
+                <h1>{{ title|default:_("Admin Views") }}</h1>
+                <p>{% translate "Run crawls, review archived pages, and inspect the environment from one compact control surface." %}</p>
+            </div>
+        </header>
+
+        {% if app_list %}
+            <div class="abx-admin-layout">
+                <main class="abx-admin-sections" id="content-main">
+                    <section class="abx-admin-section" aria-labelledby="abx-admin-main-title">
+                        <div class="abx-admin-section__head">
+                            <div>
+                                <p class="abx-admin-kicker">{% translate "Main" %}</p>
+                                <h2 id="abx-admin-main-title">{% translate "Daily Operations" %}</h2>
+                                <p class="abx-admin-section__intro">{% translate "The models used most often while collecting, organizing, and reviewing archived sites." %}</p>
+                            </div>
+                        </div>
+
+                        <div class="abx-admin-flow">
+                            <div class="abx-admin-flow__row">
+                                {% for app in app_list %}
+                                    {% for model in app.models %}
+                                        {% if model.object_name == "Crawl" or model.object_name == "CrawlSchedule" %}
+                                            {% include "admin/index_model_card.html" with model=model tone="main" %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                            </div>
+                            <div class="abx-admin-flow__row abx-admin-flow__row--child">
+                                {% for app in app_list %}
+                                    {% for model in app.models %}
+                                        {% if model.object_name == "Snapshot" %}
+                                            {% include "admin/index_model_card.html" with model=model tone="main" %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                            </div>
+                            <div class="abx-admin-flow__row abx-admin-flow__row--grandchild">
+                                {% for app in app_list %}
+                                    {% for model in app.models %}
+                                        {% if model.object_name == "ArchiveResult" %}
+                                            {% include "admin/index_model_card.html" with model=model tone="main" %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="abx-admin-card-grid">
+                            {% for app in app_list %}
+                                {% for model in app.models %}
+                                    {% if model.object_name == "Tag" or model.object_name == "Persona" or model.object_name == "User" %}
+                                        {% include "admin/index_model_card.html" with model=model tone="main" %}
+                                    {% endif %}
+                                {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </section>
+
+                    <section class="abx-admin-section" aria-labelledby="abx-admin-environment-title">
+                        <div class="abx-admin-section__head">
+                            <div>
+                                <p class="abx-admin-kicker">{% translate "Environment" %}</p>
+                                <h2 id="abx-admin-environment-title">{% translate "Configuration and Dependencies" %}</h2>
+                                <p class="abx-admin-section__intro">{% translate "Read-only runtime views for settings, plugins, workers, logs, and installed tools." %}</p>
+                            </div>
+                        </div>
+                        <div class="abx-admin-card-grid">
+                            {% for app in app_list %}
+                                {% if app.name == "Environment" %}
+                                    {% for model in app.models %}
+                                        {% include "admin/index_model_card.html" with model=model tone="environment" %}
+                                    {% endfor %}
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </section>
+
+                    <section class="abx-admin-section" aria-labelledby="abx-admin-machine-title">
+                        <div class="abx-admin-section__head">
+                            <div>
+                                <p class="abx-admin-kicker">{% translate "Machine" %}</p>
+                                <h2 id="abx-admin-machine-title">{% translate "Host State" %}</h2>
+                                <p class="abx-admin-section__intro">{% translate "Lower-level records for the current machine, interfaces, binaries, and process history." %}</p>
+                            </div>
+                        </div>
+                        <div class="abx-admin-card-grid">
+                            {% for app in app_list %}
+                                {% for model in app.models %}
+                                    {% if model.object_name == "Machine" or model.object_name == "NetworkInterface" or model.object_name == "Binary" or model.object_name == "Process" %}
+                                        {% include "admin/index_model_card.html" with model=model tone="machine" %}
+                                    {% endif %}
+                                {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </section>
+
+                    <section class="abx-admin-section" aria-labelledby="abx-admin-advanced-title">
+                        <div class="abx-admin-section__head">
+                            <div>
+                                <p class="abx-admin-kicker">{% translate "Advanced" %}</p>
+                                <h2 id="abx-admin-advanced-title">{% translate "Automation" %}</h2>
+                                <p class="abx-admin-section__intro">{% translate "API and integration objects that are useful for automation but less common during daily archiving." %}</p>
+                            </div>
+                        </div>
+                        <div class="abx-admin-card-grid">
+                            {% for app in app_list %}
+                                {% for model in app.models %}
+                                    {% if model.object_name == "APIToken" or model.object_name == "OutboundWebhook" or model.object_name == "Webhook" %}
+                                        {% include "admin/index_model_card.html" with model=model tone="advanced" %}
+                                    {% endif %}
+                                {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </section>
+                </main>
+
+                <aside class="abx-admin-aside">
+                    <section class="abx-admin-panel" aria-labelledby="abx-admin-recent-title">
+                        <p class="abx-admin-kicker">{% translate "Recent" %}</p>
+                        <h2 id="abx-admin-recent-title">{% translate "Recent Actions" %}</h2>
+                        {% get_admin_log 8 as admin_log for_user user %}
+                        {% if not admin_log %}
+                            <p class="abx-admin-empty">{% translate "No recent actions." %}</p>
+                        {% else %}
+                            <ol class="abx-admin-recent">
+                                {% for entry in admin_log %}
+                                    <li class="{% if entry.is_addition %}addlink{% endif %}{% if entry.is_change %} changelink{% endif %}{% if entry.is_deletion %} deletelink{% endif %}">
+                                        {% if entry.is_deletion or not entry.get_admin_url %}
+                                            <span>{{ entry.object_repr }}</span>
+                                        {% else %}
+                                            <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+                                        {% endif %}
+                                        <span class="abx-admin-recent__meta">{{ entry.content_type.name|capfirst }} · {{ entry.action_time|timesince }} {% translate "ago" %}</span>
+                                    </li>
+                                {% endfor %}
+                            </ol>
+                        {% endif %}
+                    </section>
+
+                    <details class="abx-admin-panel abx-admin-all-models">
+                        <summary>{% translate "All Admin Models" %}</summary>
+                        <div class="app-list">
+                            {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+                        </div>
+                    </details>
+                </aside>
+            </div>
+        {% else %}
+            <p class="abx-admin-empty">{% translate "You do not have permission to view or edit anything." %}</p>
+        {% endif %}
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block sidebar %}{% endblock %}
