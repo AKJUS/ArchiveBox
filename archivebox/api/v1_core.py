@@ -859,7 +859,6 @@ def get_snapshots(request: HttpRequest, filters: Query[SnapshotFilterSchema], wi
 
 
 @router.get("/snapshots.rss", url_name="get_snapshots_rss")
-@router.get("/snapshot.rss", url_name="get_snapshot_rss")
 def get_snapshots_rss(
     request: HttpRequest,
     crawl_id: str = "",

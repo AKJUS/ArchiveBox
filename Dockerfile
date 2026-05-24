@@ -309,6 +309,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     --mount=type=cache,target=/root/.cache/ms-playwright,sharing=locked,id=browsers-$TARGETARCH$TARGETVARIANT \
     echo "[+] Installing plugin runtime dependencies into $LIB_DIR..." \
     && apt-get update -qq \
+    && if [ "$TARGETARCH" = "arm64" ]; then \
+        abxpkg install --binproviders=playwright --bin-dir="$LIB_DIR/env/bin" chromium; \
+    fi \
     && PUID=0 PGID=0 abx-dl plugins --install \
     && find "$LIB_DIR" "$DATA_DIR"/personas -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find "$LIB_DIR" "$DATA_DIR"/personas -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \

@@ -10,6 +10,11 @@ from archivebox.base_models.admin import BaseModelAdmin
 from archivebox.api.models import APIToken
 
 
+def _webhook_fields(*names: str) -> tuple[str, ...]:
+    model_fields = {field.name for field in get_webhook_model()._meta.fields}
+    return tuple(name for name in names if name in model_fields)
+
+
 class APITokenAdmin(BaseModelAdmin):
     list_display = ("created_at", "id", "created_by", "token_redacted", "expires")
     sort_fields = ("id", "created_at", "created_by", "expires")
@@ -47,42 +52,42 @@ class APITokenAdmin(BaseModelAdmin):
 
 class CustomWebhookAdmin(WebhookAdmin, BaseModelAdmin):
     list_display = ("created_at", "created_by", "id", *WebhookAdmin.list_display)
-    sort_fields = ("created_at", "created_by", "id", "referenced_model", "endpoint", "last_success", "last_error")
-    readonly_fields = ("created_at", "modified_at", *WebhookAdmin.readonly_fields)
+    sort_fields = _webhook_fields("created_at", "created_by", "id", "ref", "endpoint", "last_success", "last_failure")
+    readonly_fields = _webhook_fields("created_at", "modified_at", *WebhookAdmin.readonly_fields)
 
     fieldsets = (
         (
             "Webhook",
             {
-                "fields": ("name", "signal", "referenced_model", "endpoint"),
+                "fields": _webhook_fields("name", "signal", "ref", "endpoint", "headers", "keep_last_response"),
                 "classes": ("card", "wide"),
             },
         ),
         (
             "Authentication",
             {
-                "fields": ("auth_token",),
+                "fields": _webhook_fields("auth_token"),
                 "classes": ("card",),
             },
         ),
         (
             "Status",
             {
-                "fields": ("enabled", "last_success", "last_error"),
+                "fields": _webhook_fields("enabled", "last_success", "last_failure", "last_response"),
                 "classes": ("card",),
             },
         ),
         (
             "Owner",
             {
-                "fields": ("created_by",),
+                "fields": _webhook_fields("created_by"),
                 "classes": ("card",),
             },
         ),
         (
             "Timestamps",
             {
-                "fields": ("created_at", "modified_at"),
+                "fields": _webhook_fields("created_at", "modified_at"),
                 "classes": ("card",),
             },
         ),

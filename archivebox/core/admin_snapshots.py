@@ -252,6 +252,12 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
     save_on_top = True
     show_full_result_count = False
 
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        request.archivebox_config = get_config()
+        extra_context = extra_context or {}
+        extra_context["CONFIG"] = request.archivebox_config
+        return super().change_view(request, object_id, form_url, extra_context | GLOBAL_CONTEXT)
+
     def changelist_view(self, request, extra_context=None):
         self.request = request
         request.archivebox_config = get_config()
@@ -928,7 +934,7 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
     def _get_expected_hook_total(self, obj) -> int:
         try:
             request = getattr(self, "request", None)
-            if getattr(getattr(request, "resolver_match", None), "url_name", "") == "core_snapshot_changelist":
+            if getattr(getattr(request, "resolver_match", None), "url_name", "") in {"core_snapshot_changelist", "core_snapshot_change"}:
                 return 0
 
             crawl = getattr(obj, "crawl", None)
