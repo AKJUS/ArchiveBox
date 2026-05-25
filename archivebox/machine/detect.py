@@ -128,7 +128,7 @@ def get_public_ip() -> str:
         except Exception:
             continue
 
-    raise Exception("Could not determine public IP address")
+    return "127.0.0.1"
 
 
 def get_local_ip(remote_ip: str = "1.1.1.1", remote_port: int = 80) -> str:

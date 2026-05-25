@@ -461,6 +461,7 @@ def get_config(
     snapshot: Any = None,
     archiveresult: Any = None,
     machine: Any = None,
+    resolve_plugins: bool = True,
 ) -> ArchiveBoxBaseConfig:
     """
     Get merged config from all sources.
@@ -549,15 +550,16 @@ def get_config(
     archivebox_scope_overrides = {key: value for key, value in scope_overrides.items() if key in _archivebox_config_input_names()}
     config_data.update(archivebox_scope_overrides)
 
-    plugin_global_config = {key: str(value) if isinstance(value, Path) else value for key, value in config_data.items()}
-    plugin_sections = resolve_plugin_configs(
-        plugin_schemas,
-        global_config=plugin_global_config,
-        user_config={**BaseConfigSet.load_from_file(CONSTANTS.CONFIG_FILE), **_plugin_user_config(scope_overrides)},
-    )
-    for plugin_config in plugin_sections.values():
-        config_data.update(plugin_config)
-    config_data.update(archivebox_scope_overrides)
+    if resolve_plugins:
+        plugin_global_config = {key: str(value) if isinstance(value, Path) else value for key, value in config_data.items()}
+        plugin_sections = resolve_plugin_configs(
+            plugin_schemas,
+            global_config=plugin_global_config,
+            user_config={**BaseConfigSet.load_from_file(CONSTANTS.CONFIG_FILE), **_plugin_user_config(scope_overrides)},
+        )
+        for plugin_config in plugin_sections.values():
+            config_data.update(plugin_config)
+        config_data.update(archivebox_scope_overrides)
 
     config_data["ABX_RUNTIME"] = "archivebox"
 

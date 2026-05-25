@@ -25,6 +25,7 @@ register = template.Library()
 
 _TEXT_PREVIEW_EXTS = (".json", ".jsonl", ".txt", ".csv", ".tsv", ".xml", ".yml", ".yaml", ".md", ".log")
 _IMAGE_PREVIEW_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".avif")
+_MHTML_PREVIEW_EXTS = (".mhtml", ".mht")
 
 _MEDIA_FILE_EXTS = {
     ".mp4",
@@ -203,7 +204,7 @@ def _build_snapshot_preview_url(snapshot_id: str, path: str = "", request=None, 
     if _is_root_snapshot_output_path(path):
         return _build_snapshot_files_url(snapshot_id, request=request, config=config)
     url = build_snapshot_url(str(snapshot_id), path, request=request, config=config)
-    if not (_is_text_preview_path(path) or _is_image_preview_path(path)):
+    if not (_is_text_preview_path(path) or _is_image_preview_path(path) or (path or "").lower().endswith(_MHTML_PREVIEW_EXTS)):
         return url
     separator = "&" if "?" in url else "?"
     return f"{url}{separator}preview=1"

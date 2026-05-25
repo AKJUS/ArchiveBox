@@ -253,16 +253,16 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
     show_full_result_count = False
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
-        request.archivebox_config = get_config()
+        request.archivebox_config = getattr(request, "archivebox_config", None) or get_config()
         extra_context = extra_context or {}
         extra_context["CONFIG"] = request.archivebox_config
         return super().change_view(request, object_id, form_url, extra_context | GLOBAL_CONTEXT)
 
     def changelist_view(self, request, extra_context=None):
         self.request = request
-        request.archivebox_config = get_config()
+        request.archivebox_config = getattr(request, "archivebox_config", None) or get_config()
         saved_list_per_page = self.list_per_page
-        self.list_per_page = min(max(5, request.archivebox_config.SNAPSHOTS_PER_PAGE), 5000)
+        self.list_per_page = min(max(5, request.archivebox_config.SNAPSHOTS_PER_PAGE), 25)
         extra_context = extra_context or {}
         extra_context["CONFIG"] = request.archivebox_config
         try:
@@ -517,7 +517,7 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
     @admin.display(description="Archive Results")
     def archiveresults_list(self, obj):
         request = getattr(self, "request", None)
-        return render_archiveresults_list(obj.archiveresult_set.all(), config=getattr(request, "archivebox_config", None))
+        return render_archiveresults_list(obj.archiveresult_set.all(), limit=8, config=getattr(request, "archivebox_config", None))
 
     @admin.display(
         description="Title",
@@ -733,15 +733,24 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
             plugins_with_output.values(),
             key=lambda result: (_plugin_sort_order().get(result.plugin, 9999), result.plugin),
         )
+        visible_results = sorted_results[:14]
         output = [
             format_html(
                 '<a href="{}" class="exists-True" title="{}">{}</a>',
-                self._result_output_href(obj, result),
+                f"/{obj.archive_path_from_db}/{result.plugin}/",
                 result.plugin,
                 get_plugin_icon(result.plugin),
             )
-            for result in sorted_results
+            for result in visible_results
         ]
+        if len(sorted_results) > len(visible_results):
+            output.append(
+                format_html(
+                    '<span title="{} more outputs">+{}</span>',
+                    len(sorted_results) - len(visible_results),
+                    len(sorted_results) - len(visible_results),
+                ),
+            )
 
         return format_html(
             '<span class="files-icons files-icons--compact" style="font-size: 1em; opacity: 0.8;">{}</span>',
@@ -840,11 +849,6 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
         stats = self._get_progress_stats(obj)
         output_size = stats["output_size"]
         size_bytes = output_size or 0
-        zip_url = self.get_snapshot_zip_url(obj)
-        zip_link = format_html(
-            '<a href="{}" class="archivebox-zip-button" data-loading-mode="spinner-only" onclick="return window.archiveboxHandleZipClick(this, event);" style="display:inline-flex; align-items:center; justify-content:center; gap:4px; width:48px; min-width:48px; height:22px; margin-top:4px; padding:0; box-sizing:border-box; border-radius:999px; border:1px solid #cbd5e1; background:#f8fafc; color:#64748b; font-size:10px; font-weight:600; line-height:1; text-decoration:none; transition:all 0.15s;" onmouseover="this.style.color=\'#1d4ed8\'; this.style.borderColor=\'#93c5fd\'; this.style.background=\'#eff6ff\';" onmouseout="this.style.color=\'#64748b\'; this.style.borderColor=\'#cbd5e1\'; this.style.background=\'#f8fafc\';"><span class="archivebox-zip-spinner" aria-hidden="true"></span><span class="archivebox-zip-label">⬇ ZIP</span></a>',
-            zip_url,
-        )
 
         if size_bytes:
             size_txt = printable_filesize(size_bytes)
@@ -859,20 +863,17 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
                 '<a href="{}" title="View all files" style="white-space: nowrap;">'
                 "{}</a>"
                 '<div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">'
-                "{}/{} hooks</div>"
-                "{}",
+                "{}/{} hooks</div>",
                 build_web_url(f"/{obj.archive_path_from_db}", request=request, config=config),
                 size_txt,
                 stats["succeeded"],
                 stats["total"],
-                zip_link,
             )
 
         return format_html(
-            '<a href="{}" title="View all files">{}</a>{}',
+            '<a href="{}" title="View all files">{}</a>',
             build_web_url(f"/{obj.archive_path_from_db}", request=request, config=config),
             size_txt,
-            zip_link,
         )
 
     def _get_progress_stats(self, obj):
@@ -976,40 +977,6 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
             return list(obj._prefetched_objects_cache["tags"])
         return None
 
-    def _result_output_href(self, obj, result: ArchiveResult) -> str:
-        ignored = {"stdout.log", "stderr.log", "hook.pid", "listener.pid", "cmd.sh"}
-        output_file_map = result.output_file_map()
-        fallback_path = ArchiveResult._fallback_output_file_path(list(output_file_map.keys()), result.plugin, output_file_map)
-        if fallback_path:
-            metadata = output_file_map.get(fallback_path) or {}
-            if isinstance(metadata, dict) and metadata.get("root_relative"):
-                return f"/{obj.archive_path_from_db}/{fallback_path}"
-            relative_path = fallback_path if fallback_path.startswith(f"{result.plugin}/") else f"{result.plugin}/{fallback_path}"
-            return f"/{obj.archive_path_from_db}/{relative_path}"
-
-        for rel_path in output_file_map:
-            raw_path = str(rel_path or "").strip().lstrip("/")
-            if not raw_path:
-                continue
-            basename = raw_path.rsplit("/", 1)[-1]
-            if basename in ignored or raw_path.endswith((".pid", ".log", ".sh")):
-                continue
-            metadata = output_file_map.get(raw_path) or {}
-            if isinstance(metadata, dict) and metadata.get("root_relative"):
-                return f"/{obj.archive_path_from_db}/{raw_path}"
-            relative_path = raw_path if raw_path.startswith(f"{result.plugin}/") else f"{result.plugin}/{raw_path}"
-            return f"/{obj.archive_path_from_db}/{relative_path}"
-
-        raw_output = str(result.output_str or "").strip().lstrip("/")
-        if raw_output and raw_output not in {".", "./"} and "://" not in raw_output and not raw_output.startswith("/"):
-            metadata = output_file_map.get(raw_output) or {}
-            if isinstance(metadata, dict) and metadata.get("root_relative"):
-                return f"/{obj.archive_path_from_db}/{raw_output}"
-            relative_path = raw_output if raw_output.startswith(f"{result.plugin}/") else f"{result.plugin}/{raw_output}"
-            return f"/{obj.archive_path_from_db}/{relative_path}"
-
-        return f"/{obj.archive_path_from_db}/{result.plugin}/"
-
     def _get_ordering_fields(self, request):
         ordering = request.GET.get("o")
         if not ordering:
@@ -1055,7 +1022,8 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
 
         # Monkey patch here plus core_tags.py
         admin_cls.change_list_template = "private_index_grid.html"
-        config = get_config()
+        config = getattr(request, "archivebox_config", None) or get_config()
+        request.archivebox_config = config
         admin_cls.list_per_page = config.SNAPSHOTS_PER_PAGE
         admin_cls.list_max_show_all = admin_cls.list_per_page
 

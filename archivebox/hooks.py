@@ -1052,6 +1052,7 @@ DEFAULT_TEMPLATES = {
 }
 
 
+@lru_cache(maxsize=None)
 def get_plugin_template(plugin: str, template_name: str, fallback: bool = True) -> str | None:
     """
     Get a plugin template by plugin name and template type.

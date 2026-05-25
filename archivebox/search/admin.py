@@ -21,7 +21,8 @@ class SearchResultsAdminMixin(admin.ModelAdmin):
         return SearchResultsChangeList
 
     def get_default_search_mode(self):
-        return get_default_search_mode()
+        request = getattr(self, "request", None)
+        return get_default_search_mode(config=getattr(request, "archivebox_config", None))
 
     def get_search_results(self, request, queryset, search_term: str):
         """Enhances the search queryset with results from the search backend"""

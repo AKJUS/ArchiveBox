@@ -53,8 +53,6 @@ from archivebox.hooks import (
     BUILTIN_PLUGINS_DIR,
     USER_PLUGINS_DIR,
     discover_plugin_configs,
-    get_enabled_plugins,
-    get_plugin_name,
     iter_plugin_dirs,
 )
 
@@ -155,7 +153,23 @@ class SnapshotView(View):
         TITLE_LOADING_MSG = "Not yet archived..."
         from archivebox.core.widgets import TagEditorWidget
 
-        runtime_config = get_config(snapshot=snapshot)
+        crawl = getattr(snapshot, "crawl", None)
+        runtime_config = getattr(request, "archivebox_config", None)
+        page_config_keys = {
+            "PREVIEW_ORIGINALS",
+            "LISTEN_HOST",
+            "USES_SUBDOMAIN_ROUTING",
+            "ADMIN_BASE_URL",
+            "ARCHIVE_BASE_URL",
+            "PUBLIC_SNAPSHOTS",
+            "SERVER_SECURITY_MODE",
+        }
+        scoped_config_keys = set((getattr(snapshot, "config", None) or {}).keys())
+        scoped_config_keys.update((getattr(crawl, "config", None) or {}).keys())
+        needs_scoped_config = bool(scoped_config_keys & page_config_keys)
+        if runtime_config is None or needs_scoped_config:
+            runtime_config = get_config(snapshot=snapshot, resolve_plugins=False)
+            request.archivebox_config = runtime_config
         snapshot._runtime_config = runtime_config
         hidden_card_plugins = {"archivedotorg", "favicon", "title"}
         outputs = [
@@ -165,9 +179,6 @@ class SnapshotView(View):
         ]
         archiveresults = {out["name"]: out for out in outputs}
         hash_index = snapshot.hashes_index
-        # Get available extractor plugins from hooks (sorted by numeric prefix for ordering)
-        # Convert to base names for display ordering
-        all_plugins = [get_plugin_name(e) for e in get_enabled_plugins()]
         accounted_entries: set[str] = set()
         for output in outputs:
             output_name = output.get("name") or ""
@@ -189,8 +200,8 @@ class SnapshotView(View):
             "pdf",
             "readability",
         ]
-        preferred_types = tuple(preview_priority + [p for p in all_plugins if p not in preview_priority])
-        all_types = preferred_types + tuple(result_type for result_type in archiveresults.keys() if result_type not in preferred_types)
+        preferred_types = tuple(preview_priority)
+        output_order = {result_type: index for index, result_type in enumerate(archiveresults.keys())}
 
         best_result = {"path": "about:blank", "result": None}
         for result_type in preferred_types:
@@ -229,7 +240,10 @@ class SnapshotView(View):
 
         ordered_outputs = sorted(
             archiveresults.values(),
-            key=lambda r: all_types.index(r["name"]) if r["name"] in all_types else -r["size"],
+            key=lambda r: (
+                preferred_types.index(r["name"]) if r["name"] in preferred_types else len(preferred_types),
+                output_order.get(r["name"], len(output_order)),
+            ),
         )
         if best_result["path"] == "about:blank" and ordered_outputs:
             best_result = ordered_outputs[0]
@@ -472,7 +486,12 @@ class SnapshotPathView(View):
         path: str = "",
         url: str | None = None,
     ):
-        if not request.user.is_authenticated and not get_config().PUBLIC_SNAPSHOTS:
+        request_config = getattr(request, "archivebox_config", None)
+        if request_config is None:
+            request_config = get_config(resolve_plugins=False)
+            request.archivebox_config = request_config
+
+        if not request.user.is_authenticated and not request_config.PUBLIC_SNAPSHOTS:
             return _admin_login_redirect_or_forbidden(request)
 
         if username == "system":
@@ -486,23 +505,30 @@ class SnapshotPathView(View):
             requested_url = domain
 
         snapshot = None
+        snapshots_qs = Snapshot.objects.select_related("crawl", "crawl__created_by")
         if snapshot_id:
             try:
-                snapshot = Snapshot.objects.get(pk=snapshot_id)
+                snapshot = snapshots_qs.get(pk=snapshot_id)
             except Snapshot.DoesNotExist:
                 try:
-                    snapshot = Snapshot.objects.get(id__startswith=snapshot_id)
+                    snapshot = snapshots_qs.get(id__startswith=snapshot_id)
                 except Snapshot.DoesNotExist:
                     snapshot = None
                 except Snapshot.MultipleObjectsReturned:
-                    snapshot = Snapshot.objects.filter(id__startswith=snapshot_id).first()
+                    snapshot = snapshots_qs.filter(id__startswith=snapshot_id).first()
         else:
             # fuzzy lookup by date + domain/url (most recent)
             username_lookup = "system" if username == "web" else username
             if requested_url:
-                qs = SnapshotView.find_snapshots_for_url(requested_url).filter(crawl__created_by__username=username_lookup)
+                qs = (
+                    SnapshotView.find_snapshots_for_url(requested_url)
+                    .select_related("crawl", "crawl__created_by")
+                    .filter(
+                        crawl__created_by__username=username_lookup,
+                    )
+                )
             else:
-                qs = Snapshot.objects.filter(crawl__created_by__username=username_lookup)
+                qs = snapshots_qs.filter(crawl__created_by__username=username_lookup)
 
             if date:
                 try:

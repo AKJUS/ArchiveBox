@@ -489,12 +489,12 @@ class ArchiveResultAdmin(BaseModelAdmin):
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         self.request = request
-        request.archivebox_config = get_config()
+        request.archivebox_config = getattr(request, "archivebox_config", None) or get_config()
         return super().change_view(request, object_id, form_url, extra_context)
 
     def changelist_view(self, request, extra_context=None):
         self.request = request
-        request.archivebox_config = get_config()
+        request.archivebox_config = getattr(request, "archivebox_config", None) or get_config()
         saved_list_per_page = self.list_per_page
         self.list_per_page = min(max(5, request.archivebox_config.SNAPSHOTS_PER_PAGE), 5000)
         try:

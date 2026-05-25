@@ -100,7 +100,11 @@ def CacheControlMiddleware(get_response):
 
         if "/archive/" in request.path or "/static/" in request.path or snapshot_path_re.match(request.path):
             if not response.get("Cache-Control"):
-                policy = "public" if get_config().PUBLIC_SNAPSHOTS else "private"
+                config = getattr(request, "archivebox_config", None)
+                if config is None:
+                    config = get_config(resolve_plugins=False)
+                    request.archivebox_config = config
+                policy = "public" if config.PUBLIC_SNAPSHOTS else "private"
                 response["Cache-Control"] = f"{policy}, max-age=60, stale-while-revalidate=300"
                 # print('Set Cache-Control header to', response['Cache-Control'])
         return response
@@ -113,7 +117,12 @@ def ServerSecurityModeMiddleware(get_response):
     allowed_methods = {"GET", "HEAD", "OPTIONS"}
 
     def middleware(request):
-        if get_config().CONTROL_PLANE_ENABLED:
+        config = getattr(request, "archivebox_config", None)
+        if config is None:
+            config = get_config(resolve_plugins=False)
+            request.archivebox_config = config
+
+        if config.CONTROL_PLANE_ENABLED:
             return get_response(request)
 
         request.user = AnonymousUser()
@@ -138,7 +147,10 @@ def HostRoutingMiddleware(get_response):
 
     def middleware(request):
         request_host = (request.get_host() or "").lower()
-        config = get_config()
+        config = getattr(request, "archivebox_config", None)
+        if config is None:
+            config = get_config(resolve_plugins=False)
+            request.archivebox_config = config
         admin_host = get_admin_host(config=config)
         web_host = get_web_host(config=config)
         api_host = get_api_host(config=config)
@@ -263,7 +275,10 @@ class ReverseProxyAuthMiddleware(RemoteUserMiddleware):
     header = "HTTP_REMOTE_USER"
 
     def process_request(self, request):
-        config = get_config()
+        config = getattr(request, "archivebox_config", None)
+        if config is None:
+            config = get_config(resolve_plugins=False)
+            request.archivebox_config = config
         self.header = "HTTP_{normalized}".format(normalized=config.REVERSE_PROXY_USER_HEADER.replace("-", "_").upper())
         if config.REVERSE_PROXY_WHITELIST == "":
             return

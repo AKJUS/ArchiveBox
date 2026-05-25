@@ -12,10 +12,14 @@
 # set -o xtrace
 # set -x
 # shopt -s nullglob
-set -o errexit
-set -o errtrace
-set -o nounset
-set -o pipefail
+set -e
+set -u
+if (set -o pipefail) 2>/dev/null; then
+    set -o pipefail
+fi
+if (set -o errtrace) 2>/dev/null; then
+    set -o errtrace
+fi
 # IFS=$'\n'
 
 clear
@@ -23,25 +27,64 @@ clear
 ARCHIVEBOX_BRANCH="${ARCHIVEBOX_BRANCH:-dev}"
 ARCHIVEBOX_IMAGE="${ARCHIVEBOX_IMAGE:-archivebox/archivebox:dev}"
 ARCHIVEBOX_PYTHON="${ARCHIVEBOX_PYTHON:-3.13}"
-ARCHIVEBOX_PACKAGE="${ARCHIVEBOX_PACKAGE:-archivebox @ https://github.com/ArchiveBox/ArchiveBox/archive/refs/heads/${ARCHIVEBOX_BRANCH}.zip}"
+ARCHIVEBOX_PACKAGE="${ARCHIVEBOX_PACKAGE:-git+https://github.com/ArchiveBox/ArchiveBox.git@${ARCHIVEBOX_BRANCH}}"
 ARCHIVEBOX_PLATFORM="${ARCHIVEBOX_PLATFORM:-}"
 ARCHIVEBOX_COMPOSE_URL="${ARCHIVEBOX_COMPOSE_URL:-https://raw.githubusercontent.com/ArchiveBox/ArchiveBox/${ARCHIVEBOX_BRANCH}/docker-compose.yml}"
-DOCKER_PLATFORM_ARGS=()
+DOCKER_PLATFORM_ARGS=""
 if [ -n "$ARCHIVEBOX_PLATFORM" ]; then
-    DOCKER_PLATFORM_ARGS=(--platform "$ARCHIVEBOX_PLATFORM")
+    DOCKER_PLATFORM_ARGS="--platform $ARCHIVEBOX_PLATFORM"
+fi
+DOCKER_RUN_TTY_ARG="-i"
+DOCKER_COMPOSE_RUN_TTY_ARG="-T"
+if [ -t 0 ]; then
+    DOCKER_RUN_TTY_ARG="-it"
+    DOCKER_COMPOSE_RUN_TTY_ARG=""
 fi
 
-wait_for_archivebox() {
-    local url="http://127.0.0.1:8000/health/"
-    local host_header="admin.archivebox.localhost:8000"
-    local attempts=60
-    local attempt
+docker_pull_archivebox() {
+    if [ -n "$ARCHIVEBOX_PLATFORM" ]; then
+        docker pull --platform "$ARCHIVEBOX_PLATFORM" "$ARCHIVEBOX_IMAGE"
+    else
+        docker pull "$ARCHIVEBOX_IMAGE"
+    fi
+}
 
-    for ((attempt = 1; attempt <= attempts; attempt++)); do
+docker_run_archivebox_init() {
+    if [ -n "$ARCHIVEBOX_PLATFORM" ]; then
+        docker run --platform "$ARCHIVEBOX_PLATFORM" "$DOCKER_RUN_TTY_ARG" -v "$PWD":/data --rm "$ARCHIVEBOX_IMAGE" init --install
+    else
+        docker run "$DOCKER_RUN_TTY_ARG" -v "$PWD":/data --rm "$ARCHIVEBOX_IMAGE" init --install
+    fi
+}
+
+docker_run_archivebox_server() {
+    if [ -n "$ARCHIVEBOX_PLATFORM" ]; then
+        docker run --platform "$ARCHIVEBOX_PLATFORM" -v "$PWD":/data -d -p 8000:8000 --name=archivebox "$ARCHIVEBOX_IMAGE"
+    else
+        docker run -v "$PWD":/data -d -p 8000:8000 --name=archivebox "$ARCHIVEBOX_IMAGE"
+    fi
+}
+
+docker_compose_run_archivebox() {
+    if [ -n "$DOCKER_COMPOSE_RUN_TTY_ARG" ]; then
+        docker compose run "$DOCKER_COMPOSE_RUN_TTY_ARG" --rm archivebox "$@"
+    else
+        docker compose run --rm archivebox "$@"
+    fi
+}
+
+wait_for_archivebox() {
+    url="http://127.0.0.1:8000/health/"
+    host_header="admin.archivebox.localhost:8000"
+    attempts=60
+    attempt=1
+
+    while [ "$attempt" -le "$attempts" ]; do
         if curl -fsS -H "Host: ${host_header}" "$url" >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
+        attempt=$((attempt + 1))
     done
 
     echo "[!] Server process started, but health check did not become ready at $url after ${attempts}s."
@@ -81,8 +124,6 @@ ensure_uv() {
 }
 
 install_archivebox_with_uv() {
-    local uv_tool_bin_dir
-
     ensure_uv
 
     echo
@@ -110,7 +151,7 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 2
 fi
 
-if (command -v docker > /dev/null && docker compose version > /dev/null && docker pull "${DOCKER_PLATFORM_ARGS[@]}" "$ARCHIVEBOX_IMAGE"); then
+if (command -v docker > /dev/null && docker compose version > /dev/null && docker_pull_archivebox); then
     echo "[+] Initializing an ArchiveBox data folder at ~/archivebox/data using Docker Compose..."
     mkdir -p ~/archivebox/data || exit 1
     cd ~/archivebox
@@ -119,7 +160,7 @@ if (command -v docker > /dev/null && docker compose version > /dev/null && docke
     fi
     curl -fsSL "$ARCHIVEBOX_COMPOSE_URL" > docker-compose.yml
     export ARCHIVEBOX_IMAGE ARCHIVEBOX_PLATFORM
-    docker compose run --rm archivebox init --install
+    docker_compose_run_archivebox init --install
     echo
     echo "[+] Starting ArchiveBox server using: docker compose up -d..."
     docker compose up -d
@@ -137,7 +178,7 @@ if (command -v docker > /dev/null && docker compose version > /dev/null && docke
     echo "    docker compose run archivebox list"
     echo "    docker compose run archivebox help"
     exit 0
-elif (command -v docker > /dev/null && docker pull "${DOCKER_PLATFORM_ARGS[@]}" "$ARCHIVEBOX_IMAGE"); then
+elif (command -v docker > /dev/null && docker_pull_archivebox); then
     echo "[+] Initializing an ArchiveBox data folder at ~/archivebox/data using Docker..."
     mkdir -p ~/archivebox/data || exit 1
     cd ~/archivebox
@@ -145,10 +186,10 @@ elif (command -v docker > /dev/null && docker pull "${DOCKER_PLATFORM_ARGS[@]}" 
         mv -i ~/archivebox/* ~/archivebox/data/
     fi
     cd ./data
-    docker run "${DOCKER_PLATFORM_ARGS[@]}" -v "$PWD":/data -it --rm "$ARCHIVEBOX_IMAGE" init --install
+    docker_run_archivebox_init
     echo
     echo "[+] Starting ArchiveBox server using: docker run -d archivebox/archivebox..."
-    docker run "${DOCKER_PLATFORM_ARGS[@]}" -v "$PWD":/data -it -d -p 8000:8000 --name=archivebox "$ARCHIVEBOX_IMAGE"
+    docker_run_archivebox_server
     wait_for_archivebox
     open_archivebox
     echo
@@ -157,11 +198,11 @@ elif (command -v docker > /dev/null && docker pull "${DOCKER_PLATFORM_ARGS[@]}" 
     echo "    docker ps --filter name=archivebox"
     echo "    docker kill archivebox"
     echo "    docker pull $ARCHIVEBOX_IMAGE"
-    echo "    docker run ${DOCKER_PLATFORM_ARGS[*]} -v $PWD:/data -d -p 8000:8000 --name=archivebox $ARCHIVEBOX_IMAGE"
-    echo "    docker run ${DOCKER_PLATFORM_ARGS[*]} -v $PWD:/data -it $ARCHIVEBOX_IMAGE manage createsuperuser"
-    echo "    docker run ${DOCKER_PLATFORM_ARGS[*]} -v $PWD:/data -it $ARCHIVEBOX_IMAGE add 'https://example.com'"
-    echo "    docker run ${DOCKER_PLATFORM_ARGS[*]} -v $PWD:/data -it $ARCHIVEBOX_IMAGE list"
-    echo "    docker run ${DOCKER_PLATFORM_ARGS[*]} -v $PWD:/data -it $ARCHIVEBOX_IMAGE help"
+    echo "    docker run $DOCKER_PLATFORM_ARGS -v $PWD:/data -d -p 8000:8000 --name=archivebox $ARCHIVEBOX_IMAGE"
+    echo "    docker run $DOCKER_PLATFORM_ARGS -v $PWD:/data -it $ARCHIVEBOX_IMAGE manage createsuperuser"
+    echo "    docker run $DOCKER_PLATFORM_ARGS -v $PWD:/data -it $ARCHIVEBOX_IMAGE add 'https://example.com'"
+    echo "    docker run $DOCKER_PLATFORM_ARGS -v $PWD:/data -it $ARCHIVEBOX_IMAGE list"
+    echo "    docker run $DOCKER_PLATFORM_ARGS -v $PWD:/data -it $ARCHIVEBOX_IMAGE help"
     exit 0
 fi
 

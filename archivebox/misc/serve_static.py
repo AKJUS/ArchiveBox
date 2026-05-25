@@ -16,6 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlencode
 
+from django import template
 from django.contrib.staticfiles import finders
 from django.template import TemplateDoesNotExist, loader
 from django.views import static
@@ -63,6 +64,25 @@ def _hash_for_path(document_root: Path, rel_path: str) -> str | None:
 def _cache_policy(config=None, **config_kwargs) -> str:
     config = config or get_config(**config_kwargs)
     return "public" if config.PUBLIC_SNAPSHOTS else "private"
+
+
+def _render_mhtml_preview_document(filename: str, output_path: str) -> str:
+    from archivebox.hooks import get_plugin_template
+
+    template_str = get_plugin_template("chrome_mhtml", "full", fallback=False)
+    if not template_str:
+        raise FileNotFoundError("chrome_mhtml/templates/full.html")
+
+    tpl = template.Engine(debug=False).from_string(template_str)
+    return tpl.render(
+        template.Context(
+            {
+                "output_path": output_path,
+                "output_path_raw": filename,
+                "plugin": "chrome_mhtml",
+            },
+        ),
+    )
 
 
 def _format_direntry_timestamp(stat_result: os.stat_result) -> str:
@@ -709,6 +729,7 @@ def serve_static_with_byterange_support(request, path, document_root=None, show_
     preview_as_image_html = (
         bool(request.GET.get("preview")) and content_type.startswith("image/") and not content_type.startswith("image/svg+xml")
     )
+    preview_as_mhtml_html = bool(request.GET.get("preview")) and fullpath.suffix.lower() in {".mhtml", ".mht"}
 
     # Respect the If-Modified-Since header for non-markdown responses.
     if not (content_type.startswith("text/plain") or content_type.startswith("text/html")):
@@ -770,6 +791,39 @@ def serve_static_with_byterange_support(request, path, document_root=None, show_
                 content_type="text/html; charset=utf-8",
                 is_archive_replay=is_archive_replay,
             )
+        except Exception:
+            pass
+
+    if preview_as_mhtml_html:
+        try:
+            raw_query = request.GET.copy()
+            raw_query.pop("preview", None)
+            raw_output_path = request.path
+            if raw_query:
+                raw_output_path = f"{raw_output_path}?{raw_query.urlencode()}"
+            rendered = _render_mhtml_preview_document(fullpath.name, raw_output_path)
+            response = HttpResponse(rendered, content_type="text/html; charset=utf-8")
+            response.headers["Last-Modified"] = http_date(statobj.st_mtime)
+            if etag:
+                response.headers["ETag"] = etag
+                response.headers["Cache-Control"] = f"{_cache_policy()}, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = f"{_cache_policy()}, max-age=60, stale-while-revalidate=300"
+            response.headers["Content-Disposition"] = f'inline; filename="{fullpath.stem}.html"'
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self' data: blob:; "
+                "script-src 'unsafe-inline'; "
+                "style-src 'unsafe-inline'; "
+                "connect-src 'self'; "
+                "frame-src 'self' data: blob:; "
+                "object-src 'none'; "
+                "base-uri 'none'; "
+                "form-action 'none';"
+            )
+            if encoding:
+                response.headers["Content-Encoding"] = encoding
+            return response
         except Exception:
             pass
 

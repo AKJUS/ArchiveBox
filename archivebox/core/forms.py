@@ -40,6 +40,7 @@ PLUGIN_GROUP_DEFINITIONS = (
             "singlefile",
             "wget",
             "archivedotorg",
+            "chrome_mhtml",
         ),
     ),
     (

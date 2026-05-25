@@ -172,7 +172,7 @@ class Crawl(ModelWithOutputDir, ModelWithConfig, ModelWithHealthStats, ModelWith
         ]
 
     def __str__(self):
-        first_url = self.get_urls_list()[0] if self.get_urls_list() else ""
+        first_url = next((line.strip() for line in (self.urls or "").splitlines() if line.strip() and not line.strip().startswith("#")), "")
         # Show last 8 digits of UUID and more of the URL
         short_id = str(self.id)[-8:]
         return f"[...{short_id}] {first_url[:120]}"

@@ -599,7 +599,7 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
 
     list_filter = (MaxDepthListFilter, "schedule", "created_by", "status", "retry_at")
     ordering = ["-created_at", "-retry_at"]
-    list_per_page = 100
+    list_per_page = 50
     actions = ["delete_selected_batched"]
     change_actions = ["recrawl"]
 
@@ -739,7 +739,7 @@ class CrawlAdmin(ConfigEditorMixin, BaseModelAdmin):
 
     @admin.display(description="URLs", ordering="urls")
     def urls_preview(self, obj):
-        first_url = obj.get_urls_list()[0] if obj.get_urls_list() else ""
+        first_url = next((line.strip() for line in (obj.urls or "").splitlines() if line.strip() and not line.strip().startswith("#")), "")
         return first_url[:80] + "..." if len(first_url) > 80 else first_url
 
     @admin.display(description="Health", ordering="health")

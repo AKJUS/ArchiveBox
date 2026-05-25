@@ -2537,14 +2537,21 @@ class Snapshot(ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHea
             lower = (path or "").lower()
             return lower.endswith(text_exts)
 
+        hashes_index = self.hashes_index
         for result in self.archiveresult_set.all().order_by("start_ts"):
-            embed_path = result.embed_path_db()
+            output_file_map = result.output_file_map()
+            embed_path = result.embed_path_db(output_file_map=output_file_map)
             if not embed_path and include_filesystem_fallback:
                 embed_path = result.embed_path()
             if not embed_path or embed_path.strip() in (".", "/", "./"):
                 continue
-            size = result.output_size or result.output_size_from_files() or self.hashes_index.get(embed_path, {}).get("size") or 0
-            if not size and include_filesystem_fallback:
+            size = (
+                result.output_size
+                or sum(result._coerce_output_file_size(metadata.get("size")) for metadata in output_file_map.values())
+                or hashes_index.get(embed_path, {}).get("size")
+                or 0
+            )
+            if not size and include_filesystem_fallback and not hashes_index:
                 abs_path = snap_dir / embed_path
                 if not abs_path.exists():
                     continue
@@ -2575,7 +2582,6 @@ class Snapshot(ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHea
             )
             seen.add(result.plugin)
 
-        hashes_index = self.hashes_index
         if hashes_index:
             grouped_hash_outputs: dict[str, dict[str, dict[str, Any]]] = {}
             ignored_roots = {"index.html", "index.json", "index.jsonl", "favicon.ico", "warc", "hashes"}
@@ -2608,7 +2614,7 @@ class Snapshot(ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHea
                 )
                 seen.add(root)
 
-        if not include_filesystem_fallback:
+        if not include_filesystem_fallback or hashes_index:
             return outputs
 
         embeddable_exts = {
@@ -3237,13 +3243,13 @@ class ArchiveResult(ModelWithOutputDir, ModelWithConfig, ModelWithNotes):
 
     @staticmethod
     def _normalize_output_files(raw_output_files: Any) -> dict[str, dict[str, Any]]:
-        from abx_dl.output_files import guess_mimetype
-
         def _enrich_metadata(path: str, metadata: dict[str, Any]) -> dict[str, Any]:
             normalized = dict(metadata)
             if "extension" not in normalized:
                 normalized["extension"] = Path(path).suffix.lower().lstrip(".")
             if "mimetype" not in normalized:
+                from abx_dl.output_files import guess_mimetype
+
                 guessed = guess_mimetype(path)
                 if guessed:
                     normalized["mimetype"] = guessed
@@ -3518,8 +3524,8 @@ class ArchiveResult(ModelWithOutputDir, ModelWithConfig, ModelWithNotes):
             return None
         return dir_path / fallback_path
 
-    def embed_path_db(self) -> str | None:
-        output_file_map = self.output_file_map()
+    def embed_path_db(self, output_file_map: dict[str, dict[str, Any]] | None = None) -> str | None:
+        output_file_map = output_file_map if output_file_map is not None else self.output_file_map()
 
         def is_root_relative(path: str) -> bool:
             metadata = output_file_map.get(path) or {}

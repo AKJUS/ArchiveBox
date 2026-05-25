@@ -76,7 +76,7 @@ echo "[+] ArchiveBox version:"
 "${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" archivebox version | sed -n '1,40p'
 
 echo "[+] Health check:"
-"${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" curl -fsS -H 'Host: admin.archivebox.io' http://127.0.0.1:8000/health/
+"${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" curl -fsS --max-time 10 --connect-timeout 2 -H 'Host: admin.archivebox.io' http://127.0.0.1:8000/health/
 REMOTE
 
 echo "[√] Demo deploy finished."
