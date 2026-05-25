@@ -353,6 +353,13 @@
         font-size: 13px;
     }
 
+    .tag-card__empty[href] {
+        display: block;
+        color: #075985;
+        font-weight: 600;
+        text-decoration: none;
+    }
+
     .tag-toast {
         position: sticky;
         top: 12px;
@@ -609,6 +616,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         grid.innerHTML = cards.map(function (card) {
+            const snapshotCount = Number(card.num_snapshots || 0);
             const snapshotHtml = (card.snapshots || []).length
                 ? card.snapshots.map(function (snapshot) {
                     return '' +
@@ -617,7 +625,9 @@ document.addEventListener('DOMContentLoaded', function () {
                             '<span>' + escapeHtml(snapshot.title) + '</span>' +
                         '</a>';
                 }).join('')
-                : '<div class="tag-card__empty">No snapshots attached yet.</div>';
+                : snapshotCount > 0
+                    ? '<a class="tag-card__empty tag-snapshot-badge" href="' + escapeHtml(card.filter_url) + '">' + escapeHtml(snapshotCount) + ' snapshot' + (snapshotCount === 1 ? '' : 's') + ' attached</a>'
+                    : '<div class="tag-card__empty">No snapshots attached yet.</div>';
 
             return '' +
                 '<article class="tag-card" data-id="' + escapeHtml(card.id) + '" data-slug="' + escapeHtml(card.slug) + '" data-filter-url="' + escapeHtml(card.filter_url) + '" data-rename-url="' + escapeHtml(card.rename_url) + '" data-delete-url="' + escapeHtml(card.delete_url) + '" data-export-urls-url="' + escapeHtml(card.export_urls_url) + '" data-export-jsonl-url="' + escapeHtml(card.export_jsonl_url) + '">' +

@@ -117,7 +117,7 @@ class TagAdmin(BaseModelAdmin):
         sort = normalize_tag_sort((request.GET.get("sort") or "created_desc").strip())
         created_by = normalize_created_by_filter((request.GET.get("created_by") or "").strip())
         year = normalize_created_year_filter((request.GET.get("year") or "").strip())
-        has_snapshots = normalize_has_snapshots_filter((request.GET.get("has_snapshots") or "all").strip())
+        has_snapshots = normalize_has_snapshots_filter((request.GET.get("has_snapshots") or "yes").strip())
         context = {
             **self.admin_site.each_context(request),
             **(extra_context or {}),
