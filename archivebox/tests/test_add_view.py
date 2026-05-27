@@ -141,7 +141,6 @@ def test_add_view_creates_crawl_with_tag_and_url_filter_overrides(client, admin_
     assert crawl.max_urls == 3
     assert crawl.crawl_max_size == 45 * 1024 * 1024
     assert crawl.snapshot_max_size == 5 * 1024 * 1024
-    assert crawl.config.get("DEFAULT_PERSONA") == "Default"
     assert crawl.config["CRAWL_MAX_URLS"] == 3
     assert crawl.config["CRAWL_MAX_SIZE"] == 45 * 1024 * 1024
     assert crawl.config["SNAPSHOT_MAX_SIZE"] == 5 * 1024 * 1024
@@ -185,7 +184,7 @@ def test_add_view_selected_persona_wins_over_stale_config_override(client, admin
     crawl = Crawl.objects.order_by("-created_at").first()
     assert crawl is not None
     assert crawl.persona_id == private_persona.id
-    assert crawl.config.get("DEFAULT_PERSONA") == "Private"
+    assert "DEFAULT_PERSONA" not in crawl.config
     assert crawl.resolve_persona() == private_persona
     runtime_config = get_config(crawl=crawl)
     assert runtime_config.ACTIVE_PERSONA == "Private"

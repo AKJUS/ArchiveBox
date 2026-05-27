@@ -105,6 +105,50 @@ def test_crawl_admin_form_saves_tags_editor_to_tags_str(crawl, admin_user):
     assert updated.config["URL_DENYLIST"] == "static.example.com"
 
 
+@pytest.mark.django_db(transaction=True)
+def test_crawl_tag_changes_sync_existing_snapshot_tags(crawl):
+    snapshots = crawl.create_snapshots_from_urls()
+    snapshots[0].save_tags(["alpha", "beta", "keep"])
+
+    crawl.tags_str = "beta,gamma"
+    crawl.save(update_fields=["tags_str", "modified_at"])
+
+    assert set(snapshots[0].tags.values_list("name", flat=True)) == {"beta", "gamma", "keep"}
+    assert set(snapshots[1].tags.values_list("name", flat=True)) == {"beta", "gamma"}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_create_snapshots_from_urls_uses_current_crawl_tags_for_stale_crawl_instance(crawl):
+    crawl.create_snapshots_from_urls()
+    fresh_crawl = Crawl.objects.get(pk=crawl.pk)
+    fresh_crawl.tags_str = "midcrawl"
+    fresh_crawl.save(update_fields=["tags_str", "modified_at"])
+
+    crawl.urls = f"{crawl.urls}\nhttps://example.net/new"
+    created = crawl.create_snapshots_from_urls()
+
+    assert [snapshot.url for snapshot in created] == ["https://example.net/new"]
+    assert set(created[0].tags.values_list("name", flat=True)) == {"midcrawl"}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_discovered_snapshots_inherit_current_crawl_tags(crawl):
+    crawl.max_depth = 1
+    crawl.save(update_fields=["max_depth", "modified_at"])
+    parent_snapshot = crawl.create_snapshots_from_urls()[0]
+    crawl.tags_str = "midcrawl"
+    crawl.save(update_fields=["tags_str", "modified_at"])
+
+    created = crawl.create_discovered_snapshots(
+        parent_snapshot,
+        [{"url": "https://example.com/child", "tags": "discovered"}],
+        depth=1,
+    )
+
+    assert [snapshot.url for snapshot in created] == ["https://example.com/child"]
+    assert set(created[0].tags.values_list("name", flat=True)) == {"midcrawl", "discovered"}
+
+
 def test_crawl_admin_delete_snapshot_action_removes_snapshot_and_url(client, admin_user):
     crawl = Crawl.objects.create(
         urls="https://example.com/remove-me",

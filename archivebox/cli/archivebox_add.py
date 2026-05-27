@@ -85,6 +85,7 @@ def add(
     crawl_max_size = parse_filesize_to_bytes(crawl_max_size)
     snapshot_max_size = parse_filesize_to_bytes(snapshot_max_size)
     config = get_config()
+    crawl_max_concurrent_snapshots_override = crawl_max_concurrent_snapshots is not None
     if crawl_max_concurrent_snapshots is None:
         crawl_max_concurrent_snapshots = config.CRAWL_MAX_CONCURRENT_SNAPSHOTS
     crawl_max_concurrent_snapshots = int(crawl_max_concurrent_snapshots)
@@ -141,9 +142,26 @@ def add(
     # Read URLs directly into crawl
     urls_content = sources_file.read_text()
     persona_name = (persona or "Default").strip() or "Default"
-    plugins = plugins or str(config.get("PLUGINS") or "")
+    plugins = plugins or ""
     persona_obj, _ = Persona.objects.get_or_create(name=persona_name)
     persona_obj.ensure_dirs()
+    effective_persona_config = get_config(persona=persona_obj)
+
+    crawl_config = {
+        **({"ONLY_NEW": not update} if not update else {}),
+        **({"INDEX_ONLY": True} if index_only else {}),
+        **({"OVERWRITE": True} if overwrite else {}),
+        **({"PLUGINS": plugins} if plugins else {}),
+        **(
+            {"CRAWL_MAX_CONCURRENT_SNAPSHOTS": crawl_max_concurrent_snapshots}
+            if crawl_max_concurrent_snapshots_override
+            and crawl_max_concurrent_snapshots != int(effective_persona_config.CRAWL_MAX_CONCURRENT_SNAPSHOTS)
+            else {}
+        ),
+        **({"PARSER": parser} if parser != "auto" else {}),
+        **({"URL_ALLOWLIST": url_allowlist} if url_allowlist else {}),
+        **({"URL_DENYLIST": url_denylist} if url_denylist else {}),
+    }
 
     crawl = Crawl.objects.create(
         urls=urls_content,
@@ -157,17 +175,7 @@ def add(
         created_by_id=created_by_id,
         status=Crawl.StatusChoices.QUEUED if bg or index_only else Crawl.StatusChoices.STARTED,
         retry_at=timezone.now() if bg else None,
-        config={
-            "ONLY_NEW": not update,
-            "INDEX_ONLY": index_only,
-            "OVERWRITE": overwrite,
-            "PLUGINS": plugins,
-            "DEFAULT_PERSONA": persona_name,
-            "CRAWL_MAX_CONCURRENT_SNAPSHOTS": crawl_max_concurrent_snapshots,
-            "PARSER": parser,
-            **({"URL_ALLOWLIST": url_allowlist} if url_allowlist else {}),
-            **({"URL_DENYLIST": url_denylist} if url_denylist else {}),
-        },
+        config=crawl_config,
     )
 
     print(f"[green]\\[+] Created Crawl {crawl.id} with max_depth={depth}[/green]")

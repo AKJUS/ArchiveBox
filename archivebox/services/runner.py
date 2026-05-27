@@ -561,8 +561,7 @@ class CrawlRunner:
         from archivebox.config.common import get_config
 
         snapshot = Snapshot.objects.select_related("crawl").get(id=snapshot_id)
-        config = get_config(crawl=self.crawl, snapshot=snapshot, include_machine=False)
-        config.update(self.base_config)
+        config = get_config(crawl=snapshot.crawl, snapshot=snapshot, include_machine=False)
         config["CRAWL_DIR"] = self.crawl_output_dir
         config["SNAP_DIR"] = str(snapshot.output_dir)
         extra_context: dict[str, Any] = {}

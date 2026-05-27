@@ -17,9 +17,13 @@ pytest_plugins = ["archivebox.tests.fixtures"]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTEST_BASETEMP_ROOT = (REPO_ROOT / "tests" / "out").resolve()
-SESSION_DATA_DIR = Path(tempfile.mkdtemp(prefix="archivebox-pytest-session-")).resolve()
+SESSION_DATA_DIR = Path(
+    os.environ.get("ARCHIVEBOX_PYTEST_SESSION_DATA_DIR") or tempfile.mkdtemp(prefix="archivebox-pytest-session-"),
+).resolve()
 # Force ArchiveBox imports to see a temp DATA_DIR during test collection.
+os.environ["ARCHIVEBOX_PYTEST_SESSION_DATA_DIR"] = str(SESSION_DATA_DIR)
 os.environ["DATA_DIR"] = str(SESSION_DATA_DIR)
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "archivebox.core.settings")
 os.environ.pop("ARCHIVE_DIR", None)
 os.environ.pop("USERS_DIR", None)
 os.environ.pop("CRAWL_DIR", None)
@@ -129,10 +133,9 @@ def isolate_test_runtime(tmp_path, monkeypatch):
     contract is that every test starts in its own temp directory and any
     in-process ``os.environ`` edits are rolled back afterwards.
 
-    We intentionally clear ``DATA_DIR`` for the body of each test so subprocess
-    tests that rely on cwd keep working. During collection/import time we still
-    seed a separate session-scoped temp ``DATA_DIR`` above so any ArchiveBox
-    config imported before this fixture runs never points at the repo root.
+    Each in-process test gets an explicit temp ``DATA_DIR`` so ArchiveBox code
+    never falls back to the repo cwd. Subprocess helpers that intentionally test
+    cwd-based behavior remove ``DATA_DIR`` for the child process themselves.
     """
     _assert_not_repo_path(tmp_path, label="tmp_path")
     original_cwd = Path.cwd()
@@ -140,11 +143,6 @@ def isolate_test_runtime(tmp_path, monkeypatch):
     original_chdir = os.chdir
     original_popen = subprocess.Popen
     os.chdir(tmp_path)
-    os.environ.pop("DATA_DIR", None)
-    os.environ.pop("ARCHIVE_DIR", None)
-    os.environ.pop("USERS_DIR", None)
-    os.environ.pop("CRAWL_DIR", None)
-    os.environ.pop("SNAP_DIR", None)
 
     def guarded_chdir(path: os.PathLike[str] | str) -> None:
         _assert_not_repo_path(Path(path), label="cwd")
@@ -160,6 +158,11 @@ def isolate_test_runtime(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "chdir", guarded_chdir)
     monkeypatch.setattr(subprocess, "Popen", guarded_popen)
+    os.environ["DATA_DIR"] = str(tmp_path)
+    os.environ.pop("ARCHIVE_DIR", None)
+    os.environ.pop("USERS_DIR", None)
+    os.environ.pop("CRAWL_DIR", None)
+    os.environ.pop("SNAP_DIR", None)
     try:
         _assert_safe_runtime_paths(cwd=Path.cwd(), env=os.environ)
         yield

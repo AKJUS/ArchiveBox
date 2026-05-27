@@ -1097,7 +1097,7 @@ class AddView(UserPassesTestMixin, FormView):
         if not isinstance(plugin_config, dict):
             plugin_config = {}
         custom_config = self._get_custom_config_overrides(form)
-        persona_name = persona.name if persona else "Default"
+        custom_config.pop("DEFAULT_PERSONA", None)
         if persona:
             persona.ensure_dirs()
 
@@ -1121,19 +1121,20 @@ class AddView(UserPassesTestMixin, FormView):
         # 2. create a new Crawl with the URLs from the file
         timestamp = timezone.now().strftime("%Y-%m-%d__%H-%M-%S")
         urls_content = sources_file.read_text()
-        # Build complete config
-        config = {
-            "INDEX_ONLY": index_only,
-            "DEPTH": depth,
-            "PLUGINS": plugins or "",
-            "DEFAULT_PERSONA": persona_name,
-            "CRAWL_MAX_CONCURRENT_SNAPSHOTS": crawl_max_concurrent_snapshots,
-        }
+        # Store only explicit crawl-scoped overrides. Persona/machine/plugin
+        # defaults are resolved at hook runtime via get_config(...).
+        config = {}
+        if index_only:
+            config["INDEX_ONLY"] = True
+        if plugins:
+            config["PLUGINS"] = plugins
+        effective_config = get_config(persona=persona) if persona else get_config()
+        if crawl_max_concurrent_snapshots != int(effective_config.CRAWL_MAX_CONCURRENT_SNAPSHOTS):
+            config["CRAWL_MAX_CONCURRENT_SNAPSHOTS"] = crawl_max_concurrent_snapshots
 
         # Merge custom config overrides
         config.update(plugin_config)
         config.update(custom_config)
-        config["DEFAULT_PERSONA"] = persona_name
         if url_filters.get("allowlist"):
             config["URL_ALLOWLIST"] = url_filters["allowlist"]
         if url_filters.get("denylist"):
@@ -1527,14 +1528,22 @@ def live_progress_view(request):
             key=lambda crawl: crawl.modified_at,
             reverse=True,
         )[:10]
-        persona_names_by_id: dict[str, str] = {}
+        persona_details_by_id: dict[str, dict[str, str]] = {}
+        persona_details_by_name: dict[str, dict[str, str]] = {}
         persona_ids = {crawl.persona_id for crawl in active_crawls_list if crawl.persona_id}
-        if persona_ids:
+        persona_names = {
+            str((crawl.config or {}).get("DEFAULT_PERSONA") or "Default") for crawl in active_crawls_list if not crawl.persona_id
+        }
+        if persona_ids or persona_names:
             from archivebox.personas.models import Persona
 
-            persona_names_by_id = {
-                str(persona_id): name for persona_id, name in Persona.objects.filter(id__in=persona_ids).values_list("id", "name")
-            }
+            for persona in Persona.objects.filter(Q(id__in=persona_ids) | Q(name__in=persona_names)).only("id", "name"):
+                persona_details = {
+                    "name": persona.name,
+                    "admin_url": f"/admin/personas/persona/{persona.pk}/change/",
+                }
+                persona_details_by_id[str(persona.id)] = persona_details
+                persona_details_by_name[persona.name] = persona_details
         active_crawl_ids = [crawl.id for crawl in active_crawls_list]
         snapshot_counts_by_crawl: dict[str, dict[str, int]] = {str(crawl_id): {} for crawl_id in active_crawl_ids}
         cancelled_snapshot_counts_by_crawl: dict[str, int] = {str(crawl_id): 0 for crawl_id in active_crawl_ids}
@@ -1929,8 +1938,9 @@ def live_progress_view(request):
             can_start = bool(crawl.urls)
             urls_preview = crawl.urls[:60] if crawl.urls else None
             crawl_tags = [tag.strip() for tag in (crawl.tags_str or "").replace("\n", ",").split(",") if tag.strip()]
-            persona_name = persona_names_by_id.get(str(crawl.persona_id)) if crawl.persona_id else None
-            persona_name = persona_name or str((crawl.config or {}).get("DEFAULT_PERSONA") or "Default")
+            persona_details = persona_details_by_id.get(str(crawl.persona_id)) if crawl.persona_id else None
+            persona_name = persona_details["name"] if persona_details else str((crawl.config or {}).get("DEFAULT_PERSONA") or "Default")
+            persona_details = persona_details or persona_details_by_name.get(persona_name)
             crawl_output_size = crawl_output_sizes_by_crawl.get(str(crawl.id), 0)
             avg_snapshot_size = int(crawl_output_size / total_snapshots) if total_snapshots else 0
 
@@ -1958,6 +1968,7 @@ def live_progress_view(request):
                     "progress": crawl_progress,
                     "created_by": crawl.created_by.username,
                     "persona": persona_name,
+                    "persona_admin_url": persona_details["admin_url"] if persona_details else None,
                     "max_depth": crawl.max_depth,
                     "max_urls": crawl.max_urls,
                     "max_crawl_size": crawl.crawl_max_size,

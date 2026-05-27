@@ -236,7 +236,7 @@ def test_add_records_selected_persona_on_crawl(tmp_path, process, disable_extrac
     conn.close()
 
     assert persona_id
-    assert default_persona == "Default"
+    assert default_persona is None
     assert (tmp_path / "personas" / "Default" / "chrome_profile").is_dir()
 
 

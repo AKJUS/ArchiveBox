@@ -47,7 +47,7 @@ class CrawlSchema(Schema):
 
     @staticmethod
     def resolve_crawl_max_concurrent_snapshots(obj):
-        return int((obj.config or {}).get("CRAWL_MAX_CONCURRENT_SNAPSHOTS") or get_config().CRAWL_MAX_CONCURRENT_SNAPSHOTS)
+        return int(get_config(crawl=obj).CRAWL_MAX_CONCURRENT_SNAPSHOTS)
 
     @staticmethod
     def resolve_created_by_id(obj):
@@ -119,15 +119,13 @@ def create_crawl(request: HttpRequest, data: CrawlCreateSchema):
         raise HttpError(400, "crawl_max_size must be >= 0")
     if data.snapshot_max_size < 0:
         raise HttpError(400, "snapshot_max_size must be >= 0")
-    crawl_max_concurrent_snapshots = data.crawl_max_concurrent_snapshots
-    if crawl_max_concurrent_snapshots is None:
-        crawl_max_concurrent_snapshots = get_config().CRAWL_MAX_CONCURRENT_SNAPSHOTS
-    if crawl_max_concurrent_snapshots < 1:
+    if data.crawl_max_concurrent_snapshots is not None and data.crawl_max_concurrent_snapshots < 1:
         raise HttpError(400, "crawl_max_concurrent_snapshots must be >= 1")
 
     tags = normalize_tag_list(data.tags, data.tags_str)
     config = dict(data.config or {})
-    config["CRAWL_MAX_CONCURRENT_SNAPSHOTS"] = crawl_max_concurrent_snapshots
+    if data.crawl_max_concurrent_snapshots is not None:
+        config["CRAWL_MAX_CONCURRENT_SNAPSHOTS"] = data.crawl_max_concurrent_snapshots
     crawl = Crawl.objects.create(
         urls="\n".join(urls),
         max_depth=data.max_depth,

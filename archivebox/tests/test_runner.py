@@ -377,6 +377,85 @@ def test_crawl_runner_empty_plugin_selection_emits_lifecycle_and_seals_crawl(tmp
 
 
 @pytest.mark.django_db(transaction=True)
+def test_crawl_runner_resolves_persona_and_crawl_config_for_each_live_snapshot():
+    from abx_dl.events import SnapshotCompletedEvent
+    from archivebox.base_models.models import get_or_create_system_user_pk
+    from archivebox.crawls.models import Crawl
+    from archivebox.core.models import ArchiveResult, Snapshot
+    from archivebox.machine.models import Process
+    from archivebox.personas.models import Persona
+    from archivebox.services.runner import CrawlRunner
+
+    persona = Persona.objects.create(
+        name="RuntimeConfig",
+        config={
+            "FAVICON_PROVIDER": "https://example.com/persona-first.ico",
+            "FAVICON_TIMEOUT": 10,
+        },
+    )
+    persona.ensure_dirs()
+    crawl = Crawl.objects.create(
+        urls="\n".join(
+            [
+                "https://www.python.org/",
+                "https://www.djangoproject.com/",
+                "https://www.wikipedia.org/",
+            ],
+        ),
+        config={
+            "PLUGINS": "favicon",
+            "CRAWL_MAX_CONCURRENT_SNAPSHOTS": 1,
+        },
+        persona_id=persona.id,
+        created_by_id=get_or_create_system_user_pk(),
+    )
+    runner = CrawlRunner(crawl)
+    completed_snapshot_ids: list[str] = []
+
+    async def update_config_between_snapshots(event: SnapshotCompletedEvent) -> None:
+        if event.snapshot_id in completed_snapshot_ids:
+            return
+        completed_snapshot_ids.append(event.snapshot_id)
+        if len(completed_snapshot_ids) == 1:
+            persona.config = {
+                **(persona.config or {}),
+                "FAVICON_PROVIDER": "https://example.com/persona-second.ico",
+            }
+            await persona.asave(update_fields=["config"])
+        elif len(completed_snapshot_ids) == 2:
+            fresh_crawl = await Crawl.objects.aget(id=crawl.id)
+            fresh_crawl.config = {
+                **(fresh_crawl.config or {}),
+                "FAVICON_PROVIDER": "https://example.com/crawl-third.ico",
+            }
+            await fresh_crawl.asave(update_fields=["config"])
+
+    runner.bus.on(SnapshotCompletedEvent, update_config_between_snapshots)
+
+    asyncio.run(runner.run())
+
+    favicon_processes = [
+        process
+        for process in Process.objects.filter(process_type=Process.TypeChoices.HOOK).order_by("started_at")
+        if process.cmd and "on_Snapshot__11_favicon.finite.bg.py" in str(process.cmd[0])
+    ]
+    providers = [process.env.get("FAVICON_PROVIDER") for process in favicon_processes]
+
+    crawl.refresh_from_db()
+    assert crawl.status == Crawl.StatusChoices.SEALED
+    assert Snapshot.objects.filter(crawl=crawl, status=Snapshot.StatusChoices.SEALED).count() == 3
+    assert (
+        ArchiveResult.objects.filter(snapshot__crawl=crawl, plugin="favicon").exclude(status=ArchiveResult.StatusChoices.FAILED).count()
+        == 3
+    )
+    assert providers == [
+        "https://example.com/persona-first.ico",
+        "https://example.com/persona-second.ico",
+        "https://example.com/crawl-third.ico",
+    ]
+
+
+@pytest.mark.django_db(transaction=True)
 def test_run_snapshot_seals_descendant_when_crawl_max_size_is_reached(tmp_path):
     from abx_dl.events import CrawlStartEvent, SnapshotEvent
     from archivebox.base_models.models import get_or_create_system_user_pk

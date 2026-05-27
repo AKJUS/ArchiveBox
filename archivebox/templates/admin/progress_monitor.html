@@ -244,9 +244,29 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+    #progress-monitor a.crawl-badge {
+        cursor: pointer;
+        text-decoration: none !important;
+    }
+    #progress-monitor a.crawl-badge:hover {
+        border-color: currentColor;
+        filter: brightness(1.14);
+    }
     #progress-monitor .crawl-badge strong {
         color: #8b949e;
         font-weight: 600;
+    }
+    #progress-monitor .crawl-title-link {
+        display: inline-block;
+        max-width: 100%;
+        color: inherit;
+        text-decoration: none !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    #progress-monitor .crawl-title-link:hover {
+        color: #79c0ff;
     }
     #progress-monitor .crawl-badge.persona {
         color: #d2a8ff;
@@ -560,6 +580,21 @@
         background: #21262d;
         color: #6e7681;
     }
+    #progress-monitor .duration-badge {
+        flex-shrink: 0;
+        min-width: 28px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        background: rgba(88, 166, 255, 0.12);
+        color: #a5d6ff;
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.2;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
 
     /* Thumbnail Strip */
     #progress-monitor .thumbnail-strip {
@@ -749,7 +784,7 @@
         return headers;
     }
     function escapeHtml(value) {
-        return String(value || '').replace(/[&<>"']/g, char => ({
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
             '&': '&amp;',
             '<': '&lt;',
             '>': '&gt;',
@@ -802,6 +837,35 @@
     function renderThumbnail(thumb, isNew) { return null; }
     function updateThumbnails(thumbnails) {}
 
+    function formatDuration(seconds) {
+        seconds = Math.max(0, Math.floor(seconds || 0));
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (hours > 0) return `${hours}hr ${minutes}m ${secs}s`;
+        if (minutes > 0) return `${minutes}m ${secs}s`;
+        return `${secs}s`;
+    }
+
+    function durationText(startedAt) {
+        const startedMs = Date.parse(startedAt || '');
+        if (!Number.isFinite(startedMs)) return '';
+        return formatDuration((Date.now() - startedMs) / 1000);
+    }
+
+    function renderDurationBadge(startedAt) {
+        const text = durationText(startedAt);
+        if (!text) return '';
+        return `<span class="duration-badge" data-started-at="${escapeAttr(startedAt)}" title="Duration">${escapeHtml(text)}</span>`;
+    }
+
+    function updateDurationBadges() {
+        document.querySelectorAll('#progress-monitor .duration-badge[data-started-at]').forEach((badge) => {
+            const text = durationText(badge.dataset.startedAt);
+            if (text) badge.textContent = text;
+        });
+    }
+
     function renderExtractor(extractor) {
         const icon = extractor.status === 'started' ? '▶' :
                     extractor.status === 'succeeded' ? '✓' :
@@ -841,6 +905,7 @@
             ? `<button class="cancel-item-btn" data-cancel-type="snapshot" data-snapshot-id="${snapshot.id}" data-label="✕" title="Cancel snapshot">✕</button>`
             : '';
         const snapshotPidHtml = snapshot.worker_pid ? `<span class="pid-label compact">pid ${snapshot.worker_pid}</span>` : '';
+        const snapshotDurationHtml = renderDurationBadge(snapshot.started);
         const titleText = snapshot.title || formatUrl(snapshot.full_url || snapshot.url);
         const urlText = snapshot.full_url || snapshot.url || '';
         const faviconHtml = snapshot.favicon_url
@@ -902,6 +967,7 @@
                             </div>
                         </div>
                         ${snapshotPidHtml}
+                        ${snapshotDurationHtml}
                         <span class="status-badge ${snapshot.status || 'unknown'}">${snapshot.status || 'unknown'}</span>
                     </a>
                     ${cancelBtn}
@@ -919,6 +985,13 @@
 
     function renderCrawl(crawl) {
         const adminUrl = `/admin/crawls/crawl/${crawl.id || 'unknown'}/change/`;
+        const adminFieldUrl = (fieldName) => `${adminUrl}#id_${fieldName}`;
+        const crawlBadge = (className, label, value, href, title) => {
+            const tag = href ? 'a' : 'span';
+            const hrefAttr = href ? ` href="${escapeAttr(href)}"` : '';
+            const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+            return `<${tag} class="crawl-badge ${className}"${hrefAttr}${titleAttr}><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</${tag}>`;
+        };
         const crawlId = (crawl.id || 'unknown').toString();
         const crawlShortId = crawlId === 'unknown' ? 'unknown' : crawlId.slice(-8);
         const startedDate = crawl.started ? crawl.started.slice(0, 10) : 'unknown date';
@@ -927,6 +1000,7 @@
             ? `<button class="cancel-item-btn" data-cancel-type="crawl" data-crawl-id="${crawl.id}" data-label="✕" title="Cancel crawl">✕</button>`
             : '';
         const crawlPidHtml = crawl.worker_pid ? `<span class="pid-label compact">pid ${crawl.worker_pid}</span>` : '';
+        const crawlDurationHtml = renderDurationBadge(crawl.started);
 
         let snapshotsHtml = '';
         if (crawl.active_snapshots && crawl.active_snapshots.length > 0) {
@@ -1005,12 +1079,12 @@
         const crawlSizeLimitText = `${crawl.crawl_output_size_display || '0 B'} / ${crawl.max_crawl_size_display || 'unlimited'}`;
         const snapshotSizeLimitText = `${crawl.avg_snapshot_size_display || '0 B'} / ${crawl.max_snapshot_size_display || 'unlimited'}`;
         const crawlBadges = [
-            `<span class="crawl-badge persona"><strong>persona</strong>${escapeHtml(crawl.persona || 'Default')}</span>`,
-            `<span class="crawl-badge limit"><strong>depth</strong>${crawl.max_depth || 0}</span>`,
-            `<span class="crawl-badge limit"><strong>urls</strong>${escapeHtml(urlLimitText)}</span>`,
-            `<span class="crawl-badge size"><strong>crawl size</strong>${escapeHtml(crawlSizeLimitText)}</span>`,
-            `<span class="crawl-badge size"><strong>avg snap</strong>${escapeHtml(snapshotSizeLimitText)}</span>`,
-            ...(crawl.tags || []).map(tag => `<span class="crawl-badge tag">#${escapeHtml(tag)}</span>`),
+            crawlBadge('persona', 'Persona Config', crawl.persona || 'Default', crawl.persona_admin_url, 'Edit persona config'),
+            crawlBadge('limit', 'depth', crawl.max_depth || 0, null, ''),
+            crawlBadge('limit', 'urls', urlLimitText, adminFieldUrl('max_urls'), 'Edit max URLs'),
+            crawlBadge('size', 'crawl size', crawlSizeLimitText, adminFieldUrl('crawl_max_size'), 'Edit max crawl size'),
+            crawlBadge('size', 'avg snap', snapshotSizeLimitText, adminFieldUrl('snapshot_max_size'), 'Edit max snapshot size'),
+            ...(crawl.tags || []).map(tag => `<a class="crawl-badge tag" href="${escapeAttr(adminFieldUrl('tags_editor'))}" title="Edit crawl tags">#${escapeHtml(tag)}</a>`),
         ].join('');
         const statsHtml = [
             `<span class="crawl-badge count"><strong>done</strong>${crawl.completed_snapshots || 0}</span>`,
@@ -1022,17 +1096,18 @@
         return `
             <div class="crawl-item" data-crawl-id="${crawl.id || 'unknown'}">
                 <div class="crawl-header">
-                    <a class="crawl-header-link" href="${adminUrl}">
+                    <div class="crawl-header-link">
                         <div class="crawl-info">
-                            <div class="crawl-label">Crawl #${escapeHtml(crawlShortId)} ${escapeHtml(startedDate)} started by ${escapeHtml(crawl.created_by || 'unknown')}</div>
+                            <a class="crawl-label crawl-title-link" href="${escapeAttr(adminUrl)}">Crawl #${escapeHtml(crawlShortId)} ${escapeHtml(startedDate)} started by ${escapeHtml(crawl.created_by || 'unknown')}</a>
                             <div class="crawl-badges">${crawlBadges}</div>
                         </div>
                         <div class="crawl-stats">
                             ${statsHtml}
                         </div>
                         ${crawlPidHtml}
+                        ${crawlDurationHtml}
                         <span class="status-badge ${crawl.status || 'unknown'}">${crawl.status || 'unknown'}</span>
-                    </a>
+                    </div>
                     ${cancelBtn}
                 </div>
                 <div class="crawl-progress">
@@ -1139,6 +1214,7 @@
         }
 
         // Recent thumbnails removed
+        updateDurationBadges();
     }
 
     function fetchProgress() {
@@ -1277,6 +1353,7 @@
 
     // Start polling when page loads
     startPolling();
+    setInterval(updateDurationBadges, 1000);
 
     // Pause polling when tab is hidden
     document.addEventListener('visibilitychange', function() {

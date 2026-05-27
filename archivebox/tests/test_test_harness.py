@@ -14,6 +14,21 @@ def test_session_data_dir_is_outside_repo_root():
         assert test_harness.PYTEST_BASETEMP_ROOT in (Path.cwd(), *Path.cwd().parents)
 
 
+def test_in_process_archivebox_config_uses_temp_data_dir():
+    from archivebox.config import CONSTANTS
+    from archivebox.config.common import get_config
+
+    data_dir = Path(os.environ["DATA_DIR"]).resolve()
+    assert data_dir == Path.cwd().resolve()
+    assert test_harness.REPO_ROOT not in data_dir.parents
+    assert CONSTANTS.DATA_DIR != test_harness.REPO_ROOT
+
+    config = get_config(include_machine=False)
+    assert config.DATA_DIR == data_dir
+    assert config.ARCHIVE_DIR == data_dir / "archive"
+    assert config.USERS_DIR == data_dir / "archive" / "users"
+
+
 def test_cli_helpers_reject_repo_root_runtime_paths():
     with pytest.raises(AssertionError, match="repo root"):
         test_harness.run_archivebox_cmd(["version"], data_dir=test_harness.REPO_ROOT)
