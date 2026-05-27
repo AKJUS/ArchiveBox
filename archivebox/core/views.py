@@ -1463,14 +1463,12 @@ def live_progress_view(request):
             (
                 ArchiveResult.StatusChoices.QUEUED,
                 ArchiveResult.StatusChoices.STARTED,
-                ArchiveResult.StatusChoices.SUCCEEDED,
-                ArchiveResult.StatusChoices.FAILED,
             ),
         )
         archiveresults_pending = archiveresult_status_counts.get(ArchiveResult.StatusChoices.QUEUED, 0)
         archiveresults_started = archiveresult_status_counts.get(ArchiveResult.StatusChoices.STARTED, 0)
-        archiveresults_succeeded = archiveresult_status_counts.get(ArchiveResult.StatusChoices.SUCCEEDED, 0)
-        archiveresults_failed = archiveresult_status_counts.get(ArchiveResult.StatusChoices.FAILED, 0)
+        archiveresults_succeeded = 0
+        archiveresults_failed = 0
 
         # Build hierarchical active crawls with nested snapshots and archive results
 
@@ -1604,6 +1602,10 @@ def live_progress_view(request):
             )
             for archiveresult in displayed_archiveresults:
                 archiveresults_by_snapshot.setdefault(str(archiveresult.snapshot_id), []).append(archiveresult)
+                if archiveresult.status == ArchiveResult.StatusChoices.SUCCEEDED:
+                    archiveresults_succeeded += 1
+                elif archiveresult.status == ArchiveResult.StatusChoices.FAILED:
+                    archiveresults_failed += 1
 
         def find_snapshot_for_process(proc_pwd: Path) -> Snapshot | None:
             for path_part in reversed(proc_pwd.parts):
