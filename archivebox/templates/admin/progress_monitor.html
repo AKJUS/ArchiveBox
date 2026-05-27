@@ -898,6 +898,14 @@
     }
 
     function renderSnapshot(snapshot, crawlId) {
+        if (Array.isArray(snapshot)) {
+            snapshot = {
+                id: snapshot[0],
+                url: snapshot[1],
+                title: snapshot[2],
+                status: snapshot[3],
+            };
+        }
         const statusIcon = snapshot.status === 'started' ? '▤' : '▢';
         const adminUrl = snapshot.admin_url || `/admin/core/snapshot/${snapshot.id || 'unknown'}/change/`;
         const canCancel = snapshot.status === 'queued';
