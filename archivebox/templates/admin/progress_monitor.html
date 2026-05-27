@@ -273,12 +273,6 @@
         background: rgba(31, 111, 235, 0.16);
         border-color: rgba(31, 111, 235, 0.28);
     }
-    #progress-monitor .crawl-badge.source {
-        max-width: 340px;
-        color: #58a6ff;
-        background: rgba(88, 166, 255, 0.10);
-        border-color: rgba(88, 166, 255, 0.20);
-    }
     #progress-monitor .crawl-stats {
         display: flex;
         gap: 6px;
@@ -928,8 +922,6 @@
         const crawlId = (crawl.id || 'unknown').toString();
         const crawlShortId = crawlId === 'unknown' ? 'unknown' : crawlId.slice(-8);
         const startedDate = crawl.started ? crawl.started.slice(0, 10) : 'unknown date';
-        const sourceText = crawl.urls_preview || crawl.label || '';
-        const sourceShort = sourceText.length > 70 ? `${sourceText.slice(0, 67)}...` : sourceText;
         const canCancel = crawl.status === 'queued' || crawl.status === 'started';
         const cancelBtn = canCancel
             ? `<button class="cancel-item-btn" data-cancel-type="crawl" data-crawl-id="${crawl.id}" data-label="✕" title="Cancel crawl">✕</button>`
@@ -1014,7 +1006,6 @@
             ? `${crawl.total_snapshots} snapshot${(crawl.total_snapshots || 0) === 1 ? '' : 's'}`
             : ((crawl.urls_count || 0) > 0 ? `${crawl.urls_count} URL${(crawl.urls_count || 0) === 1 ? '' : 's'}` : 'no URLs');
         const crawlBadges = [
-            sourceShort ? `<span class="crawl-badge source"><strong>source</strong>${escapeHtml(sourceShort)}</span>` : '',
             `<span class="crawl-badge persona"><strong>persona</strong>${escapeHtml(crawl.persona || 'Default')}</span>`,
             `<span class="crawl-badge limit"><strong>depth</strong>${crawl.max_depth || 0}</span>`,
             `<span class="crawl-badge limit"><strong>urls</strong>${escapeHtml(maxUrlsText)}</span>`,
