@@ -175,14 +175,14 @@
         background: #161b22;
         border: 1px solid #30363d;
         border-radius: 8px;
-        margin-bottom: 12px;
+        margin-bottom: 9px;
         overflow: hidden;
     }
     #progress-monitor .crawl-header {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 10px 14px;
+        gap: 10px;
+        padding: 7px 12px;
         background: rgba(0,0,0,0.2);
     }
     #progress-monitor .crawl-header:hover {
@@ -201,11 +201,6 @@
     #progress-monitor a.crawl-header-link:visited {
         color: inherit;
     }
-    #progress-monitor .crawl-icon {
-        font-size: 16px;
-        width: 20px;
-        text-align: center;
-    }
     #progress-monitor .crawl-info {
         flex: 1;
         min-width: 0;
@@ -221,27 +216,6 @@
         font-size: 11px;
         color: #8b949e;
         margin-top: 2px;
-    }
-    #progress-monitor .crawl-tags {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        margin-top: 5px;
-    }
-    #progress-monitor .crawl-tag {
-        display: inline-flex;
-        align-items: center;
-        max-width: 120px;
-        padding: 1px 6px;
-        border: 1px solid #30363d;
-        border-radius: 10px;
-        color: #c9d1d9;
-        background: rgba(139, 148, 158, 0.12);
-        font-size: 10px;
-        line-height: 16px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
     #progress-monitor .crawl-stats {
         display: flex;
@@ -886,7 +860,6 @@
     }
 
     function renderCrawl(crawl) {
-        const statusIcon = crawl.status === 'started' ? '▦' : '▥';
         const adminUrl = `/admin/crawls/crawl/${crawl.id || 'unknown'}/change/`;
         const canCancel = crawl.status === 'queued' || crawl.status === 'started';
         const cancelBtn = canCancel
@@ -976,19 +949,17 @@
         } else if (crawl.urls_preview) {
             metaText += ` | ${escapeHtml(crawl.urls_preview.substring(0, 40))}${crawl.urls_preview.length > 40 ? '...' : ''}`;
         }
-        const tagsHtml = (crawl.tags || []).length
-            ? `<div class="crawl-tags">${crawl.tags.map(tag => `<span class="crawl-tag" title="${escapeAttr(tag)}">${escapeHtml(tag)}</span>`).join('')}</div>`
-            : '';
+        if ((crawl.tags || []).length) {
+            metaText += ` | tags: ${escapeHtml(crawl.tags.join(', '))}`;
+        }
 
         return `
             <div class="crawl-item" data-crawl-id="${crawl.id || 'unknown'}">
                 <div class="crawl-header">
                     <a class="crawl-header-link" href="${adminUrl}">
-                            <span class="crawl-icon">${statusIcon}</span>
-                            <div class="crawl-info">
+                        <div class="crawl-info">
                             <div class="crawl-label">Crawl: ${escapeHtml(crawl.label || '(no label)')}</div>
                             <div class="crawl-meta">${metaText}</div>
-                            ${tagsHtml}
                         </div>
                         <div class="crawl-stats">
                             <span style="color:#3fb950">${crawl.completed_snapshots || 0} done</span>
