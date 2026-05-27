@@ -182,7 +182,7 @@
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 7px 12px;
+        padding: 8px 12px;
         background: rgba(0,0,0,0.2);
     }
     #progress-monitor .crawl-header:hover {
@@ -207,19 +207,72 @@
     }
     #progress-monitor .crawl-label {
         font-weight: 600;
-        color: #58a6ff;
+        color: #f0f6fc;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    #progress-monitor .crawl-meta {
+    #progress-monitor .crawl-source {
+        color: #58a6ff;
+        font-weight: 500;
+        margin-left: 5px;
+    }
+    #progress-monitor .crawl-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 5px;
+    }
+    #progress-monitor .crawl-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 240px;
+        padding: 2px 7px;
+        border-radius: 999px;
         font-size: 11px;
+        line-height: 1.35;
+        color: #c9d1d9;
+        background: rgba(110, 118, 129, 0.16);
+        border: 1px solid rgba(110, 118, 129, 0.22);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    #progress-monitor .crawl-badge strong {
         color: #8b949e;
-        margin-top: 2px;
+        font-weight: 600;
+    }
+    #progress-monitor .crawl-badge.persona {
+        color: #d2a8ff;
+        background: rgba(163, 113, 247, 0.16);
+        border-color: rgba(163, 113, 247, 0.28);
+    }
+    #progress-monitor .crawl-badge.limit {
+        color: #79c0ff;
+        background: rgba(88, 166, 255, 0.13);
+        border-color: rgba(88, 166, 255, 0.24);
+    }
+    #progress-monitor .crawl-badge.size {
+        color: #ffa657;
+        background: rgba(240, 136, 62, 0.13);
+        border-color: rgba(240, 136, 62, 0.24);
+    }
+    #progress-monitor .crawl-badge.count {
+        color: #7ee787;
+        background: rgba(63, 185, 80, 0.13);
+        border-color: rgba(63, 185, 80, 0.24);
+    }
+    #progress-monitor .crawl-badge.tag {
+        color: #a5d6ff;
+        background: rgba(31, 111, 235, 0.16);
+        border-color: rgba(31, 111, 235, 0.28);
     }
     #progress-monitor .crawl-stats {
         display: flex;
-        gap: 12px;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
         font-size: 11px;
     }
 
@@ -861,6 +914,11 @@
 
     function renderCrawl(crawl) {
         const adminUrl = `/admin/crawls/crawl/${crawl.id || 'unknown'}/change/`;
+        const crawlId = (crawl.id || 'unknown').toString();
+        const crawlShortId = crawlId === 'unknown' ? 'unknown' : crawlId.slice(-8);
+        const startedDate = crawl.started ? crawl.started.slice(0, 10) : 'unknown date';
+        const sourceText = crawl.urls_preview || crawl.label || '';
+        const sourceShort = sourceText.length > 70 ? `${sourceText.slice(0, 67)}...` : sourceText;
         const canCancel = crawl.status === 'queued' || crawl.status === 'started';
         const cancelBtn = canCancel
             ? `<button class="cancel-item-btn" data-cancel-type="crawl" data-crawl-id="${crawl.id}" data-label="✕" title="Cancel crawl">✕</button>`
@@ -941,31 +999,35 @@
         const maxUrlsText = (crawl.max_urls || 0) > 0 ? `${crawl.max_urls} max URLs` : 'all URLs';
         const crawlSizeText = crawl.max_crawl_size_display || 'unlimited';
         const snapshotSizeText = crawl.max_snapshot_size_display || 'unlimited';
-        let metaText = `by ${escapeHtml(crawl.created_by || 'unknown')} | persona: ${escapeHtml(crawl.persona || 'Default')} | depth: ${crawl.max_depth || 0} | ${maxUrlsText} | crawl: ${escapeHtml(crawlSizeText)} | snapshot: ${escapeHtml(snapshotSizeText)}`;
-        if ((crawl.total_snapshots || 0) > 0) {
-            metaText += ` | ${crawl.total_snapshots} snapshots`;
-        } else if ((crawl.urls_count || 0) > 0) {
-            metaText += ` | ${crawl.urls_count} URLs`;
-        } else if (crawl.urls_preview) {
-            metaText += ` | ${escapeHtml(crawl.urls_preview.substring(0, 40))}${crawl.urls_preview.length > 40 ? '...' : ''}`;
-        }
-        if ((crawl.tags || []).length) {
-            metaText += ` | tags: ${escapeHtml(crawl.tags.join(', '))}`;
-        }
+        const itemCountText = (crawl.total_snapshots || 0) > 0
+            ? `${crawl.total_snapshots} snapshot${(crawl.total_snapshots || 0) === 1 ? '' : 's'}`
+            : ((crawl.urls_count || 0) > 0 ? `${crawl.urls_count} URL${(crawl.urls_count || 0) === 1 ? '' : 's'}` : 'no URLs');
+        const crawlBadges = [
+            `<span class="crawl-badge persona"><strong>persona</strong>${escapeHtml(crawl.persona || 'Default')}</span>`,
+            `<span class="crawl-badge limit"><strong>depth</strong>${crawl.max_depth || 0}</span>`,
+            `<span class="crawl-badge limit"><strong>urls</strong>${escapeHtml(maxUrlsText)}</span>`,
+            `<span class="crawl-badge size"><strong>crawl</strong>${escapeHtml(crawlSizeText)}</span>`,
+            `<span class="crawl-badge size"><strong>snapshot</strong>${escapeHtml(snapshotSizeText)}</span>`,
+            `<span class="crawl-badge count"><strong>items</strong>${escapeHtml(itemCountText)}</span>`,
+            ...(crawl.tags || []).map(tag => `<span class="crawl-badge tag">#${escapeHtml(tag)}</span>`),
+        ].join('');
+        const statsHtml = [
+            `<span class="crawl-badge count"><strong>done</strong>${crawl.completed_snapshots || 0}</span>`,
+            `<span class="crawl-badge size"><strong>active</strong>${crawl.started_snapshots || 0}</span>`,
+            `<span class="crawl-badge"><strong>pending</strong>${crawl.pending_snapshots || 0}</span>`,
+            (crawl.cancelled_snapshots || 0) > 0 ? `<span class="crawl-badge"><strong>cancelled</strong>${crawl.cancelled_snapshots}</span>` : '',
+        ].join('');
 
         return `
             <div class="crawl-item" data-crawl-id="${crawl.id || 'unknown'}">
                 <div class="crawl-header">
                     <a class="crawl-header-link" href="${adminUrl}">
                         <div class="crawl-info">
-                            <div class="crawl-label">Crawl: ${escapeHtml(crawl.label || '(no label)')}</div>
-                            <div class="crawl-meta">${metaText}</div>
+                            <div class="crawl-label">Crawl #${escapeHtml(crawlShortId)} ${escapeHtml(startedDate)} started by ${escapeHtml(crawl.created_by || 'unknown')}${sourceShort ? `<span class="crawl-source">${escapeHtml(sourceShort)}</span>` : ''}</div>
+                            <div class="crawl-badges">${crawlBadges}</div>
                         </div>
                         <div class="crawl-stats">
-                            <span style="color:#3fb950">${crawl.completed_snapshots || 0} done</span>
-                            <span style="color:#d29922">${crawl.started_snapshots || 0} active</span>
-                            <span style="color:#8b949e">${crawl.pending_snapshots || 0} pending</span>
-                            ${(crawl.cancelled_snapshots || 0) > 0 ? `<span style="color:#8b949e">${crawl.cancelled_snapshots} cancelled</span>` : ''}
+                            ${statsHtml}
                         </div>
                         ${crawlPidHtml}
                         <span class="status-badge ${crawl.status || 'unknown'}">${crawl.status || 'unknown'}</span>
