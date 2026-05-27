@@ -943,6 +943,10 @@ class PublicIndexView(ListView):
         for snapshot in context.get("object_list") or ():
             snapshot._icons_compact = True
             snapshot._is_archived_cached = bool(snapshot.downloaded_at or snapshot.status == Snapshot.StatusChoices.SEALED)
+            results = getattr(snapshot, "_prefetched_objects_cache", {}).get("archiveresult_set")
+            if results is not None:
+                snapshot.output_size_sum = sum(result.output_size or result.output_size_from_files() for result in results)
+                snapshot.num_outputs_cached = len(results)
         return context
 
     def get_queryset(self, **kwargs):
@@ -959,6 +963,8 @@ class PublicIndexView(ListView):
                         "snapshot_id",
                         "plugin",
                         "status",
+                        "output_size",
+                        "output_files",
                     ),
                 ),
             )
@@ -968,49 +974,24 @@ class PublicIndexView(ListView):
         if not query:
             return qs
 
-        query_type = self.request.GET.get("query_type")
         search_mode = get_search_mode(self.request.GET.get("search_mode"))
 
-        if not query_type or query_type == "all":
-            metadata_qs = qs.filter(
-                Q(title__icontains=query) | Q(url__icontains=query) | Q(timestamp__icontains=query) | Q(tags__name__icontains=query),
-            )
-            if search_mode == "meta":
-                qs = metadata_qs
-            else:
-                try:
-                    qs = prioritize_metadata_matches(
-                        qs,
-                        metadata_qs,
-                        query_search_index(query, search_mode=search_mode),
-                        ordering=self.ordering,
-                    )
-                except Exception as err:
-                    print(f"[!] Error while using search backend: {err.__class__.__name__} {err}")
-                    qs = metadata_qs
-        elif query_type == "fulltext":
-            if search_mode == "meta":
-                qs = qs.none()
-            else:
-                try:
-                    qs = query_search_index(query, search_mode=search_mode).filter(pk__in=qs.values("pk"))
-                except Exception as err:
-                    print(f"[!] Error while using search backend: {err.__class__.__name__} {err}")
-                    qs = qs.none()
-        elif query_type == "meta":
-            qs = qs.filter(
-                Q(title__icontains=query) | Q(url__icontains=query) | Q(timestamp__icontains=query) | Q(tags__name__icontains=query),
-            )
-        elif query_type == "url":
-            qs = qs.filter(Q(url__icontains=query))
-        elif query_type == "title":
-            qs = qs.filter(Q(title__icontains=query))
-        elif query_type == "timestamp":
-            qs = qs.filter(Q(timestamp__icontains=query))
-        elif query_type == "tags":
-            qs = qs.filter(Q(tags__name__icontains=query))
+        metadata_qs = qs.filter(
+            Q(title__icontains=query) | Q(url__icontains=query) | Q(timestamp__icontains=query) | Q(tags__name__icontains=query),
+        )
+        if search_mode == "meta":
+            qs = metadata_qs
         else:
-            print(f'[!] Unknown value for query_type: "{query_type}"')
+            try:
+                qs = prioritize_metadata_matches(
+                    qs,
+                    metadata_qs,
+                    query_search_index(query, search_mode=search_mode),
+                    ordering=self.ordering,
+                )
+            except Exception as err:
+                print(f"[!] Error while using search backend: {err.__class__.__name__} {err}")
+                qs = metadata_qs
 
         return qs.distinct()
 

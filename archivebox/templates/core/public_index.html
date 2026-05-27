@@ -2,79 +2,444 @@
 {% load static tz %}
 {% load core_tags %}
 
+{% block extra_head %}
+<style>
+    #content.flex {
+        display: block;
+    }
+
+    .public-snapshot-list {
+        width: 100%;
+    }
+
+    .public-snapshot-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .public-snapshot-toolbar form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+        margin: 0;
+    }
+
+    .public-snapshot-toolbar label.search-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        margin: 0;
+        opacity: 0.65;
+    }
+
+    .public-snapshot-toolbar #searchbar {
+        flex: 1 1 320px;
+        min-width: 180px;
+        height: 34px;
+        padding: 6px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 7px;
+        font-size: 13px;
+    }
+
+    .public-snapshot-toolbar input[type="submit"] {
+        height: 34px;
+        margin: 0;
+        padding: 0 14px;
+        border-radius: 7px;
+    }
+
+    .public-search-modes {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid #dbe3ee;
+        border-radius: 8px;
+        background: #f8fafc;
+        white-space: nowrap;
+    }
+
+    .public-search-modes label {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin: 0;
+        padding: 5px 8px;
+        border-radius: 6px;
+        color: #475569;
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .public-search-modes label:has(input:checked) {
+        background: #fff;
+        color: #0f172a;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    .public-search-modes input {
+        margin: 0;
+    }
+
+    .public-snapshot-count {
+        color: #64748b;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .public-snapshot-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    #table-bookmarks {
+        width: 100%;
+        min-width: 980px;
+        table-layout: fixed;
+        border-collapse: collapse;
+    }
+
+    #table-bookmarks thead th {
+        padding: 9px 10px;
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+        color: #475569;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    #table-bookmarks tbody td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #edf2f7;
+        vertical-align: middle;
+    }
+
+    #table-bookmarks tbody tr:hover {
+        background: #f8fafc;
+    }
+
+    #table-bookmarks tbody tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .snapshot-time {
+        width: 102px;
+        white-space: nowrap;
+    }
+
+    .snapshot-time a {
+        display: inline-flex;
+        flex-direction: column;
+        color: #334155;
+        text-decoration: none;
+        line-height: 1.2;
+    }
+
+    .snapshot-time small {
+        color: #94a3b8;
+        font-size: 11px;
+    }
+
+    .snapshot-preview-cell {
+        width: 106px;
+    }
+
+    #content .snapshot-preview-cell .snapshot-preview {
+        width: 86px;
+        height: 54px;
+        max-width: 86px;
+        max-height: 54px;
+        margin: 0;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #f8fafc;
+        object-fit: cover;
+        object-position: top;
+    }
+
+    .snapshot-title-cell {
+        min-width: 0;
+    }
+
+    .snapshot-title-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        margin-bottom: 2px;
+    }
+
+    .snapshot-favicon-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        min-width: 22px;
+        height: 22px;
+    }
+
+    #content .snapshot-favicon-link .link-favicon {
+        display: block;
+        width: 18px;
+        height: 18px;
+        max-width: 18px;
+        border-radius: 4px;
+        object-fit: contain;
+    }
+
+    .snapshot-title {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        color: #0f172a;
+        font-size: 14px;
+        font-weight: 650;
+        line-height: 1.25;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-decoration: none;
+    }
+
+    .snapshot-url {
+        display: block;
+        margin-left: 30px;
+        overflow: hidden;
+        color: #64748b;
+        font-size: 12px;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-decoration: none;
+    }
+
+    .snapshot-url:hover,
+    .snapshot-title:hover {
+        text-decoration: underline;
+    }
+
+    .snapshot-tags-cell {
+        width: 190px;
+    }
+
+    .snapshot-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        max-height: 46px;
+        overflow: hidden;
+    }
+
+    .snapshot-tag {
+        display: inline-flex;
+        align-items: center;
+        max-width: 160px;
+        padding: 2px 7px;
+        border: 1px solid #bfdbfe;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.35;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .snapshot-status-cell {
+        width: 96px;
+    }
+
+    .snapshot-status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 68px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #f1f5f9;
+        color: #475569;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        text-transform: uppercase;
+    }
+
+    .status-sealed .snapshot-status,
+    .status-succeeded .snapshot-status {
+        background: #d1fae5;
+        color: #047857;
+    }
+
+    .status-started .snapshot-status {
+        background: #dbeafe;
+        color: #1d4ed8;
+    }
+
+    .status-queued .snapshot-status,
+    .status-backoff .snapshot-status {
+        background: #fef3c7;
+        color: #b45309;
+    }
+
+    .status-failed .snapshot-status {
+        background: #fee2e2;
+        color: #b91c1c;
+    }
+
+    .snapshot-files-cell {
+        width: 220px;
+        overflow: hidden;
+    }
+
+    .snapshot-files-cell .files-icons {
+        max-width: 200px;
+    }
+
+    .snapshot-size-cell {
+        width: 102px;
+        white-space: nowrap;
+    }
+
+    .snapshot-size-cell a {
+        display: block;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    .snapshot-size-cell small {
+        display: block;
+        color: #94a3b8;
+        font-size: 10px;
+        line-height: 1.2;
+    }
+
+    .empty-value {
+        color: #cbd5e1;
+    }
+
+    .public-pagination {
+        margin: 18px 0 0;
+        text-align: center;
+        color: #64748b;
+        font-size: 13px;
+    }
+
+    .public-pagination .step-links {
+        display: inline-flex;
+        gap: 12px;
+        align-items: center;
+        margin-top: 6px;
+    }
+
+    @media (max-width: 980px) {
+        .public-snapshot-toolbar,
+        .public-snapshot-toolbar form {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+        .public-snapshot-count {
+            align-self: flex-start;
+        }
+
+        .public-search-modes {
+            flex-wrap: wrap;
+            white-space: normal;
+        }
+    }
+</style>
+<script>
+    function nextPublicSnapshotPreview(img) {
+        const fallbacks = (img.dataset.fallbacks || '').split(',').filter(Boolean)
+        if (fallbacks.length) {
+            img.src = fallbacks.shift()
+            img.dataset.fallbacks = fallbacks.join(',')
+            return
+        }
+        img.style.opacity = 0
+    }
+</script>
+{% endblock %}
+
 {% block body %}
-    <div id="toolbar">
-        <form id="changelist-search" action="{{ request.path }}" method="get">
-            <div>
-                <label for="searchbar"><img src="/static/admin/img/search.svg" alt="Search"></label>
-                <select name="query_type" id="query_type">
-                    <option {% if request.GET.query_type == 'all' %}selected{% endif %} value="all">All</option>
-                    <option {% if request.GET.query_type == 'fulltext' %}selected{% endif %} value="fulltext">Content</option>
-                    <option {% if request.GET.query_type == 'meta' %}selected{% endif %} value="meta">Metadata</option>
-                    <option {% if request.GET.query_type == 'url' %}selected{% endif %} value="url">URL</option>
-                    <option {% if request.GET.query_type == 'title' %}selected{% endif %} value="title">Title</option>
-                    <option {% if request.GET.query_type == 'timestamp' %}selected{% endif %} value="timestamp">Timestamp</option>
-                    <option {% if request.GET.query_type == 'tags' %}selected{% endif %} value="tags">Tags</option>
-                </select>
-                <input type="text" size="40" name="q" value="{{ request.GET.q }}" id="searchbar" autofocus placeholder="Title, URL, tags, timestamp, or content...".>
-                <input type="submit" value="Search" style="height: 36px; padding-top: 6px; margin: 8px"/>
-                <span style="display:inline-flex; flex-wrap:wrap; gap:8px; align-items:center; margin-left:4px; font-size:12px;">
-                    <label><input type="radio" name="search_mode" value="meta"{% if search_mode == "meta" %} checked{% endif %}> meta (db-only)</label>
-                    <label><input type="radio" name="search_mode" value="contents"{% if search_mode == "contents" %} checked{% endif %}> contents (ripgrep/sonic/etc.)</label>
-                    <label><input type="radio" name="search_mode" value="deep"{% if search_mode == "deep" %} checked{% endif %}> deep</label>
+    <div class="public-snapshot-list">
+        <div class="public-snapshot-toolbar">
+            <form id="changelist-search" action="{{ request.path }}" method="get">
+                <label class="search-icon" for="searchbar"><img src="/static/admin/img/search.svg" alt="Search"></label>
+                <input type="text" size="40" name="q" value="{{ request.GET.q }}" id="searchbar" autofocus placeholder="Search title, URL, tags, timestamp, or content...">
+                <input type="submit" value="Search">
+                <span class="public-search-modes">
+                    <label><input type="radio" name="search_mode" value="meta"{% if search_mode == "meta" %} checked{% endif %}> Meta</label>
+                    <label><input type="radio" name="search_mode" value="contents"{% if search_mode == "contents" %} checked{% endif %}> Contents</label>
+                    <label><input type="radio" name="search_mode" value="deep"{% if search_mode == "deep" %} checked{% endif %}> Deep</label>
                 </span>
-                <input type="button"
-                       value="♺"
-                       title="Refresh..."
-                       onclick="location.href='{{ request.get_full_path }}'"
-                       style="background-color: rgba(121, 174, 200, 0.8); height: 30px; font-size: 0.8em; margin-top: 12px; padding-top: 6px; float:right">
-                </input>
-                &nbsp;
-                &nbsp;
-                {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} total
-                &nbsp;
-               (Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }})
+            </form>
+            <div class="public-snapshot-count">
+                {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }}
+                <span>(page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }})</span>
             </div>
-        </form>
-    </div>
-    <div style="width: 100%; overflow-x: auto;">
-        <table id="table-bookmarks" style="width: 100%; table-layout: fixed">
-            <thead>
-                <tr>
-                    <th style="width: 132px">Bookmarked</th>
-                    <th>Snapshot ({{page_obj.paginator.count}})</th>
-                    <th style="width: 280px">Files</th>
-                    <th>Original URL</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for link in object_list %}
-                    {% include 'index_row.html' with link=link  %}
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    <br/>
-    <center>
-        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} total
-        <br/>
-        <span class="step-links">
-            {% if page_obj.has_previous %}
-                <a href="?{% url_replace page='1' %}">&laquo; first</a> &nbsp;
-                <a href="?{% url_replace page=page_obj.previous_page_number %}">previous</a>
-                &nbsp;
-            {% endif %}
-    
-            <span class="current">
-                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </div>
+        <div class="public-snapshot-table-wrap">
+            <table id="table-bookmarks">
+                <thead>
+                    <tr>
+                        <th class="snapshot-time">Saved</th>
+                        <th class="snapshot-preview-cell">Preview</th>
+                        <th>Snapshot ({{ page_obj.paginator.count }})</th>
+                        <th class="snapshot-tags-cell">Tags</th>
+                        <th class="snapshot-status-cell">Status</th>
+                        <th class="snapshot-files-cell">Files</th>
+                        <th class="snapshot-size-cell">Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for link in object_list %}
+                        {% include 'index_row.html' with link=link %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="public-pagination">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} total
+            <br>
+            <span class="step-links">
+                {% if page_obj.has_previous %}
+                    <a href="?{% url_replace page='1' %}">&laquo; first</a>
+                    <a href="?{% url_replace page=page_obj.previous_page_number %}">previous</a>
+                {% endif %}
+
+                <span class="current">
+                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                </span>
+
+                {% if page_obj.has_next %}
+                    <a href="?{% url_replace page=page_obj.next_page_number %}">next</a>
+                    <a href="?{% url_replace page=page_obj.paginator.num_pages %}">last &raquo;</a>
+                {% endif %}
             </span>
-        
-            {% if page_obj.has_next %}
-                &nbsp;
-                <a href="?{% url_replace page=page_obj.next_page_number %}">next </a> &nbsp;
-                <a href="?{% url_replace page=page_obj.paginator.num_pages %}">last &raquo;</a>
-            {% endif %}
-        </span>
-        <br>
-    </center>
+        </div>
+    </div>
 {% endblock %}
