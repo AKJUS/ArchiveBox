@@ -1122,18 +1122,25 @@ def recover_orphaned_snapshots() -> int:
     from archivebox.crawls.models import Crawl
     from archivebox.core.models import ArchiveResult, Snapshot
     from archivebox.machine.models import Process
-    from django.db.models import Q
 
     active_snapshot_ids: set[str] = set()
     orphaned_snapshots = list(
-        Snapshot.objects.filter(
-            Q(status=Snapshot.StatusChoices.STARTED, retry_at__isnull=True)
-            | Q(status=Snapshot.StatusChoices.SEALED, archiveresult__status=ArchiveResult.StatusChoices.QUEUED),
-        )
+        Snapshot.objects.filter(status=Snapshot.StatusChoices.STARTED, retry_at__isnull=True)
         .select_related("crawl")
-        .prefetch_related("archiveresult_set")
-        .distinct(),
+        .prefetch_related("archiveresult_set"),
     )
+
+    queued_result_snapshot_ids = list(
+        ArchiveResult.objects.filter(status=ArchiveResult.StatusChoices.QUEUED).values_list("snapshot_id", flat=True).distinct(),
+    )
+    if queued_result_snapshot_ids:
+        orphaned_snapshots.extend(
+            snapshot
+            for snapshot in Snapshot.objects.filter(id__in=queued_result_snapshot_ids)
+            .select_related("crawl")
+            .prefetch_related("archiveresult_set")
+            if snapshot.status == Snapshot.StatusChoices.SEALED
+        )
     running_processes = Process.objects.filter(
         status=Process.StatusChoices.RUNNING,
         process_type__in=[

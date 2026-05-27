@@ -222,6 +222,27 @@
         color: #8b949e;
         margin-top: 2px;
     }
+    #progress-monitor .crawl-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 5px;
+    }
+    #progress-monitor .crawl-tag {
+        display: inline-flex;
+        align-items: center;
+        max-width: 120px;
+        padding: 1px 6px;
+        border: 1px solid #30363d;
+        border-radius: 10px;
+        color: #c9d1d9;
+        background: rgba(139, 148, 158, 0.12);
+        font-size: 10px;
+        line-height: 16px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     #progress-monitor .crawl-stats {
         display: flex;
         gap: 12px;
@@ -944,7 +965,10 @@
         }
 
         // Show snapshot info or URL count if no snapshots yet
-        let metaText = `depth: ${crawl.max_depth || 0}`;
+        const maxUrlsText = (crawl.max_urls || 0) > 0 ? `${crawl.max_urls} max URLs` : 'all URLs';
+        const crawlSizeText = crawl.max_crawl_size_display || 'unlimited';
+        const snapshotSizeText = crawl.max_snapshot_size_display || 'unlimited';
+        let metaText = `by ${escapeHtml(crawl.created_by || 'unknown')} | persona: ${escapeHtml(crawl.persona || 'Default')} | depth: ${crawl.max_depth || 0} | ${maxUrlsText} | crawl: ${escapeHtml(crawlSizeText)} | snapshot: ${escapeHtml(snapshotSizeText)}`;
         if ((crawl.total_snapshots || 0) > 0) {
             metaText += ` | ${crawl.total_snapshots} snapshots`;
         } else if ((crawl.urls_count || 0) > 0) {
@@ -952,6 +976,9 @@
         } else if (crawl.urls_preview) {
             metaText += ` | ${escapeHtml(crawl.urls_preview.substring(0, 40))}${crawl.urls_preview.length > 40 ? '...' : ''}`;
         }
+        const tagsHtml = (crawl.tags || []).length
+            ? `<div class="crawl-tags">${crawl.tags.map(tag => `<span class="crawl-tag" title="${escapeAttr(tag)}">${escapeHtml(tag)}</span>`).join('')}</div>`
+            : '';
 
         return `
             <div class="crawl-item" data-crawl-id="${crawl.id || 'unknown'}">
@@ -961,6 +988,7 @@
                             <div class="crawl-info">
                             <div class="crawl-label">Crawl: ${escapeHtml(crawl.label || '(no label)')}</div>
                             <div class="crawl-meta">${metaText}</div>
+                            ${tagsHtml}
                         </div>
                         <div class="crawl-stats">
                             <span style="color:#3fb950">${crawl.completed_snapshots || 0} done</span>

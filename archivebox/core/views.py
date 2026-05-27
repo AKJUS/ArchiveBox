@@ -1521,7 +1521,13 @@ def live_progress_view(request):
             "created_by_id",
             "modified_at",
             "urls",
+            "config",
             "max_depth",
+            "max_urls",
+            "crawl_max_size",
+            "snapshot_max_size",
+            "tags_str",
+            "persona_id",
             "status",
             "retry_at",
             "label",
@@ -1541,6 +1547,14 @@ def live_progress_view(request):
             key=lambda crawl: crawl.modified_at,
             reverse=True,
         )[:10]
+        persona_names_by_id: dict[str, str] = {}
+        persona_ids = {crawl.persona_id for crawl in active_crawls_list if crawl.persona_id}
+        if persona_ids:
+            from archivebox.personas.models import Persona
+
+            persona_names_by_id = {
+                str(persona_id): name for persona_id, name in Persona.objects.filter(id__in=persona_ids).values_list("id", "name")
+            }
         active_crawl_ids = [crawl.id for crawl in active_crawls_list]
         snapshot_counts_by_crawl: dict[str, dict[str, int]] = {str(crawl_id): {} for crawl_id in active_crawl_ids}
         cancelled_snapshot_counts_by_crawl: dict[str, int] = {str(crawl_id): 0 for crawl_id in active_crawl_ids}
@@ -1926,6 +1940,9 @@ def live_progress_view(request):
             # Check if crawl can start (for debugging stuck crawls)
             can_start = bool(crawl.urls)
             urls_preview = crawl.urls[:60] if crawl.urls else None
+            crawl_tags = [tag.strip() for tag in (crawl.tags_str or "").replace("\n", ",").split(",") if tag.strip()]
+            persona_name = persona_names_by_id.get(str(crawl.persona_id)) if crawl.persona_id else None
+            persona_name = persona_name or str((crawl.config or {}).get("DEFAULT_PERSONA") or "Default")
 
             # Check if retry_at is in the future (would prevent worker from claiming)
             retry_at_future = crawl.retry_at > now if crawl.retry_at else False
@@ -1949,7 +1966,15 @@ def live_progress_view(request):
                     "status": crawl.status,
                     "started": crawl.created_at.isoformat() if crawl.created_at else None,
                     "progress": crawl_progress,
+                    "created_by": crawl.created_by.username,
+                    "persona": persona_name,
                     "max_depth": crawl.max_depth,
+                    "max_urls": crawl.max_urls,
+                    "max_crawl_size": crawl.crawl_max_size,
+                    "max_snapshot_size": crawl.snapshot_max_size,
+                    "max_crawl_size_display": printable_filesize(crawl.crawl_max_size) if crawl.crawl_max_size else "unlimited",
+                    "max_snapshot_size_display": printable_filesize(crawl.snapshot_max_size) if crawl.snapshot_max_size else "unlimited",
+                    "tags": crawl_tags,
                     "urls_count": urls_count,
                     "total_snapshots": total_snapshots,
                     "completed_snapshots": completed_snapshots,
