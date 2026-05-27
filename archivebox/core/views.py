@@ -945,7 +945,7 @@ class PublicIndexView(ListView):
             snapshot._is_archived_cached = bool(snapshot.downloaded_at or snapshot.status == Snapshot.StatusChoices.SEALED)
             results = getattr(snapshot, "_prefetched_objects_cache", {}).get("archiveresult_set")
             if results is not None:
-                snapshot.output_size_sum = sum(result.output_size or result.output_size_from_files() for result in results)
+                snapshot.output_size_sum = sum(result.output_size or 0 for result in results)
                 snapshot.num_outputs_cached = len(results)
         return context
 
@@ -964,7 +964,6 @@ class PublicIndexView(ListView):
                         "plugin",
                         "status",
                         "output_size",
-                        "output_files",
                     ),
                 ),
             )
