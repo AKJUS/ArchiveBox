@@ -377,17 +377,6 @@ Bases: {py:obj}`archivebox.config.configset.BaseConfigSet`
 
 ````
 
-````{py:attribute} BIND_ADDR
-:canonical: archivebox.config.common.ServerConfig.BIND_ADDR
-:type: str
-:value: >
-   'Field(...)'
-
-```{autodoc2-docstring} archivebox.config.common.ServerConfig.BIND_ADDR
-```
-
-````
-
 ````{py:attribute} LISTEN_HOST
 :canonical: archivebox.config.common.ServerConfig.LISTEN_HOST
 :type: str
@@ -399,24 +388,13 @@ Bases: {py:obj}`archivebox.config.configset.BaseConfigSet`
 
 ````
 
-````{py:attribute} ADMIN_BASE_URL
-:canonical: archivebox.config.common.ServerConfig.ADMIN_BASE_URL
+````{py:attribute} BASE_URL
+:canonical: archivebox.config.common.ServerConfig.BASE_URL
 :type: str
 :value: >
    'Field(...)'
 
-```{autodoc2-docstring} archivebox.config.common.ServerConfig.ADMIN_BASE_URL
-```
-
-````
-
-````{py:attribute} ARCHIVE_BASE_URL
-:canonical: archivebox.config.common.ServerConfig.ARCHIVE_BASE_URL
-:type: str
-:value: >
-   'Field(...)'
-
-```{autodoc2-docstring} archivebox.config.common.ServerConfig.ARCHIVE_BASE_URL
+```{autodoc2-docstring} archivebox.config.common.ServerConfig.BASE_URL
 ```
 
 ````

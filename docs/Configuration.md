@@ -166,34 +166,19 @@ archivebox config --set PUBLIC_ADD_VIEW=False    # allow submitting new URLs wit
 Django's secret key for cryptographic signing (sessions, CSRF tokens, etc.). Automatically generated on first run.
 
 ---
-#### `BIND_ADDR`
+#### `LISTEN_HOST`
 **Possible Values:** [`127.0.0.1:8000`]/`0.0.0.0:8000`/...
-Address and port for the ArchiveBox web server to listen on.
+Address and port for the ArchiveBox web server to listen on. This is only the local bind socket, not the public URL.
 
 ---
-#### `LISTEN_HOST`
-**Possible Values:** [`archivebox.localhost:8000`]/`archive.example.com:443`/...
-The public hostname and port that ArchiveBox is accessible at.
+#### `BASE_URL`
+**Possible Values:** [`""`]/`https://archive.example.com`/`http://archivebox.localhost:8000`/...
+Canonical public URL used to build links. In subdomain security mode, ArchiveBox automatically derives `admin.`, `web.`, `api.`, `public.`, and `snap-*.` hosts from this base while preserving the scheme and port.
 
 ---
 #### `ALLOWED_HOSTS`
 **Possible Values:** [`*`]/`archive.example.com,localhost`/...
 Comma-separated list of allowed HTTP Host header values. Set this to your domain name(s) in production.
-
----
-#### `CSRF_TRUSTED_ORIGINS`
-**Possible Values:** [`http://admin.archivebox.localhost:8000`]/`https://archive.example.com`/...
-Comma-separated list of trusted origins for CSRF validation. Must include the scheme (http/https).
-
----
-#### `ADMIN_BASE_URL`
-**Possible Values:** [`""`]/`/admin/`/...
-Base URL path for the Django admin interface.
-
----
-#### `ARCHIVE_BASE_URL`
-**Possible Values:** [`""`]/`/archive/`/...
-Base URL path for serving archived content.
 
 ---
 #### `SNAPSHOTS_PER_PAGE`

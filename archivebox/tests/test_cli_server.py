@@ -7,8 +7,10 @@ Verify server can start (basic smoke tests only, no full server testing).
 import os
 import asyncio
 import json
+import signal
 import subprocess
 import sys
+from datetime import datetime
 from types import SimpleNamespace
 
 
@@ -156,3 +158,58 @@ def test_sonic_daemon_event_handler_accepts_real_running_worker(archivebox_daemo
             await bus.destroy()
 
     asyncio.run(run_test())
+
+
+def test_supervisord_takeover_stops_all_live_process_rows(tmp_path, process, db):
+    import psutil
+    from django.utils import timezone
+
+    from archivebox.machine.models import Machine, Process
+    from archivebox.tests.test_orm_helpers import use_archivebox_db
+
+    assert process.returncode == 0, process.stderr
+    env = os.environ.copy()
+    env.update({"DATA_DIR": str(tmp_path), "USE_COLOR": "False", "SHOW_PROGRESS": "False"})
+    procs = []
+    try:
+        for _index in range(2):
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "archivebox", "run", "--daemon"],
+                cwd=tmp_path,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            procs.append(proc)
+            started_at = datetime.fromtimestamp(psutil.Process(proc.pid).create_time(), tz=timezone.get_current_timezone())
+            with use_archivebox_db(tmp_path):
+                Process.objects.create(
+                    machine=Machine.current(),
+                    process_type=Process.TypeChoices.SUPERVISORD,
+                    worker_type="supervisord",
+                    pwd=str(tmp_path),
+                    cmd=[sys.executable],
+                    pid=proc.pid,
+                    started_at=started_at,
+                    status=Process.StatusChoices.RUNNING,
+                    timeout=0,
+                )
+
+        with use_archivebox_db(tmp_path):
+            from archivebox.workers.supervisord_util import stop_existing_supervisord_process
+
+            stop_existing_supervisord_process()
+
+        for proc in procs:
+            proc.wait(timeout=10)
+        with use_archivebox_db(tmp_path):
+            assert not Process.objects.filter(
+                process_type=Process.TypeChoices.SUPERVISORD,
+                status=Process.StatusChoices.RUNNING,
+                pwd=str(tmp_path),
+            ).exists()
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGKILL)
