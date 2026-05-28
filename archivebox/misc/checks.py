@@ -80,7 +80,11 @@ def check_migrations(*, blocking: bool = True, auto_apply: bool = False, cancel_
             print(f"        ... and {len(missing_from_code) - 10} more", file=sys.stderr)
         print(file=sys.stderr)
         print(
-            "    If you intentionally downgraded and need to roll the DB back, run this with a build that contains those migrations:",
+            "    If you are intentionally trying to downgrade, switch back to the newer version temporarily",
+            file=sys.stderr,
+        )
+        print(
+            "    and run this to downgrade the DB version (back up your DB first!):",
             file=sys.stderr,
         )
         for app, target in sorted(rollback_targets.items()):

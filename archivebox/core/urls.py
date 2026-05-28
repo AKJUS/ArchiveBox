@@ -71,7 +71,7 @@ urlpatterns = [
     path("accounts/logout/", RedirectView.as_view(url="/admin/logout/")),
     path("accounts/", include("django.contrib.auth.urls")),
     re_path(
-        r"^admin/live-progress/screencast/(?P<snapshot_id>[0-9a-fA-F-]{8,36})\.jpg$",
+        r"^admin/live-progress/screencast/(?P<object_id>[0-9a-fA-F-]{8,36})\.jpg$",
         archivebox_admin.admin_view(live_progress_screencast_frame_view),
         name="live_progress_screencast_frame",
     ),

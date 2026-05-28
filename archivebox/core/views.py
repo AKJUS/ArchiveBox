@@ -1386,24 +1386,20 @@ class HealthCheckView(View):
         return HttpResponse("OK", content_type="text/plain", status=200)
 
 
-def live_progress_screencast_frame_view(request, snapshot_id: str):
+def live_progress_screencast_frame_view(request, object_id: str):
     """Serve cache-only Chrome screencast frames through the admin app."""
     if not is_admin_user(request):
         return HttpResponseForbidden("Permission denied")
 
     token = request.GET.get("token", "")
     try:
-        if SCREENCAST_SIGNER.unsign(token, max_age=60) != str(snapshot_id):
+        if SCREENCAST_SIGNER.unsign(token, max_age=60) != str(object_id):
             return HttpResponseForbidden("Permission denied")
     except (BadSignature, SignatureExpired):
         return HttpResponseForbidden("Permission denied")
 
-    snapshot = Snapshot.objects.filter(id=snapshot_id).select_related("crawl", "crawl__created_by").first()
-    if not snapshot:
-        raise Http404
-
     live_root = (CONSTANTS.CACHE_DIR / "chrome_screencast").resolve()
-    frame_path = live_root / str(snapshot.id) / "latest.jpg"
+    frame_path = live_root / str(object_id) / "latest.jpg"
     try:
         resolved_frame_path = frame_path.resolve(strict=True)
     except FileNotFoundError:
@@ -1975,6 +1971,19 @@ def live_progress_view(request):
             crawl_setup_completed = sum(1 for item in crawl_setup_plugins if item.get("status") == "succeeded")
             crawl_setup_failed = sum(1 for item in crawl_setup_plugins if item.get("status") == "failed")
             crawl_setup_pending = sum(1 for item in crawl_setup_plugins if item.get("status") == "queued")
+            crawl_screencast_url = ""
+            crawl_screencast_link = ""
+            live_crawl_preview_path = CONSTANTS.CACHE_DIR / "chrome_screencast" / crawl_id / "latest.jpg"
+            try:
+                live_crawl_preview_stat = live_crawl_preview_path.stat()
+            except OSError:
+                live_crawl_preview_stat = None
+            if live_crawl_preview_stat and live_crawl_preview_stat.st_size > 0:
+                token = SCREENCAST_SIGNER.sign(crawl_id)
+                crawl_screencast_url = (
+                    f"/admin/live-progress/screencast/{crawl_id}.jpg?v={live_crawl_preview_stat.st_mtime_ns}&token={quote(token)}"
+                )
+                crawl_screencast_link = f"/admin/crawls/crawl/{crawl_id}/change/"
 
             # Get active snapshots for this crawl (already prefetched)
             active_snapshots_for_crawl = []
@@ -2251,6 +2260,8 @@ def live_progress_view(request):
                     "setup_completed_plugins": crawl_setup_completed,
                     "setup_failed_plugins": crawl_setup_failed,
                     "setup_pending_plugins": crawl_setup_pending,
+                    "screencast_url": crawl_screencast_url,
+                    "screencast_link": crawl_screencast_link,
                     "active_snapshots": active_snapshots_for_crawl,
                     "can_start": can_start,
                     "urls_preview": urls_preview,

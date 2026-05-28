@@ -219,6 +219,39 @@
         object-fit: cover;
         object-position: top center;
     }
+    #progress-monitor .screencast-placeholder {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 6px;
+        text-align: center;
+        color: #8b949e;
+        background: #010409;
+    }
+    #progress-monitor .screencast-placeholder-icon {
+        color: #c9d1d9;
+        font-size: 32px;
+        font-weight: 700;
+        line-height: 1;
+    }
+    #progress-monitor .screencast-placeholder.launching .screencast-placeholder-icon {
+        color: #d29922;
+    }
+    #progress-monitor .screencast-placeholder-title {
+        color: #f0f6fc;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+    #progress-monitor .screencast-placeholder-subtitle {
+        max-width: 260px;
+        color: #8b949e;
+        font-size: 11px;
+        line-height: 1.35;
+    }
     #progress-monitor .screencast-caption {
         display: flex;
         align-items: center;
@@ -236,6 +269,14 @@
         flex: 0 0 7px;
         background: #3fb950;
         box-shadow: 0 0 8px rgba(63, 185, 80, 0.9);
+    }
+    #progress-monitor .screencast-dot.not-launched {
+        background: #6e7681;
+        box-shadow: none;
+    }
+    #progress-monitor .screencast-dot.launching {
+        background: #d29922;
+        box-shadow: 0 0 8px rgba(210, 153, 34, 0.8);
     }
     #progress-monitor .screencast-text {
         min-width: 0;
@@ -1149,24 +1190,106 @@
         });
     }
 
-    function activeScreencastSnapshot(data) {
+    function setupHookMatches(item, pattern) {
+        const text = `${item.plugin || ''} ${item.hook_name || ''} ${item.label || ''}`.toLowerCase();
+        return text.includes(pattern);
+    }
+
+    function activeScreencastTarget(data) {
         for (const crawl of data.active_crawls || []) {
             for (const snapshot of crawl.active_snapshots || []) {
                 if (!Array.isArray(snapshot) && snapshot.screencast_url) {
-                    return snapshot;
+                    return {type: 'frame', crawl, snapshot};
                 }
+            }
+        }
+        for (const crawl of data.active_crawls || []) {
+            if (crawl.screencast_url) {
+                return {
+                    type: 'frame',
+                    crawl,
+                    snapshot: {
+                        id: crawl.id,
+                        title: 'Live browser setup',
+                        url: 'Crawl setup',
+                        admin_url: `/admin/crawls/crawl/${crawl.id}/change/`,
+                        screencast_url: crawl.screencast_url,
+                        screencast_link: crawl.screencast_link,
+                    },
+                };
+            }
+        }
+        for (const crawl of data.active_crawls || []) {
+            const setupPlugins = crawl.setup_plugins || [];
+            const startedSetup = setupPlugins.filter((item) => item.status === 'started');
+            if (startedSetup.some((item) => setupHookMatches(item, 'chrome launch'))) {
+                return {
+                    type: 'placeholder',
+                    crawl,
+                    state: 'launching',
+                    icon: '▣',
+                    title: 'Launching browser',
+                    subtitle: 'Chrome is starting and publishing its CDP session.',
+                };
+            }
+            for (const snapshot of crawl.active_snapshots || []) {
+                if (Array.isArray(snapshot)) continue;
+                const startedSnapshotPlugins = (snapshot.all_plugins || []).filter((item) => item.status === 'started');
+                if (startedSnapshotPlugins.some((item) => setupHookMatches(item, 'chrome tab'))) {
+                    return {
+                        type: 'placeholder',
+                        crawl,
+                        snapshot,
+                        state: 'launching',
+                        icon: '▣',
+                        title: 'Opening browser tab',
+                        subtitle: 'The snapshot tab is being attached for capture.',
+                    };
+                }
+            }
+            if ((crawl.status === 'queued' || crawl.status === 'started') && !setupPlugins.some((item) => setupHookMatches(item, 'chrome launch'))) {
+                return {
+                    type: 'placeholder',
+                    crawl,
+                    state: 'not-launched',
+                    icon: '▯',
+                    title: 'Browser not launched yet',
+                    subtitle: 'Waiting for the crawl setup hooks to start Chrome.',
+                };
             }
         }
         return null;
     }
 
     function updateScreencastPanel(data) {
-        const snapshot = activeScreencastSnapshot(data);
-        if (!snapshot) {
+        const target = activeScreencastTarget(data);
+        if (!target) {
             screencastPanel.classList.remove('visible');
             screencastPanel.innerHTML = '';
             return;
         }
+        if (target.type === 'placeholder') {
+            const crawlUrl = target.crawl?.id ? `/admin/crawls/crawl/${target.crawl.id}/change/` : '/admin/';
+            screencastPanel.classList.add('visible');
+            screencastPanel.innerHTML = `
+                <a class="screencast-frame" href="${escapeAttr(crawlUrl)}" title="Open crawl admin">
+                    <span class="screencast-placeholder ${escapeAttr(target.state)}">
+                        <span class="screencast-placeholder-icon">${escapeHtml(target.icon)}</span>
+                        <span class="screencast-placeholder-title">${escapeHtml(target.title)}</span>
+                        <span class="screencast-placeholder-subtitle">${escapeHtml(target.subtitle)}</span>
+                    </span>
+                </a>
+                <a class="screencast-caption" href="${escapeAttr(crawlUrl)}" title="Open crawl admin">
+                    <span class="screencast-dot ${escapeAttr(target.state)}"></span>
+                    <span class="screencast-text">
+                        <span class="screencast-title">${escapeHtml(target.title)}</span>
+                        <span class="screencast-url">Crawl setup</span>
+                    </span>
+                </a>
+            `;
+            return;
+        }
+        const snapshot = target.snapshot;
         const adminUrl = snapshot.admin_url || `/admin/core/snapshot/${snapshot.id || 'unknown'}/change/`;
         const linkUrl = snapshot.screencast_link || snapshot.view_url || adminUrl;
         const titleText = snapshot.title || formatUrl(snapshot.full_url || snapshot.url);

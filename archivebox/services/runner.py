@@ -1208,11 +1208,6 @@ def run_snapshot_maintenance(snapshot_id: str) -> bool:
     snapshot.write_index_jsonl()
     snapshot.write_json_details()
     snapshot.write_html_details()
-    print(
-        f"[runner] Snapshot {str(snapshot.id)[-12:]} maintenance complete "
-        f"status={snapshot.status} fs_version={snapshot.fs_version} queued_results={'yes' if has_queued_results else 'no'}",
-        flush=True,
-    )
     return True
 
 
