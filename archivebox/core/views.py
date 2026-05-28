@@ -1560,6 +1560,17 @@ def live_progress_view(request):
             url = str(url or "")
             return url if len(url) <= 96 else f"{url[:93]}..."
 
+        def screencast_frame_url(object_id: str) -> str:
+            frame_path = CONSTANTS.CACHE_DIR / "chrome_screencast" / object_id / "latest.jpg"
+            try:
+                frame_stat = frame_path.stat()
+            except OSError:
+                return ""
+            if frame_stat.st_size <= 0:
+                return ""
+            token = SCREENCAST_SIGNER.sign(object_id)
+            return f"/admin/live-progress/screencast/{object_id}.jpg?v={frame_stat.st_mtime_ns}&token={quote(token)}"
+
         machine_id = Machine.current().id
         orchestrator_proc = (
             Process.objects.filter(
@@ -1971,19 +1982,8 @@ def live_progress_view(request):
             crawl_setup_completed = sum(1 for item in crawl_setup_plugins if item.get("status") == "succeeded")
             crawl_setup_failed = sum(1 for item in crawl_setup_plugins if item.get("status") == "failed")
             crawl_setup_pending = sum(1 for item in crawl_setup_plugins if item.get("status") == "queued")
-            crawl_screencast_url = ""
-            crawl_screencast_link = ""
-            live_crawl_preview_path = CONSTANTS.CACHE_DIR / "chrome_screencast" / crawl_id / "latest.jpg"
-            try:
-                live_crawl_preview_stat = live_crawl_preview_path.stat()
-            except OSError:
-                live_crawl_preview_stat = None
-            if live_crawl_preview_stat and live_crawl_preview_stat.st_size > 0:
-                token = SCREENCAST_SIGNER.sign(crawl_id)
-                crawl_screencast_url = (
-                    f"/admin/live-progress/screencast/{crawl_id}.jpg?v={live_crawl_preview_stat.st_mtime_ns}&token={quote(token)}"
-                )
-                crawl_screencast_link = f"/admin/crawls/crawl/{crawl_id}/change/"
+            crawl_screencast_url = screencast_frame_url(crawl_id)
+            crawl_screencast_link = f"/admin/crawls/crawl/{crawl_id}/change/" if crawl_screencast_url else ""
 
             # Get active snapshots for this crawl (already prefetched)
             active_snapshots_for_crawl = []
@@ -2034,17 +2034,8 @@ def live_progress_view(request):
                     snapshot_preview_url = snapshot_favicon_url
 
                 if snapshot["status"] == Snapshot.StatusChoices.STARTED:
-                    live_preview_path = CONSTANTS.CACHE_DIR / "chrome_screencast" / str(snapshot["id"]) / "latest.jpg"
-                    try:
-                        live_preview_stat = live_preview_path.stat()
-                    except OSError:
-                        live_preview_stat = None
-                    if live_preview_stat and live_preview_stat.st_size > 0:
-                        token = SCREENCAST_SIGNER.sign(str(snapshot["id"]))
-                        snapshot_screencast_url = (
-                            f"/admin/live-progress/screencast/{snapshot['id']}.jpg?v={live_preview_stat.st_mtime_ns}&token={quote(token)}"
-                        )
-                        snapshot_screencast_link = snapshot_view_url(snapshot)
+                    snapshot_screencast_url = screencast_frame_url(str(snapshot["id"]))
+                    snapshot_screencast_link = snapshot_view_url(snapshot) if snapshot_screencast_url else ""
 
                 def plugin_sort_key(ar):
                     status_order = {

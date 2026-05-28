@@ -231,49 +231,30 @@ class CrawlRunner:
         if threading.current_thread() is not threading.main_thread():
             return []
 
-        loop = asyncio.get_running_loop()
         installed: list[tuple[signal.Signals, Any, bool]] = []
         for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
             previous = signal.getsignal(sig)
 
-            def request_abort(sig=sig) -> None:
+            def request_abort(_signum, _frame, sig=sig) -> None:
+                os.write(sys.stdout.fileno(), f"\n[🛑] Got {sig.name}, stopping gracefully...\n".encode())
                 self._request_abort_from_signal(sig)
+                raise KeyboardInterrupt
 
-            try:
-                loop.add_signal_handler(sig, request_abort)
-                installed.append((sig, previous, True))
-            except (NotImplementedError, RuntimeError):
-                signal.signal(sig, lambda _signum, _frame, sig=sig: self._request_abort_from_signal(sig))
-                installed.append((sig, previous, False))
+            signal.signal(sig, request_abort)
+            installed.append((sig, previous, False))
         return installed
 
     def _restore_signal_handlers(self, installed: list[tuple[signal.Signals, Any, bool]]) -> None:
-        loop = asyncio.get_running_loop()
         for sig, previous, installed_on_loop in reversed(installed):
             if installed_on_loop:
-                loop.remove_signal_handler(sig)
+                asyncio.get_running_loop().remove_signal_handler(sig)
             signal.signal(sig, previous)
 
-    def _request_abort_from_signal(self, sig: signal.Signals) -> None:
-        if self._signal_abort_requested:
-            if self._run_task is not None and not self._run_task.done():
-                self._run_task.cancel()
-            return
+    def _request_abort_from_signal(self, _sig: signal.Signals) -> None:
         self._signal_abort_requested = True
         self._skip_wait_until_idle = True
-        asyncio.create_task(self.abort_from_signal(sig.name))
-
-    async def abort_from_signal(self, signal_name: str) -> None:
-        from archivebox.crawls.models import Crawl
-
-        await sync_to_async(
-            Crawl.objects.filter(id=self.crawl.id).exclude(status=Crawl.StatusChoices.SEALED).update,
-            thread_sensitive=False,
-        )(
-            status=Crawl.StatusChoices.STARTED,
-            retry_at=timezone.now(),
-            modified_at=timezone.now(),
-        )
+        if self._run_task is not None and not self._run_task.done():
+            self._run_task.cancel()
 
     async def crawl_is_cancelled(self) -> bool:
         from archivebox.crawls.models import Crawl
@@ -380,7 +361,12 @@ class CrawlRunner:
     async def stop_snapshot_tasks(self) -> None:
         if not self.snapshot_tasks:
             return
-        done, pending = await asyncio.wait(list(self.snapshot_tasks.values()), timeout=5.0)
+        tasks = list(self.snapshot_tasks.values())
+        if self._signal_abort_requested:
+            done = {task for task in tasks if task.done()}
+            pending = set(tasks) - done
+        else:
+            done, pending = await asyncio.wait(tasks, timeout=5.0)
         for task in pending:
             task.cancel()
         await asyncio.gather(*done, *pending, return_exceptions=True)

@@ -1190,12 +1190,9 @@
         });
     }
 
-    function setupHookMatches(item, pattern) {
-        const text = `${item.plugin || ''} ${item.hook_name || ''} ${item.label || ''}`.toLowerCase();
-        return text.includes(pattern);
-    }
-
     function activeScreencastTarget(data) {
+        const hookText = (item) => `${item.plugin || ''} ${item.hook_name || ''} ${item.label || ''}`.toLowerCase();
+        let fallback = null;
         for (const crawl of data.active_crawls || []) {
             for (const snapshot of crawl.active_snapshots || []) {
                 if (!Array.isArray(snapshot) && snapshot.screencast_url) {
@@ -1218,12 +1215,12 @@
                     },
                 };
             }
-        }
-        for (const crawl of data.active_crawls || []) {
+
+            if (fallback) continue;
+
             const setupPlugins = crawl.setup_plugins || [];
-            const startedSetup = setupPlugins.filter((item) => item.status === 'started');
-            if (startedSetup.some((item) => setupHookMatches(item, 'chrome launch'))) {
-                return {
+            if (setupPlugins.some((item) => item.status === 'started' && hookText(item).includes('chrome launch'))) {
+                fallback = {
                     type: 'placeholder',
                     crawl,
                     state: 'launching',
@@ -1231,24 +1228,27 @@
                     title: 'Launching browser',
                     subtitle: 'Chrome is starting and publishing its CDP session.',
                 };
+                continue;
             }
-            for (const snapshot of crawl.active_snapshots || []) {
-                if (Array.isArray(snapshot)) continue;
-                const startedSnapshotPlugins = (snapshot.all_plugins || []).filter((item) => item.status === 'started');
-                if (startedSnapshotPlugins.some((item) => setupHookMatches(item, 'chrome tab'))) {
-                    return {
-                        type: 'placeholder',
-                        crawl,
-                        snapshot,
-                        state: 'launching',
-                        icon: '▣',
-                        title: 'Opening browser tab',
-                        subtitle: 'The snapshot tab is being attached for capture.',
-                    };
-                }
+            const openingSnapshot = (crawl.active_snapshots || []).find((snapshot) => {
+                return !Array.isArray(snapshot) && (snapshot.all_plugins || []).some((item) => (
+                    item.status === 'started' && hookText(item).includes('chrome tab')
+                ));
+            });
+            if (openingSnapshot) {
+                fallback = {
+                    type: 'placeholder',
+                    crawl,
+                    snapshot: openingSnapshot,
+                    state: 'launching',
+                    icon: '▣',
+                    title: 'Opening browser tab',
+                    subtitle: 'The snapshot tab is being attached for capture.',
+                };
+                continue;
             }
-            if ((crawl.status === 'queued' || crawl.status === 'started') && !setupPlugins.some((item) => setupHookMatches(item, 'chrome launch'))) {
-                return {
+            if ((crawl.status === 'queued' || crawl.status === 'started') && !setupPlugins.some((item) => hookText(item).includes('chrome launch'))) {
+                fallback = {
                     type: 'placeholder',
                     crawl,
                     state: 'not-launched',
@@ -1258,7 +1258,7 @@
                 };
             }
         }
-        return null;
+        return fallback;
     }
 
     function updateScreencastPanel(data) {

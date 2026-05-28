@@ -42,6 +42,7 @@ __command__ = "archivebox run"
 
 import os
 import sys
+import asyncio
 from collections import defaultdict
 
 import rich_click as click
@@ -266,7 +267,7 @@ def run_runner(daemon: bool = False, crawl_id: str | None = None, maintenance_on
         with foreground_shutdown_signals(), foreground_parent_watchdog(enabled=not daemon):
             run_pending_crawls(daemon=daemon, crawl_id=crawl_id, maintenance_only=maintenance_only)
         return 0
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         return 0
     except Exception as e:
         rprint(f"[red]Runner error: {type(e).__name__}: {e}[/red]", file=sys.stderr)

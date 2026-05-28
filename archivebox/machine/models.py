@@ -812,8 +812,10 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
             print(f"Failed to create LIB_BIN_DIR {lib_bin_dir}: {e}", file=sys.stderr)
             return None
 
-        # Get binary name (last component of path)
-        binary_name = binary_abspath.name
+        # Expose the canonical Binary.name in LIB_BIN_DIR. Some providers point
+        # abspath at implementation files like cli.js or manifest.json; those
+        # are valid targets, but they are not user-facing binary names.
+        binary_name = _canonical_binary_name(self.name) or binary_abspath.name
         symlink_path = lib_bin_dir / binary_name
 
         if app_index != -1 and len(binary_parts) > app_index + 2 and binary_parts[app_index + 1 : app_index + 3] == ("Contents", "MacOS"):
@@ -842,7 +844,6 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
         # Create new symlink
         try:
             symlink_path.symlink_to(binary_abspath)
-            print(f"Symlinked {binary_name} -> {symlink_path}", file=sys.stderr)
             return symlink_path
         except (OSError, PermissionError) as e:
             print(f"Failed to create symlink {symlink_path} -> {binary_abspath}: {e}", file=sys.stderr)

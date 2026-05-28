@@ -22,7 +22,7 @@ def server(
     nothreading: bool = False,
 ) -> None:
     """Run the ArchiveBox HTTP server"""
-    from archivebox.config.common import get_config
+    from archivebox.config.common import get_config, rprint
 
     config = get_config()
     runserver_args = list(runserver_args or (config.BIND_ADDR,))
@@ -76,6 +76,7 @@ def server(
     from archivebox.services.supervision_service import (
         command_owns_runtime_stack,
         current_command,
+        runtime_stack_owner,
         standby_until_runtime_stack_needed,
     )
     from archivebox.core.shutdown_util import foreground_parent_watchdog, foreground_shutdown_signals
@@ -94,6 +95,14 @@ def server(
     print()
     bind_url = f"http://{host}:{port}"
     command = current_command(Process.TypeChoices.SERVER, data_dir=config.DATA_DIR, url=bind_url)
+
+    def still_owns_runtime_stack() -> bool:
+        from django.db import connections
+
+        try:
+            return command_owns_runtime_stack(command, data_dir=config.DATA_DIR)
+        finally:
+            connections.close_all()
 
     try:
         with foreground_shutdown_signals(), foreground_parent_watchdog():
@@ -114,13 +123,19 @@ def server(
                     debug=run_in_debug,
                     reload=reload,
                     nothreading=nothreading,
-                    keep_running=lambda: command_owns_runtime_stack(command, data_dir=config.DATA_DIR),
-                    should_stop_supervisord=lambda: command_owns_runtime_stack(command, data_dir=config.DATA_DIR),
+                    keep_running=still_owns_runtime_stack,
+                    should_stop_supervisord=still_owns_runtime_stack,
                 )
                 if result == "interrupted":
                     break
-                if not command_owns_runtime_stack(command, data_dir=config.DATA_DIR):
-                    print("[yellow][*] Another ArchiveBox command took over the runtime stack; standing by.[/yellow]")
+                if not still_owns_runtime_stack():
+                    owner = runtime_stack_owner(data_dir=config.DATA_DIR)
+                    owner_pid = owner.pid if owner else "unknown"
+                    rprint(
+                        "[yellow][*] A newer archivebox process took over the runner "
+                        f"(pid={owner_pid}). Work will continue there, and will continue here if the other process is stopped and work still remains.[/yellow]",
+                        file=sys.stderr,
+                    )
                     continue
                 if result == "exited":
                     print("[yellow][*] Runtime stack exited while this parent is still leader; restarting...[/yellow]")

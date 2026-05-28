@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import sys
 from pathlib import Path
 
 from django.utils import timezone
@@ -29,7 +30,6 @@ def current_command(process_type: str, *, data_dir: str | Path, url: str | None 
 def live_processes(*, process_type: str, data_dir: str | Path, url: str | None = None):
     from archivebox.machine.models import Machine, Process
 
-    Process.cleanup_stale_running(machine=Machine.current())
     qs = Process.objects.filter(
         machine=Machine.current(),
         process_type=process_type,
@@ -54,7 +54,6 @@ def command_is_newest(command, *, process_type: str, data_dir: str | Path, url: 
 def runtime_stack_owner(*, data_dir: str | Path):
     from archivebox.machine.models import Machine, Process
 
-    Process.cleanup_stale_running(machine=Machine.current())
     base_qs = Process.objects.filter(
         machine=Machine.current(),
         status=Process.StatusChoices.RUNNING,
@@ -117,7 +116,6 @@ def healthy_orchestrator(*, data_dir: str | Path):
     from archivebox.machine.models import Machine, Process
     from archivebox.workers.supervisord_util import get_existing_supervisord_process, get_worker
 
-    Process.cleanup_stale_running(machine=Machine.current())
     supervisor = get_existing_supervisord_process()
     worker = get_worker(supervisor, "worker_runner") if supervisor else None
     if isinstance(worker, dict) and worker.get("statename") in ("STARTING", "RUNNING"):
@@ -145,7 +143,6 @@ def standby_until_leader_needed(command, *, process_type: str, data_dir: str | P
             leader_pid = leader.pid if leader else "unknown"
             rprint(f"[yellow][*] Standing by; newer ArchiveBox parent pid={leader_pid} is running the orchestrator and server.[/yellow]")
             announced = True
-        command.heartbeat()
         time.sleep(interval)
     command.modified_at = timezone.now()
     command.save(update_fields=["modified_at"])
@@ -161,11 +158,11 @@ def standby_until_runtime_stack_needed(command, *, data_dir: str | Path, interva
             owner = runtime_stack_owner(data_dir=data_dir)
             owner_pid = owner.pid if owner else "unknown"
             rprint(
-                "[yellow][*] Runner is now owned by newer archivebox process "
-                f"pid={owner_pid}, processing will continue there and will resume here if the other process is stopped and work still remains[/yellow]",
+                "[yellow][*] A newer archivebox process took over the runner "
+                f"(pid={owner_pid}). Work will continue there, and will continue here if the other process is stopped and work still remains.[/yellow]",
+                file=sys.stderr,
             )
             announced = True
-        command.heartbeat()
         time.sleep(interval)
     command.modified_at = timezone.now()
     command.save(update_fields=["modified_at"])

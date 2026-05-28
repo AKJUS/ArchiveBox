@@ -422,7 +422,7 @@ def stop_existing_supervisord_process():
     PID_FILE = SOCK_FILE.parent / PID_FILE_NAME
     stop_grace_seconds = configured_stopwaitsecs(tuple(_desired_supervisord_workers.values()))
 
-    supervisor = get_existing_supervisord_process()
+    supervisor = get_existing_supervisord_process(quiet=True)
     supervisor_pid = None
     supervisor_shutdown_requested = False
     if supervisor is not None:
@@ -955,6 +955,9 @@ def start_server_workers(
         if daemonize:
             return None
 
+        from django.db import connections
+
+        connections.close_all()
         try:
             with foreground_shutdown_signals() as shutdown_state:
                 # Tail worker logs while supervisord runs.

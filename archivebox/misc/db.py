@@ -34,6 +34,12 @@ def sqlite_lock_holders(db_path: Path = DATA_DIR / "index.sqlite3") -> list[str]
     import psutil
 
     db_path = db_path.resolve()
+    db_sidecars = {
+        db_path,
+        db_path.with_name(f"{db_path.name}-wal"),
+        db_path.with_name(f"{db_path.name}-shm"),
+        db_path.with_name(f"{db_path.name}-journal"),
+    }
     holders: list[str] = []
     for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline", "status"]):
         try:
@@ -45,7 +51,7 @@ def sqlite_lock_holders(db_path: Path = DATA_DIR / "index.sqlite3") -> list[str]
                 open_path = Path(open_file.path).resolve()
             except (OSError, RuntimeError):
                 continue
-            if open_path == db_path or open_path.name in {f"{db_path.name}-wal", f"{db_path.name}-shm", f"{db_path.name}-journal"}:
+            if open_path in db_sidecars:
                 info = proc.info
                 cmdline = compact_command(info.get("cmdline"), fallback=info.get("name") or "")
                 holders.append(f"pid={info['pid']} ppid={info['ppid']} {info['status']} {cmdline}")
