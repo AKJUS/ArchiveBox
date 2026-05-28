@@ -874,11 +874,18 @@ def test_archiveresult_files_preserved_after_migration(tmp_path):
     # CRITICAL: Verify old structure is cleaned up
     assert old_files_count == 0, f"Old structure not cleaned up: {old_files_count} files still in archive/timestamp/ directories"
 
-    # CRITICAL: Verify all files were moved (total count should match)
-    total_after_update = files_new_count + old_files_count
-    assert files_before_count == total_after_update, (
-        f"Files lost during reorganization: {files_before_count} before → {total_after_update} after"
+    # CRITICAL: Verify all original payload files were moved. The 0.9 lazy
+    # maintenance pass also writes fresh index.jsonl/index.html metadata from
+    # the hydrated DB row, so raw file counts are allowed to increase; compare
+    # the legacy payload contents after excluding those generated metadata
+    # files to keep the no-data-loss assertion strict.
+    generated_metadata_names = {"index.html", "index.jsonl"}
+    original_payloads = sorted(path.read_text() for path in files_before)
+    migrated_payloads = sorted(
+        path.read_text() for path in [*files_new_structure, *old_files_remaining] if path.name not in generated_metadata_names
     )
+    assert original_payloads == migrated_payloads, "Legacy payload files changed or were lost during reorganization"
+    assert files_new_count >= files_before_count, "New 0.9 metadata should not replace legacy payload files"
 
     # CRITICAL: Verify sample files exist in new structure
     assert len(new_sample_files) > 0, "Sample files not found in new structure"
