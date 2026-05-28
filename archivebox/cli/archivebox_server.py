@@ -25,7 +25,7 @@ def server(
     from archivebox.config.common import get_config
 
     config = get_config()
-    runserver_args = list(runserver_args or (config.LISTEN_HOST,))
+    runserver_args = list(runserver_args or (config.BIND_ADDR,))
 
     if init:
         from archivebox.cli.archivebox_init import init as archivebox_init
@@ -62,7 +62,7 @@ def server(
     except IndexError:
         pass
 
-    os.environ["LISTEN_HOST"] = f"{host}:{port}"
+    os.environ["BIND_ADDR"] = f"{host}:{port}"
     from archivebox.core.host_utils import build_admin_url
 
     admin_url = build_admin_url("/admin/")

@@ -38,7 +38,7 @@ def normalize_base_url(value: str | None) -> str:
 
 def get_listen_host(config: dict[str, Any] | None = None, **config_kwargs: Any) -> str:
     config = config or get_config(**config_kwargs)
-    return (config.LISTEN_HOST or "").strip()
+    return (config.BIND_ADDR or "").strip()
 
 
 def get_listen_parts(config: dict[str, Any] | None = None, **config_kwargs: Any) -> tuple[str, str | None]:

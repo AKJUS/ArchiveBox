@@ -262,28 +262,29 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
         )
     )
 
-    # Impossible state repair: a SEALED snapshot with a still-running child is
-    # active, not final. Reflect that without starting duplicate work.
+    # Maintenance repair: a SEALED snapshot may legitimately have queued or
+    # running ArchiveResults during targeted work like `update --index-only`.
+    # retry_at is the scheduler tick; status stays SEALED so recovery does not
+    # reopen final lifecycle rows just because maintenance is pending.
     cleaned["requeued_snapshots"] += (
         Snapshot.objects.filter(status=Snapshot.StatusChoices.SEALED)
         .annotate(has_running_unfinished_results=Exists(running_unfinished_archiveresults))
         .filter(has_running_unfinished_results=True)
         .update(
-            status=Snapshot.StatusChoices.STARTED,
-            retry_at=None,
+            retry_at=now,
             modified_at=now,
         )
     )
 
-    # Impossible state repair: SEALED snapshots should not contain unfinished
-    # ArchiveResults. There is no valid state-machine transition from final
-    # back to queued, so repair only the fields needed for the runner to retry.
+    # Maintenance repair: unfinished ArchiveResults under a SEALED snapshot are
+    # targeted plugin work, not a reason to change the snapshot lifecycle. The
+    # sealed branch of run_due_snapshot picks queued plugins and runs only those
+    # rows, then clears retry_at when maintenance is complete.
     cleaned["requeued_snapshots"] += (
         Snapshot.objects.filter(status=Snapshot.StatusChoices.SEALED)
         .annotate(has_unfinished_results_without_running=Exists(unfinished_without_running_archiveresults))
         .filter(has_unfinished_results_without_running=True)
         .update(
-            status=Snapshot.StatusChoices.QUEUED,
             retry_at=now,
             modified_at=now,
         )
@@ -337,7 +338,7 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
         "queued_crawls_unlocked": "repaired queued Crawl row(s) with retry_at=NULL",
         "queued_snapshots_unlocked": "repaired queued Snapshot row(s) with retry_at=NULL",
         "requeued_archiveresults": "requeued ArchiveResult row(s) left in BACKOFF",
-        "requeued_snapshots": "reopened sealed Snapshot row(s) with unfinished ArchiveResults",
+        "requeued_snapshots": "rescheduled sealed Snapshot row(s) with unfinished maintenance ArchiveResults",
         "sealed_queued_snapshots": "sealed stale queued Snapshot row(s) whose ArchiveResults were already final",
         "sealed_queued_crawls": "sealed stale queued Crawl row(s) whose Snapshots were already final",
     }

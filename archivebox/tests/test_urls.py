@@ -202,12 +202,12 @@ class TestUrlRouting:
             snapshot_subdomain = get_snapshot_subdomain(snapshot_id)
             snapshot_host = get_snapshot_host(snapshot_id)
             original_host = get_original_host(domain)
-            listen_host = SERVER_CONFIG.LISTEN_HOST
+            bind_addr = SERVER_CONFIG.BIND_ADDR
             base_host = get_base_host()
 
-            listen_host_only, listen_port = split_host_port(listen_host)
-            assert listen_host_only == "127.0.0.1"
-            assert listen_port == "8000"
+            bind_host, bind_port = split_host_port(bind_addr)
+            assert bind_host == "127.0.0.1"
+            assert bind_port == "8000"
             host_only, port = split_host_port(base_host)
             assert host_only == "archivebox.localhost"
             assert port == "8000"
@@ -727,7 +727,7 @@ class TestUrlRouting:
             """,
             mode="safe-subdomains-fullreplay",
             env_overrides={
-                "LISTEN_HOST": "127.0.0.1:8766",
+                "BIND_ADDR": "127.0.0.1:8766",
                 "BASE_URL": "",
             },
         )

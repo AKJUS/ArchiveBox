@@ -164,6 +164,7 @@ def test_supervisord_takeover_stops_all_live_process_rows(tmp_path, process, db)
     import psutil
     from django.utils import timezone
 
+    from archivebox.config import CONSTANTS
     from archivebox.machine.models import Machine, Process
     from archivebox.tests.test_orm_helpers import use_archivebox_db
 
@@ -188,8 +189,8 @@ def test_supervisord_takeover_stops_all_live_process_rows(tmp_path, process, db)
                     machine=Machine.current(),
                     process_type=Process.TypeChoices.SUPERVISORD,
                     worker_type="supervisord",
-                    pwd=str(tmp_path),
-                    cmd=[sys.executable],
+                    pwd=str(CONSTANTS.DATA_DIR),
+                    cmd=[],
                     pid=proc.pid,
                     started_at=started_at,
                     status=Process.StatusChoices.RUNNING,
@@ -207,7 +208,7 @@ def test_supervisord_takeover_stops_all_live_process_rows(tmp_path, process, db)
             assert not Process.objects.filter(
                 process_type=Process.TypeChoices.SUPERVISORD,
                 status=Process.StatusChoices.RUNNING,
-                pwd=str(tmp_path),
+                pwd=str(CONSTANTS.DATA_DIR),
             ).exists()
     finally:
         for proc in procs:

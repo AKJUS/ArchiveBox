@@ -119,6 +119,37 @@ def _live_supervisord_processes_from_db():
         return []
 
 
+def _stop_older_supervisord_processes(*, current_pid: int, current_started_at: float, timeout: float) -> None:
+    """Stop older supervisord parents for this DATA_DIR after a start race.
+
+    Lazy daemon users such as `archivebox list --search ...` may race to start
+    Sonic. The durable Process table is the arbiter: after this parent is
+    recorded, kill only live supervisord rows that started before this one.
+    If another parent started later, leave it alone so newest healthy owner wins.
+    """
+
+    for process, proc in _live_supervisord_processes_from_db():
+        if proc.pid == current_pid:
+            continue
+        try:
+            if proc.create_time() >= current_started_at:
+                continue
+            print(f"[🦸‍♂️] Stopping older supervisord process (pid={proc.pid})...")
+            children = proc.children(recursive=True)
+            proc.terminate()
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            wait_psutil_and_kill_children(proc, children, timeout=timeout)
+            process.mark_exited(exit_code=0)
+        except psutil.NoSuchProcess:
+            process.mark_exited(exit_code=0)
+        except (BrokenPipeError, OSError, psutil.TimeoutExpired):
+            pass
+
+
 RUNNER_WORKER = {
     "name": "worker_runner",
     "command": _shell_join([sys.executable, "-m", "archivebox", "run", "--daemon"]),
@@ -494,6 +525,7 @@ def start_new_supervisord_process(daemonize=False):
     LOG_FILE = CONSTANTS.LOGS_DIR / LOG_FILE_NAME
     CONFIG_FILE = SOCK_FILE.parent / CONFIG_FILE_NAME
     PID_FILE = SOCK_FILE.parent / PID_FILE_NAME
+    stop_grace_seconds = configured_stopwaitsecs(tuple(_desired_supervisord_workers.values()))
 
     print(f"[🦸‍♂️] Supervisord starting{' in background' if daemonize else ''}...")
     pretty_log_path = pretty_path(LOG_FILE)
@@ -525,8 +557,11 @@ def start_new_supervisord_process(daemonize=False):
             stderr=log_handle,
             start_new_session=True,
         )
+        current_started_at = psutil.Process(proc.pid).create_time()
         _record_supervisord_process(proc, CONFIG_FILE)
-        return wait_for_supervisord_ready()
+        supervisor = wait_for_supervisord_ready()
+        _stop_older_supervisord_processes(current_pid=proc.pid, current_started_at=current_started_at, timeout=stop_grace_seconds)
+        return supervisor
     else:
         # Keep supervisord foreground-owned by this process, but isolate it
         # from terminal Ctrl+C. The ArchiveBox parent owns user-facing server
@@ -543,9 +578,12 @@ def start_new_supervisord_process(daemonize=False):
         # Store the process so we can wait on it later
         global _supervisord_proc
         _supervisord_proc = proc
+        current_started_at = psutil.Process(proc.pid).create_time()
         _record_supervisord_process(proc, CONFIG_FILE)
 
-        return wait_for_supervisord_ready()
+        supervisor = wait_for_supervisord_ready()
+        _stop_older_supervisord_processes(current_pid=proc.pid, current_started_at=current_started_at, timeout=stop_grace_seconds)
+        return supervisor
 
 
 def wait_for_supervisord_ready(max_wait_sec: float = 5.0, interval_sec: float = 0.1, *, quiet: bool = False):

@@ -205,7 +205,12 @@ def update(
     setup_django()
     from archivebox.machine.models import Process
     from archivebox.core.shutdown_util import foreground_parent_watchdog, foreground_shutdown_signals
-    from archivebox.services.supervision_service import current_command, ensure_daemon_stack, standby_until_runtime_stack_needed
+    from archivebox.services.supervision_service import (
+        command_owns_runtime_stack,
+        current_command,
+        ensure_daemon_stack,
+        standby_until_runtime_stack_needed,
+    )
     from archivebox.workers.supervisord_util import stop_existing_supervisord_process
 
     command = current_command(Process.TypeChoices.UPDATE, data_dir=CONSTANTS.DATA_DIR)
@@ -245,6 +250,7 @@ def update(
                 do_migrate = migrate_only or not index_only
                 do_index = index_only or not migrate_only
                 do_run_until_idle = do_migrate or do_index
+                ran_post_migrate_runner = False
 
                 if do_migrate:
                     if (
@@ -298,6 +304,23 @@ def update(
                         )
                         print_combined_stats(stats_combined)
 
+                    if do_run_until_idle:
+                        print("[*] Phase 3: Running queued/interrupted crawl work until idle...")
+                        from archivebox.cli.archivebox_run import run_runner, run_snapshot_worker
+
+                        if is_filtered_update:
+                            if not touched_snapshot_ids:
+                                print("[*] No matching snapshots queued work for the runner.")
+                            for snapshot_id in sorted(touched_snapshot_ids):
+                                exit_code = run_snapshot_worker(snapshot_id)
+                                if exit_code != 0:
+                                    raise SystemExit(exit_code)
+                        else:
+                            exit_code = run_runner(daemon=False, maintenance_only=migrate_only)
+                            if exit_code != 0:
+                                raise SystemExit(exit_code)
+                        ran_post_migrate_runner = True
+
                 if do_index:
                     ensure_daemon_stack(reason="search indexing")
                     search_plugins = _get_search_indexing_plugins()
@@ -329,7 +352,7 @@ def update(
                         print_index_stats(stats)
                         touched_snapshot_ids.update(stats.get("snapshot_ids", []))
 
-                if do_run_until_idle:
+                if do_run_until_idle and (do_index or not ran_post_migrate_runner):
                     print("[*] Phase 3: Running queued/interrupted crawl work until idle...")
                     from archivebox.cli.archivebox_run import run_runner, run_snapshot_worker
 
@@ -391,7 +414,7 @@ def update(
         raise SystemExit(130)
     finally:
         command.mark_exited()
-        if stop_daemon_stack:
+        if stop_daemon_stack and command_owns_runtime_stack(command, data_dir=CONSTANTS.DATA_DIR):
             stop_existing_supervisord_process()
 
 

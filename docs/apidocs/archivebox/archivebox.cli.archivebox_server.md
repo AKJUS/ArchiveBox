@@ -27,7 +27,7 @@
 
 ### API
 
-````{py:function} server(runserver_args: typing.Iterable[str] = (SERVER_CONFIG.LISTEN_HOST, ), reload: bool = False, init: bool = False, debug: bool = False, daemonize: bool = False, nothreading: bool = False) -> None
+````{py:function} server(runserver_args: typing.Iterable[str] = (SERVER_CONFIG.BIND_ADDR, ), reload: bool = False, init: bool = False, debug: bool = False, daemonize: bool = False, nothreading: bool = False) -> None
 :canonical: archivebox.cli.archivebox_server.server
 
 ```{autodoc2-docstring} archivebox.cli.archivebox_server.server

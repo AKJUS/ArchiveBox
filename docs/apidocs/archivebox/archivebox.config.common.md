@@ -377,13 +377,13 @@ Bases: {py:obj}`archivebox.config.configset.BaseConfigSet`
 
 ````
 
-````{py:attribute} LISTEN_HOST
-:canonical: archivebox.config.common.ServerConfig.LISTEN_HOST
+````{py:attribute} BIND_ADDR
+:canonical: archivebox.config.common.ServerConfig.BIND_ADDR
 :type: str
 :value: >
    'Field(...)'
 
-```{autodoc2-docstring} archivebox.config.common.ServerConfig.LISTEN_HOST
+```{autodoc2-docstring} archivebox.config.common.ServerConfig.BIND_ADDR
 ```
 
 ````

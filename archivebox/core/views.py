@@ -189,7 +189,7 @@ class SnapshotView(View):
         runtime_config = getattr(request, "archivebox_config", None)
         page_config_keys = {
             "PREVIEW_ORIGINALS",
-            "LISTEN_HOST",
+            "BIND_ADDR",
             "USES_SUBDOMAIN_ROUTING",
             "BASE_URL",
             "PERMISSIONS",

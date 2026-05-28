@@ -166,7 +166,7 @@ archivebox config --set PUBLIC_ADD_VIEW=False    # allow submitting new URLs wit
 Django's secret key for cryptographic signing (sessions, CSRF tokens, etc.). Automatically generated on first run.
 
 ---
-#### `LISTEN_HOST`
+#### `BIND_ADDR`
 **Possible Values:** [`127.0.0.1:8000`]/`0.0.0.0:8000`/...
 Address and port for the ArchiveBox web server to listen on. This is only the local bind socket, not the public URL.
 

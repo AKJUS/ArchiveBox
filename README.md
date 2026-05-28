@@ -106,7 +106,7 @@ curl -fsSL 'https://get.archivebox.io' | bash
 </code></pre>
 <br/>
 <sub>Open <a href="http://web.archivebox.localhost:8000"><code>http://web.archivebox.localhost:8000</code></a> for the public UI and <a href="http://admin.archivebox.localhost:8000"><code>http://admin.archivebox.localhost:8000</code></a> for the admin UI ➡️</sub><br/>
-<sub>Set <code>LISTEN_HOST</code> to change the base domain; <code>web.</code> and <code>admin.</code> subdomains are used automatically.</sub>
+<sub>Set <code>BIND_ADDR</code> to change the base domain; <code>web.</code> and <code>admin.</code> subdomains are used automatically.</sub>
 </details>
 <br/>
 
@@ -588,7 +588,7 @@ docker run -v $PWD:/data -it -p 8000:8000 archivebox/archivebox
 </code></pre>
 
 <sup>Open <a href="http://web.archivebox.localhost:8000"><code>http://web.archivebox.localhost:8000</code></a> for the public UI and <a href="http://admin.archivebox.localhost:8000"><code>http://admin.archivebox.localhost:8000</code></a> for the admin UI ➡️</sup><br/>
-<sup>Set <code>LISTEN_HOST</code> to change the base domain; <code>web.</code> and <code>admin.</code> subdomains are used automatically.</sup>
+<sup>Set <code>BIND_ADDR</code> to change the base domain; <code>web.</code> and <code>admin.</code> subdomains are used automatically.</sup>
 <br/><br/>
 <i>For more info, see our <a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Usage#ui-usage">Usage: Web UI</a> wiki. ➡️</i>
 <br/><br/>
