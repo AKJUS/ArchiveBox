@@ -217,8 +217,16 @@ def add(
     else:
         # Foreground mode: run full crawl runner until all work is done
         print("[green]\\[*] Starting crawl runner to process crawl...[/green]")
-        with foreground_shutdown_signals(), foreground_parent_watchdog():
-            run_crawl(str(crawl.id))
+        from archivebox.machine.models import Process
+        from archivebox.services.supervision_service import current_command, standby_until_runtime_stack_needed
+
+        command = current_command(Process.TypeChoices.ADD, data_dir=CONSTANTS.DATA_DIR, url=first_url)
+        try:
+            standby_until_runtime_stack_needed(command, data_dir=CONSTANTS.DATA_DIR)
+            with foreground_shutdown_signals(), foreground_parent_watchdog():
+                run_crawl(str(crawl.id))
+        finally:
+            command.mark_exited()
 
         # Print summary for foreground runs
         try:

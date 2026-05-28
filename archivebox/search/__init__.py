@@ -18,7 +18,7 @@ import os
 from contextlib import contextmanager
 from typing import Any
 
-from django.db.models import Case, IntegerField, QuerySet, Value, When
+from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
 
 from archivebox.misc.util import enforce_types
 from archivebox.misc.logging import stderr
@@ -33,6 +33,7 @@ SEARCH_BACKEND_UI_NAMES = {
     "sonic": "sonic",
     "fts": "sqlite",
 }
+MAX_SEARCH_RANK_IDS = 500
 
 
 @contextmanager
@@ -135,18 +136,35 @@ def prioritize_metadata_matches(
     deep_queryset: QuerySet | None = None,
     ordering: list[str] | tuple[str, ...] | None = None,
 ) -> QuerySet:
-    metadata_ids = list(metadata_queryset.values_list("pk", flat=True).distinct())
+    metadata_ids = list(metadata_queryset.values_list("pk", flat=True).distinct()[: MAX_SEARCH_RANK_IDS + 1])
     metadata_id_set = set(metadata_ids)
-    fulltext_ids = [pk for pk in fulltext_queryset.values_list("pk", flat=True).distinct() if pk not in metadata_id_set]
+    fulltext_ids = [
+        pk for pk in fulltext_queryset.values_list("pk", flat=True).distinct()[: MAX_SEARCH_RANK_IDS + 1] if pk not in metadata_id_set
+    ]
     fulltext_id_set = set(fulltext_ids)
     deep_ids = []
     if deep_queryset is not None:
         deep_ids = [
-            pk for pk in deep_queryset.values_list("pk", flat=True).distinct() if pk not in metadata_id_set and pk not in fulltext_id_set
+            pk
+            for pk in deep_queryset.values_list("pk", flat=True).distinct()[: MAX_SEARCH_RANK_IDS + 1]
+            if pk not in metadata_id_set and pk not in fulltext_id_set
         ]
 
     if not metadata_ids and not fulltext_ids and not deep_ids:
         return base_queryset.none()
+
+    if any(len(ids) > MAX_SEARCH_RANK_IDS for ids in (metadata_ids, fulltext_ids, deep_ids)):
+        search_filter = Q()
+        if metadata_ids:
+            search_filter |= Q(pk__in=metadata_queryset.values("pk").distinct())
+        if fulltext_ids:
+            search_filter |= Q(pk__in=fulltext_queryset.values("pk").distinct())
+        if deep_queryset is not None and deep_ids:
+            search_filter |= Q(pk__in=deep_queryset.values("pk").distinct())
+        qs = base_queryset.filter(search_filter)
+        if ordering is not None:
+            qs = qs.order_by(*ordering)
+        return qs.distinct()
 
     qs = base_queryset.filter(pk__in=[*metadata_ids, *fulltext_ids, *deep_ids]).annotate(
         search_rank=Case(

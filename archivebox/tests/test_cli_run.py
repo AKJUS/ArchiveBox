@@ -8,7 +8,11 @@ Tests cover:
 """
 
 import json
+import os
+import signal
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -274,31 +278,68 @@ class TestRunEmpty:
 
 
 class TestRunDaemonMode:
-    def test_run_daemon_starts_runner_without_reading_stdin(self, monkeypatch):
-        from archivebox.cli import archivebox_run
+    def test_run_daemon_ignores_piped_stdin_and_starts_real_runner(self, initialized_archive, db):
+        from archivebox.machine.models import Process
+        from archivebox.tests.test_orm_helpers import use_archivebox_db
 
-        class FakeStdin:
-            def isatty(self):
-                return False
-
-        monkeypatch.setattr(sys, "stdin", FakeStdin())
-        calls = []
-        monkeypatch.setattr(
-            archivebox_run,
-            "process_stdin_records",
-            lambda: (_ for _ in ()).throw(AssertionError("daemon mode must not block on stdin")),
+        env = os.environ.copy()
+        env.update(
+            {
+                "DATA_DIR": str(initialized_archive),
+                "USE_COLOR": "False",
+                "SHOW_PROGRESS": "False",
+                "USE_INDEXING_BACKEND": "False",
+            },
         )
-        monkeypatch.setattr(
-            archivebox_run,
-            "run_runner",
-            lambda daemon=False: calls.append(f"runner:{daemon}") or 0,
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "archivebox", "run", "--daemon"],
+            cwd=initialized_archive,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
         )
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        assert proc.stderr is not None
 
-        with pytest.raises(SystemExit) as exit_info:
-            archivebox_run.main.callback(daemon=True, crawl_id=None, snapshot_id=None, binary_id=None)
+        try:
+            proc.stdin.write("{this is not jsonl}\n")
+            proc.stdin.close()
 
-        assert exit_info.value.code == 0
-        assert calls == ["runner:True"]
+            deadline = time.monotonic() + 20
+            started = False
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    stdout = proc.stdout.read()
+                    stderr = proc.stderr.read()
+                    pytest.fail(f"daemon exited before starting runner: code={proc.returncode}\nstdout={stdout}\nstderr={stderr}")
+                with use_archivebox_db(initialized_archive):
+                    started = Process.objects.filter(
+                        process_type=Process.TypeChoices.ORCHESTRATOR,
+                        status=Process.StatusChoices.RUNNING,
+                        pid=proc.pid,
+                    ).exists()
+                if started:
+                    break
+                time.sleep(0.25)
+
+            assert started is True
+        finally:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=5)
+
+        stdout = proc.stdout.read()
+        stderr = proc.stderr.read()
+        assert proc.returncode == 0, stdout + stderr
+        assert "No records to process" not in stderr
 
 
 @pytest.mark.django_db
