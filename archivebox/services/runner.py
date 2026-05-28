@@ -1182,7 +1182,7 @@ def recover_orphaned_snapshots() -> int:
         )
     empty_active_snapshot_ids = list(
         Snapshot.objects.filter(
-            crawl__status=Crawl.StatusChoices.STARTED,
+            crawl__status__in=[Crawl.StatusChoices.STARTED, Crawl.StatusChoices.SEALED],
             status=Snapshot.StatusChoices.SEALED,
             downloaded_at__isnull=False,
             archiveresult__isnull=True,
