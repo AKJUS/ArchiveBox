@@ -133,6 +133,7 @@ class BinaryService(BaseService):
 
     async def on_BinaryEvent(self, event: BinaryEvent) -> None:
         from archivebox.machine.models import Binary, Machine
+        from archivebox.config.common import get_config
 
         machine = await sync_to_async(Machine.current, thread_sensitive=True)()
         binary, _ = await Binary.objects.aget_or_create(
@@ -158,3 +159,5 @@ class BinaryService(BaseService):
         await binary.asave(
             update_fields=["abspath", "version", "sha256", "binproviders", "binprovider", "overrides", "status", "retry_at", "modified_at"],
         )
+        lib_bin_dir = await sync_to_async(lambda: get_config().LIB_BIN_DIR, thread_sensitive=True)()
+        await sync_to_async(binary.symlink_to_lib_bin, thread_sensitive=True)(lib_bin_dir)

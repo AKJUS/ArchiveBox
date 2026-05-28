@@ -108,7 +108,8 @@ def get_machine_admin_url() -> str | None:
     try:
         from archivebox.machine.models import Machine
 
-        return Machine.current().admin_change_url
+        machine = Machine.current()
+        return getattr(machine, "admin_change_url", None) or f"/admin/machine/machine/{machine.id}/change/"
     except Exception:
         return None
 

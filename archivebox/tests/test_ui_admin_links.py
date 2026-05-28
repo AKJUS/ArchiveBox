@@ -1,5 +1,10 @@
 import pytest
+import subprocess
+from datetime import datetime, timezone as dt_timezone
+from pathlib import Path
 from django.contrib.admin.sites import AdminSite
+from django.contrib.messages import get_messages
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.test import RequestFactory
 from django.urls import reverse
 import html
@@ -62,6 +67,46 @@ def _create_iface(machine):
         region="Test Region",
         country="Test Country",
     )
+
+
+def _admin_post_request(path):
+    request = RequestFactory().post(path)
+    request.session = {}
+    request._messages = FallbackStorage(request)
+    return request
+
+
+@pytest.fixture
+def running_process_record():
+    from archivebox.machine.models import Machine, Process, psutil
+
+    cmd = ["/bin/sleep", "60"]
+    popen = subprocess.Popen(
+        cmd,
+        cwd=Path.cwd(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        os_process = psutil.Process(popen.pid)
+        process = Process.objects.create(
+            machine=Machine.current(refresh=True),
+            process_type=Process.TypeChoices.HOOK,
+            pwd=str(Path.cwd()),
+            cmd=cmd,
+            pid=popen.pid,
+            started_at=datetime.fromtimestamp(os_process.create_time(), tz=dt_timezone.utc),
+            status=Process.StatusChoices.RUNNING,
+        )
+        yield process
+    finally:
+        if popen.poll() is None:
+            popen.terminate()
+            try:
+                popen.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                popen.kill()
+                popen.wait(timeout=5)
 
 
 def test_archiveresult_admin_links_plugin_and_process():
@@ -271,20 +316,13 @@ def test_process_admin_links_binary_and_iface():
     assert f"/admin/machine/networkinterface/{iface.id}/change" in iface_html
 
 
-def test_process_admin_kill_actions_only_terminate_running_processes(monkeypatch):
+def test_process_admin_kill_actions_only_terminate_running_processes(running_process_record):
     from archivebox.machine.admin import ProcessAdmin
-    from archivebox.machine.models import Process
+    from archivebox.machine.models import Machine, Process
 
-    machine = _create_machine()
-    running = Process.objects.create(
-        machine=machine,
-        process_type=Process.TypeChoices.HOOK,
-        pwd="/tmp/running",
-        cmd=["/tmp/on_Snapshot__06_wget.finite.bg.py", "--url=https://example.com"],
-        status=Process.StatusChoices.RUNNING,
-    )
+    running = running_process_record
     exited = Process.objects.create(
-        machine=machine,
+        machine=Machine.current(),
         process_type=Process.TypeChoices.HOOK,
         pwd="/tmp/exited",
         cmd=["/tmp/on_Snapshot__06_wget.finite.bg.py", "--url=https://example.com"],
@@ -292,29 +330,24 @@ def test_process_admin_kill_actions_only_terminate_running_processes(monkeypatch
     )
 
     admin = ProcessAdmin(Process, AdminSite())
-    request = RequestFactory().post("/admin/machine/process/")
-
-    terminated = []
-    flashed = []
-
-    monkeypatch.setattr(Process, "is_running", property(lambda self: self.pk == running.pk), raising=False)
-    monkeypatch.setattr(Process, "terminate", lambda self, graceful_timeout=5.0: terminated.append(self.pk) or True)
-    monkeypatch.setattr(admin, "message_user", lambda req, msg, level=None: flashed.append((msg, level)))
+    request = _admin_post_request("/admin/machine/process/")
 
     admin.kill_processes(request, Process.objects.filter(pk__in=[running.pk, exited.pk]).order_by("created_at"))
 
-    assert terminated == [running.pk]
-    assert any("Killed 1 running process" in msg for msg, _level in flashed)
-    assert any("Skipped 1 process" in msg for msg, _level in flashed)
+    running.refresh_from_db()
+    assert running.status == Process.StatusChoices.EXITED
+    assert running.exit_code is not None
+    messages = [message.message for message in get_messages(request)]
+    assert any("Killed 1 running process" in msg for msg in messages)
+    assert any("Skipped 1 process" in msg for msg in messages)
 
 
-def test_process_admin_object_kill_action_redirects_and_skips_exited(monkeypatch):
+def test_process_admin_object_kill_action_redirects_and_skips_exited():
     from archivebox.machine.admin import ProcessAdmin
-    from archivebox.machine.models import Process
+    from archivebox.machine.models import Machine, Process
 
-    machine = _create_machine()
     process = Process.objects.create(
-        machine=machine,
+        machine=Machine.current(refresh=True),
         process_type=Process.TypeChoices.HOOK,
         pwd="/tmp/exited",
         cmd=["/tmp/on_Snapshot__06_wget.finite.bg.py", "--url=https://example.com"],
@@ -322,21 +355,16 @@ def test_process_admin_object_kill_action_redirects_and_skips_exited(monkeypatch
     )
 
     admin = ProcessAdmin(Process, AdminSite())
-    request = RequestFactory().post(f"/admin/machine/process/{process.pk}/change/")
-
-    terminated = []
-    flashed = []
-
-    monkeypatch.setattr(Process, "is_running", property(lambda self: False), raising=False)
-    monkeypatch.setattr(Process, "terminate", lambda self, graceful_timeout=5.0: terminated.append(self.pk) or True)
-    monkeypatch.setattr(admin, "message_user", lambda req, msg, level=None: flashed.append((msg, level)))
+    request = _admin_post_request(f"/admin/machine/process/{process.pk}/change/")
 
     response = admin.kill_process(request, process)
 
     assert response.status_code == 302
     assert response.url == reverse("admin:machine_process_change", args=[process.pk])
-    assert terminated == []
-    assert any("Skipped 1 process" in msg for msg, _level in flashed)
+    process.refresh_from_db()
+    assert process.status == Process.StatusChoices.EXITED
+    messages = [message.message for message in get_messages(request)]
+    assert any("Skipped 1 process" in msg for msg in messages)
 
 
 def test_process_admin_output_summary_uses_archiveresult_output_files():

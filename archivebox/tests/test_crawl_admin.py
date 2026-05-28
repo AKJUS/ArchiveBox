@@ -288,6 +288,7 @@ def test_create_snapshots_from_urls_respects_max_urls(admin_user):
     ]
     assert crawl.snapshot_set.count() == 2
     assert crawl.remaining_snapshot_capacity() == 0
+    assert crawl.limit_stop_reason() == "crawl_max_urls"
     assert crawl.add_url({"url": "https://example.com/extra", "depth": 1}) is False
 
 

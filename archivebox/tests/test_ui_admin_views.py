@@ -10,10 +10,14 @@ Tests cover:
 
 import json
 import pytest
+import subprocess
 import uuid
+from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
+from urllib.parse import urlencode
+from asgiref.sync import async_to_sync
 from django.test import override_settings
 from django.test.client import RequestFactory
 from django.urls import reverse
@@ -29,6 +33,28 @@ User = get_user_model()
 ADMIN_HOST = "admin.archivebox.localhost:8000"
 PUBLIC_HOST = "public.archivebox.localhost:8000"
 WEB_HOST = "web.archivebox.localhost:8000"
+
+
+def consume_streaming_response(response):
+    if response.is_async:
+
+        async def consume():
+            return b"".join([chunk async for chunk in response.streaming_content])
+
+        return async_to_sync(consume)()
+    return b"".join(response.streaming_content)
+
+
+def populate_admin_search_cache(client, path, params):
+    search_url = f"{path}?{urlencode(params)}"
+    response = client.get(
+        reverse("admin:core_snapshot_search_stream"),
+        {**params, "search_url": search_url},
+        HTTP_HOST=ADMIN_HOST,
+    )
+    assert response.status_code == 200
+    assert consume_streaming_response(response)
+    return client.get(path, params, HTTP_HOST=ADMIN_HOST)
 
 
 @pytest.fixture
@@ -1036,18 +1062,13 @@ class TestAdminSnapshotListView:
         assert succeeded.output_str == "Example Domain"
         assert snapshot.status == snapshot.StatusChoices.QUEUED
 
-    def test_archive_now_action_uses_original_snapshot_url_without_timestamp_suffix(self, client, admin_user, snapshot, monkeypatch):
-        import archivebox.core.admin_snapshots as admin_snapshots
+    def test_archive_now_action_uses_original_snapshot_url_without_timestamp_suffix(self, client, admin_user, snapshot):
+        from archivebox.crawls.models import Crawl
+        from archivebox.core.models import Snapshot
 
+        existing_crawl_ids = set(Crawl.objects.values_list("id", flat=True))
         snapshot.url = "https://example.com/path#section-1"
         snapshot.save(update_fields=["url"])
-
-        queued = []
-
-        def fake_bg_add(payload):
-            queued.append(payload)
-
-        monkeypatch.setattr(admin_snapshots, "bg_add", fake_bg_add)
 
         client.login(username="testadmin", password="testpassword")
         url = reverse("admin:core_snapshot_changelist")
@@ -1062,24 +1083,25 @@ class TestAdminSnapshotListView:
         )
 
         assert response.status_code == 302
-        assert queued == [{"urls": "https://example.com/path#section-1"}]
+        new_crawl = Crawl.objects.exclude(id__in=existing_crawl_ids).get()
+        assert new_crawl.status == Crawl.StatusChoices.QUEUED
+        assert new_crawl.retry_at is not None
+        assert new_crawl.urls.strip() == "https://example.com/path#section-1"
+        new_snapshot = new_crawl.snapshot_set.get()
+        assert new_snapshot.url == "https://example.com/path#section-1"
+        assert new_snapshot.status == Snapshot.StatusChoices.QUEUED
+        assert new_snapshot.retry_at is not None
 
-    def test_archive_now_action_groups_multiple_snapshots_into_one_crawl(self, client, admin_user, snapshot, monkeypatch):
-        import archivebox.core.admin_snapshots as admin_snapshots
+    def test_archive_now_action_groups_multiple_snapshots_into_one_crawl(self, client, admin_user, snapshot):
+        from archivebox.crawls.models import Crawl
         from archivebox.core.models import Snapshot
 
+        existing_crawl_ids = set(Crawl.objects.values_list("id", flat=True))
         other_snapshot = Snapshot.objects.create(
             url="https://example.com/other#frag",
             crawl=snapshot.crawl,
             status=Snapshot.StatusChoices.STARTED,
         )
-
-        queued = []
-
-        def fake_bg_add(payload):
-            queued.append(payload)
-
-        monkeypatch.setattr(admin_snapshots, "bg_add", fake_bg_add)
 
         client.login(username="testadmin", password="testpassword")
         url = reverse("admin:core_snapshot_changelist")
@@ -1094,8 +1116,11 @@ class TestAdminSnapshotListView:
         )
 
         assert response.status_code == 302
-        assert len(queued) == 1
-        assert set(queued[0]["urls"].splitlines()) == {"https://example.com", "https://example.com/other#frag"}
+        new_crawl = Crawl.objects.exclude(id__in=existing_crawl_ids).get()
+        assert new_crawl.status == Crawl.StatusChoices.QUEUED
+        assert set(new_crawl.urls.splitlines()) == {"https://example.com", "https://example.com/other#frag"}
+        assert set(new_crawl.snapshot_set.values_list("url", flat=True)) == {"https://example.com", "https://example.com/other#frag"}
+        assert set(new_crawl.snapshot_set.values_list("status", flat=True)) == {Snapshot.StatusChoices.QUEUED}
 
     def test_change_view_archiveresults_inline_shows_process_and_machine_links(self, client, admin_user, snapshot, db):
         import archivebox.machine.models as machine_models
@@ -1244,25 +1269,45 @@ class TestArchiveResultAdminListView:
 
 
 class TestLiveProgressView:
-    def test_live_progress_reports_supervisord_runner_running(self, client, admin_user, db, monkeypatch):
+    def test_live_progress_reports_real_orchestrator_process_running(self, client, admin_user, db):
         import archivebox.machine.models as machine_models
-        import archivebox.workers.supervisord_util as supervisord_util
+        from archivebox.machine.models import Machine, Process, psutil
 
         machine_models._CURRENT_MACHINE = None
-        monkeypatch.setattr(supervisord_util, "get_existing_supervisord_process", lambda **_kwargs: object())
-        monkeypatch.setattr(
-            supervisord_util,
-            "get_worker",
-            lambda supervisor, name: {"statename": "RUNNING", "pid": 12345} if name == "worker_runner" else None,
+        cmd = ["/bin/sleep", "60"]
+        popen = subprocess.Popen(
+            cmd,
+            cwd=Path.cwd(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+        try:
+            os_process = psutil.Process(popen.pid)
+            Process.objects.create(
+                machine=Machine.current(refresh=True),
+                process_type=Process.TypeChoices.ORCHESTRATOR,
+                status=Process.StatusChoices.RUNNING,
+                pid=popen.pid,
+                cmd=cmd,
+                env={},
+                started_at=datetime.fromtimestamp(os_process.create_time(), tz=dt_timezone.utc),
+            )
 
-        client.login(username="testadmin", password="testpassword")
-        response = client.get(reverse("live_progress"), HTTP_HOST=ADMIN_HOST)
+            client.login(username="testadmin", password="testpassword")
+            response = client.get(reverse("live_progress"), HTTP_HOST=ADMIN_HOST)
 
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["orchestrator_running"] is True
-        assert payload["orchestrator_pid"] == 12345
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["orchestrator_running"] is True
+            assert payload["orchestrator_pid"] == popen.pid
+        finally:
+            if popen.poll() is None:
+                popen.terminate()
+                try:
+                    popen.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    popen.kill()
+                    popen.wait(timeout=5)
 
     def test_live_progress_ignores_unscoped_running_processes_when_no_crawls(self, client, admin_user, db):
         import os
@@ -1445,38 +1490,36 @@ class TestLiveProgressView:
 class TestAdminSnapshotSearch:
     """Tests for admin snapshot search functionality."""
 
-    def test_admin_search_mode_selector_defaults_to_meta_for_ripgrep(self, client, admin_user, monkeypatch):
+    pytestmark = pytest.mark.django_db(transaction=True)
+
+    def test_admin_search_mode_selector_defaults_to_configured_deep_backend_for_ripgrep(self, client, admin_user, monkeypatch):
         monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "ripgrep")
 
         client.login(username="testadmin", password="testpassword")
         response = client.get(reverse("admin:core_snapshot_changelist"), HTTP_HOST=ADMIN_HOST)
 
         assert response.status_code == 200
-        assert b'name="search_mode" value="meta" checked' in response.content
-        assert b'name="search_mode" value="contents"' in response.content
-        assert b'name="search_mode" value="deep"' in response.content
+        assert response.context["cl"].search_mode == "deep:ripgrep"
+        assert b'name="search_mode"' in response.content
+        assert b'value="contents"' in response.content
+        assert b'value="deep:ripgrep"' in response.content
 
-    def test_admin_search_mode_selector_defaults_to_contents_for_non_ripgrep(self, client, admin_user, monkeypatch):
+    def test_admin_search_mode_selector_defaults_to_configured_deep_backend_for_sqlite(self, client, admin_user, monkeypatch):
         monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "sqlite")
 
         client.login(username="testadmin", password="testpassword")
         response = client.get(reverse("admin:core_snapshot_changelist"), HTTP_HOST=ADMIN_HOST)
 
         assert response.status_code == 200
-        assert b'name="search_mode" value="contents" checked' in response.content
+        assert response.context["cl"].search_mode == "deep:sqlite"
 
-    def test_admin_search_mode_selector_stays_checked_after_search(self, client, admin_user, crawl, monkeypatch):
+    def test_admin_search_mode_selector_stays_checked_after_search(self, client, admin_user, crawl):
         from archivebox.core.models import Snapshot
 
         Snapshot.objects.create(
             url="https://example.com/fulltext-only",
             title="Unrelated Title",
             crawl=crawl,
-        )
-
-        monkeypatch.setattr(
-            "archivebox.search.admin.query_search_index",
-            lambda query, search_mode=None: Snapshot.objects.all(),
         )
 
         client.login(username="testadmin", password="testpassword")
@@ -1487,84 +1530,79 @@ class TestAdminSnapshotSearch:
         )
 
         assert response.status_code == 200
-        assert b'name="search_mode" value="contents" checked' in response.content
-        assert b'name="search_mode" value="meta" checked' not in response.content
+        assert response.context["cl"].search_mode == "contents"
         assert b'id="changelist"' in response.content
         assert b"search-mode-contents" in response.content
 
-    def test_admin_search_mode_adds_result_tint_class_for_deep(self, client, admin_user, crawl, monkeypatch):
+    def test_admin_search_stream_uses_real_ripgrep_backend_for_deep_results(self, client, admin_user, crawl, monkeypatch):
         from archivebox.core.models import Snapshot
 
-        Snapshot.objects.create(
+        monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "ripgrep")
+        fulltext_snapshot = Snapshot.objects.create(
             url="https://example.com/fulltext-only",
             title="Unrelated Title",
             crawl=crawl,
         )
-
-        monkeypatch.setattr(
-            "archivebox.search.admin.query_search_index",
-            lambda query, search_mode=None: Snapshot.objects.all(),
-        )
+        output_file = fulltext_snapshot.output_dir / "dom" / "output.html"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("<html><body>needle-deep-result</body></html>", encoding="utf-8")
 
         client.login(username="testadmin", password="testpassword")
-        response = client.get(
+        response = populate_admin_search_cache(
+            client,
             reverse("admin:core_snapshot_changelist"),
-            {"q": "google", "search_mode": "deep"},
-            HTTP_HOST=ADMIN_HOST,
+            {"q": "needle-deep-result", "search_mode": "deep"},
         )
 
         assert response.status_code == 200
-        assert b'name="search_mode" value="deep" checked' in response.content
+        assert response.context["cl"].search_mode.startswith("deep")
         assert b"search-mode-deep" in response.content
-        assert b"search-rank-" in response.content
+        assert str(fulltext_snapshot.id).encode() in response.content
 
-    def test_deep_search_assigns_metadata_contents_and_deep_only_ranks(self, client, admin_user, crawl, monkeypatch):
+    def test_admin_meta_search_streams_results_in_metadata_wave_order(self, client, admin_user, crawl):
         from archivebox.core.models import Snapshot
 
-        metadata_snapshot = Snapshot.objects.create(
-            url="https://example.com/google-meta",
-            title="Google Metadata Match",
+        prefix_snapshot = Snapshot.objects.create(
+            url="https://google.example.com/prefix",
+            title="Later Title",
+            timestamp="2000000000",
             crawl=crawl,
         )
-        contents_snapshot = Snapshot.objects.create(
-            url="https://example.com/contents-only",
-            title="Unrelated Title",
+        contains_snapshot = Snapshot.objects.create(
+            url="https://example.com/path/google-contained",
+            title="Later Title",
+            timestamp="3000000000",
             crawl=crawl,
         )
-        deep_snapshot = Snapshot.objects.create(
-            url="https://example.com/deep-only",
-            title="Unrelated Title",
+        title_snapshot = Snapshot.objects.create(
+            url="https://example.com/title-only",
+            title="Google Title Match",
+            timestamp="1000000000",
             crawl=crawl,
         )
-
-        def fake_query_search_index(query, search_mode=None):
-            if search_mode == "contents":
-                return Snapshot.objects.filter(pk=contents_snapshot.pk)
-            if search_mode == "deep":
-                return Snapshot.objects.filter(pk__in=[contents_snapshot.pk, deep_snapshot.pk])
-            return Snapshot.objects.none()
-
-        monkeypatch.setattr("archivebox.search.admin.query_search_index", fake_query_search_index)
 
         client.login(username="testadmin", password="testpassword")
-        response = client.get(
-            reverse("admin:core_snapshot_changelist"),
-            {"q": "google", "search_mode": "deep"},
-            HTTP_HOST=ADMIN_HOST,
+        path = reverse("admin:core_snapshot_changelist")
+        params = {"q": "google", "search_mode": "meta"}
+        response = populate_admin_search_cache(
+            client,
+            path,
+            params,
         )
 
         assert response.status_code == 200
-        ranks = dict(response.context["cl"].queryset.values_list("pk", "search_rank"))
-        assert ranks[metadata_snapshot.pk] == 0
-        assert ranks[contents_snapshot.pk] == 1
-        assert ranks[deep_snapshot.pk] == 2
-        assert b'class="search-rank-0"' in response.content
-        assert b'class="search-rank-1"' in response.content
-        assert b'class="search-rank-2"' in response.content
+        from django.core.cache import cache
+        from archivebox.search.admin import get_admin_search_cache_key
 
-    def test_search_ranks_metadata_matches_before_fulltext_by_default(self, client, admin_user, crawl, monkeypatch):
+        cached = cache.get(get_admin_search_cache_key(SimpleNamespace(user=admin_user), f"{path}?{urlencode(params)}"))
+        assert cached["ids"][:3] == [str(title_snapshot.pk), str(contains_snapshot.pk), str(prefix_snapshot.pk)]
+        result_ids = list(response.context["cl"].queryset.values_list("pk", flat=True))
+        assert {title_snapshot.pk, contains_snapshot.pk, prefix_snapshot.pk}.issubset(result_ids)
+
+    def test_admin_contents_search_stream_uses_real_backend_results(self, client, admin_user, crawl, monkeypatch):
         from archivebox.core.models import Snapshot
 
+        monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "ripgrep")
         metadata_snapshot = Snapshot.objects.create(
             url="https://example.com/google-meta",
             title="Google Metadata Match",
@@ -1575,48 +1613,48 @@ class TestAdminSnapshotSearch:
             title="Unrelated Title",
             crawl=crawl,
         )
-
-        monkeypatch.setattr(
-            "archivebox.search.admin.query_search_index",
-            lambda query, search_mode=None: Snapshot.objects.filter(pk=fulltext_snapshot.pk),
-        )
+        output_file = fulltext_snapshot.output_dir / "dom" / "output.html"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("<html><body>google fulltext match</body></html>", encoding="utf-8")
 
         client.login(username="testadmin", password="testpassword")
-        response = client.get(reverse("admin:core_snapshot_changelist"), {"q": "google", "search_mode": "contents"}, HTTP_HOST=ADMIN_HOST)
+        response = populate_admin_search_cache(
+            client,
+            reverse("admin:core_snapshot_changelist"),
+            {"q": "google", "search_mode": "contents"},
+        )
 
         assert response.status_code == 200
         result_ids = list(response.context["cl"].queryset.values_list("pk", flat=True))
-        assert result_ids[:2] == [metadata_snapshot.pk, fulltext_snapshot.pk]
+        assert metadata_snapshot.pk not in result_ids
+        assert result_ids[:1] == [fulltext_snapshot.pk]
 
-    def test_manual_admin_sort_ignores_search_rank_ordering(self, client, admin_user, crawl, monkeypatch):
+    def test_manual_admin_sort_applies_to_cached_search_results(self, client, admin_user, crawl):
         from archivebox.core.models import Snapshot
 
-        metadata_snapshot = Snapshot.objects.create(
-            url="https://example.com/google-meta",
-            title="Google Metadata Match",
+        older_snapshot = Snapshot.objects.create(
+            url="https://example.com/google-older",
+            title="A Google Older",
+            timestamp="1000000000",
             crawl=crawl,
         )
-        fulltext_snapshot = Snapshot.objects.create(
-            url="https://example.com/fulltext-only",
-            title="Unrelated Title",
+        newer_snapshot = Snapshot.objects.create(
+            url="https://example.com/google-newer",
+            title="Z Google Newer",
+            timestamp="2000000000",
             crawl=crawl,
-        )
-
-        monkeypatch.setattr(
-            "archivebox.search.admin.query_search_index",
-            lambda query, search_mode=None: Snapshot.objects.filter(pk=fulltext_snapshot.pk),
         )
 
         client.login(username="testadmin", password="testpassword")
-        response = client.get(
+        response = populate_admin_search_cache(
+            client,
             reverse("admin:core_snapshot_changelist"),
-            {"q": "google", "search_mode": "contents", "o": "-0"},
-            HTTP_HOST=ADMIN_HOST,
+            {"q": "google", "search_mode": "meta", "o": "4"},
         )
 
         assert response.status_code == 200
         result_ids = list(response.context["cl"].queryset.values_list("pk", flat=True))
-        assert result_ids[:2] == [fulltext_snapshot.pk, metadata_snapshot.pk]
+        assert result_ids[:2] == [older_snapshot.pk, newer_snapshot.pk]
 
     def test_search_by_url(self, client, admin_user, snapshot):
         """Test searching snapshots by URL."""
@@ -1750,18 +1788,21 @@ class TestPublicIndexSearch:
         assert private_response["Location"].startswith("/admin/login/")
 
     @override_settings(PUBLIC_INDEX=True)
-    def test_public_search_mode_selector_defaults_to_meta_for_ripgrep(self, client, monkeypatch):
+    def test_public_search_mode_selector_defaults_to_configured_deep_backend_for_ripgrep(self, client, monkeypatch):
         monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "ripgrep")
 
         response = client.get("/public/", HTTP_HOST=PUBLIC_HOST)
 
         assert response.status_code == 200
-        assert b'name="search_mode" value="meta" checked' in response.content
+        assert response.context["search_mode"] == "deep:ripgrep"
+        assert b'name="search_mode"' in response.content
+        assert b'value="deep:ripgrep"' in response.content
 
     def test_public_search_ranks_metadata_matches_before_fulltext(self, crawl, monkeypatch):
         from archivebox.core.models import Snapshot
         from archivebox.core.views import PublicIndexView
 
+        monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "ripgrep")
         metadata_snapshot = Snapshot.objects.create(
             url="https://public-example.com/google-meta",
             title="Google Metadata Match",
@@ -1774,11 +1815,9 @@ class TestPublicIndexSearch:
             crawl=crawl,
             status=Snapshot.StatusChoices.SEALED,
         )
-
-        monkeypatch.setattr(
-            "archivebox.core.views.query_search_index",
-            lambda query, search_mode=None: Snapshot.objects.filter(pk=fulltext_snapshot.pk),
-        )
+        output_file = fulltext_snapshot.output_dir / "dom" / "output.html"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("<html><body>google public fulltext match</body></html>", encoding="utf-8")
 
         request = RequestFactory().get("/public/", {"q": "google", "search_mode": "contents"})
         view = PublicIndexView()

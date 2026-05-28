@@ -1,6 +1,7 @@
 """archivebox/tests/conftest.py - Pytest fixtures for CLI tests."""
 
 import os
+import json
 import secrets
 import socket
 import subprocess
@@ -11,6 +12,7 @@ import time
 import shutil
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -218,6 +220,52 @@ def initialized_archive(isolated_data_dir):
     return isolated_data_dir
 
 
+@pytest.fixture
+def archivebox_daemon_server(tmp_path, process, unused_tcp_port_factory):
+    """
+    Start a real daemonized ArchiveBox server in this test's DATA_DIR and
+    always stop its supervisord before the test exits.
+    """
+    assert process.returncode == 0, process.stderr
+    started: list[tuple[Path, dict[str, str]]] = []
+
+    def start(**env_overrides: str):
+        env = os.environ.copy()
+        env.update(
+            {
+                "USE_COLOR": "False",
+                "SHOW_PROGRESS": "False",
+                "SEARCH_BACKEND_SONIC_HOST_NAME": "127.0.0.1",
+                "SEARCH_BACKEND_SONIC_PORT": str(unused_tcp_port_factory()),
+                **{key: str(value) for key, value in env_overrides.items()},
+            },
+        )
+        port = unused_tcp_port_factory()
+        result = subprocess.run(
+            [sys.executable, "-m", "archivebox", "server", "--daemonize", f"127.0.0.1:{port}"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+        started.append((tmp_path, env))
+        return SimpleNamespace(
+            data_dir=tmp_path,
+            env=env,
+            port=port,
+            worker_state=lambda: _archivebox_worker_state(tmp_path, env),
+            wait_for_workers=lambda names, timeout=45: _wait_for_archivebox_workers(tmp_path, env, names, timeout=timeout),
+        )
+
+    try:
+        yield start
+    finally:
+        for cwd, env in reversed(started):
+            _stop_archivebox_supervisord(cwd, env)
+
+
 # =============================================================================
 # CWD-based CLI Helpers (no DATA_DIR env)
 # =============================================================================
@@ -261,6 +309,57 @@ def run_archivebox_cmd_cwd(
     )
 
     return result.stdout, result.stderr, result.returncode
+
+
+def _run_archivebox_manage_shell(cwd: Path, env: dict[str, str], script: str, timeout: int = 60) -> str:
+    result = subprocess.run(
+        [sys.executable, "-m", "archivebox", "manage", "shell", "-c", script],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout
+
+
+def _archivebox_worker_state(cwd: Path, env: dict[str, str]) -> dict[str, Any]:
+    stdout = _run_archivebox_manage_shell(
+        cwd,
+        env,
+        """
+import json
+from archivebox.workers.supervisord_util import get_existing_supervisord_process, get_worker
+supervisor = get_existing_supervisord_process(quiet=True)
+workers = {}
+if supervisor:
+    for name in ("worker_daphne", "worker_sonic", "worker_runner"):
+        workers[name] = get_worker(supervisor, name)
+print(json.dumps(workers, default=str))
+""",
+    )
+    return json.loads(stdout.strip().splitlines()[-1])
+
+
+def _stop_archivebox_supervisord(cwd: Path, env: dict[str, str]) -> None:
+    _run_archivebox_manage_shell(
+        cwd,
+        env,
+        "from archivebox.workers.supervisord_util import stop_existing_supervisord_process; stop_existing_supervisord_process()",
+        timeout=30,
+    )
+
+
+def _wait_for_archivebox_workers(cwd: Path, env: dict[str, str], names: tuple[str, ...] | list[str], timeout: int = 45) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    state: dict[str, Any] = {}
+    while time.time() < deadline:
+        state = _archivebox_worker_state(cwd, env)
+        if all(state.get(name, {}).get("statename") == "RUNNING" for name in names):
+            return state
+        time.sleep(1)
+    return state
 
 
 def stop_process(proc: subprocess.Popen[str]) -> tuple[str, str]:

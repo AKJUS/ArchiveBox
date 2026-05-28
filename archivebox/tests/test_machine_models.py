@@ -14,13 +14,11 @@ Tests cover:
 import os
 import subprocess
 import sys
-import tempfile
 from datetime import timedelta
 from pathlib import Path
 from typing import cast
 
 import pytest
-from django.test import TestCase
 from django.utils import timezone
 
 from archivebox.machine.models import (
@@ -36,32 +34,75 @@ from archivebox.machine.models import (
     PROCESS_TIMEOUT_GRACE,
 )
 
+pytestmark = pytest.mark.django_db
 
-class TestMachineModel(TestCase):
+
+def _reset_machine_model_caches():
+    import archivebox.machine.models as models
+
+    models._CURRENT_MACHINE = None
+    models._CURRENT_INTERFACE = None
+    models._CURRENT_PROCESS = None
+    models._CURRENT_BINARIES = {}
+
+
+@pytest.fixture(autouse=True)
+def reset_machine_model_caches():
+    _reset_machine_model_caches()
+    yield
+    _reset_machine_model_caches()
+
+
+@pytest.fixture
+def machine():
+    return Machine.current()
+
+
+@pytest.fixture
+def binary(machine):
+    return Binary.objects.create(
+        machine=machine,
+        name="test-binary",
+        binproviders="env",
+    )
+
+
+@pytest.fixture
+def process(machine):
+    return Process.objects.create(
+        machine=machine,
+        cmd=["echo", "test"],
+        pwd="/tmp",
+    )
+
+
+@pytest.fixture
+def cleanup_paths():
+    paths: list[Path] = []
+    yield paths
+    for path in reversed(paths):
+        path.unlink(missing_ok=True)
+
+
+class TestMachineModel:
     """Test the Machine model."""
-
-    def setUp(self):
-        """Reset cached machine between tests."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
 
     def test_machine_current_creates_machine(self):
         """Machine.current() should create a machine if none exists."""
         machine = Machine.current()
 
-        self.assertIsNotNone(machine)
-        self.assertIsNotNone(machine.id)
-        self.assertIsNotNone(machine.guid)
-        self.assertEqual(machine.hostname, os.uname().nodename)
-        self.assertIn(machine.os_family, ["linux", "darwin", "windows", "freebsd"])
+        assert machine is not None
+        assert machine.id is not None
+        assert machine.guid is not None
+        assert machine.hostname == os.uname().nodename
+        assert machine.os_family in ["linux", "darwin", "windows", "freebsd"]
 
     def test_machine_current_returns_cached(self):
         """Machine.current() should return cached machine within recheck interval."""
         machine1 = Machine.current()
         machine2 = Machine.current()
 
-        self.assertEqual(machine1.id, machine2.id)
+        assert machine1.id == machine2.id
 
     def test_machine_current_refreshes_after_interval(self):
         """Machine.current() should refresh after recheck interval."""
@@ -77,7 +118,7 @@ class TestMachineModel(TestCase):
         machine2 = Machine.current()
 
         # Should have fetched/updated the machine (same GUID)
-        self.assertEqual(machine1.guid, machine2.guid)
+        assert machine1.guid == machine2.guid
 
     def test_machine_current_recreates_stale_cached_row(self):
         """Machine.current() should recreate the cached machine if the row was deleted."""
@@ -92,10 +133,10 @@ class TestMachineModel(TestCase):
 
         machine2 = Machine.current()
 
-        self.assertNotEqual(machine1_id, machine2.id)
-        self.assertEqual(machine1_guid, machine2.guid)
+        assert machine1_id != machine2.id
+        assert machine1_guid == machine2.guid
 
-    def test_machine_from_jsonl_update(self):
+    def test_machine_from_jsonl_update(self, cleanup_paths):
         """Machine.from_json() should update machine config."""
         from archivebox.config.constants import CONSTANTS
 
@@ -103,7 +144,7 @@ class TestMachineModel(TestCase):
         wget_path = CONSTANTS.DEFAULT_LIB_DIR / "wget"
         wget_path.parent.mkdir(parents=True, exist_ok=True)
         wget_path.write_text("#!/bin/sh\n")
-        self.addCleanup(lambda: wget_path.exists() and wget_path.unlink())
+        cleanup_paths.append(wget_path)
         record = {
             "config": {
                 "WGET_BINARY": str(wget_path),
@@ -112,11 +153,10 @@ class TestMachineModel(TestCase):
 
         result = Machine.from_json(record)
 
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertEqual(result.config.get("WGET_BINARY"), str(wget_path))
+        assert result.config.get("WGET_BINARY") == str(wget_path)
 
-    def test_machine_from_jsonl_keeps_only_valid_binary_paths(self):
+    def test_machine_from_jsonl_keeps_only_valid_binary_paths(self, cleanup_paths):
         """Machine.from_json() should persist only valid LIB_DIR binary paths."""
         from archivebox.config.constants import CONSTANTS
 
@@ -124,7 +164,7 @@ class TestMachineModel(TestCase):
         wget_path = CONSTANTS.DEFAULT_LIB_DIR / "wget"
         wget_path.parent.mkdir(parents=True, exist_ok=True)
         wget_path.write_text("#!/bin/sh\n")
-        self.addCleanup(lambda: wget_path.exists() and wget_path.unlink())
+        cleanup_paths.append(wget_path)
         record = {
             "config": {
                 "WGET_BINARY": str(wget_path),
@@ -135,18 +175,17 @@ class TestMachineModel(TestCase):
 
         result = Machine.from_json(record)
 
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertEqual(result.config.get("WGET_BINARY"), str(wget_path))
-        self.assertNotIn("CHROMIUM_VERSION", result.config)
-        self.assertNotIn("YTDLP_BINARY", result.config)
+        assert result.config.get("WGET_BINARY") == str(wget_path)
+        assert "CHROMIUM_VERSION" not in result.config
+        assert "YTDLP_BINARY" not in result.config
 
     def test_machine_from_jsonl_invalid(self):
         """Machine.from_json() should return None for invalid records."""
         result = Machine.from_json({"invalid": "record"})
-        self.assertIsNone(result)
+        assert result is None
 
-    def test_machine_current_keeps_only_derived_runtime_cache(self):
+    def test_machine_current_keeps_only_derived_runtime_cache(self, cleanup_paths):
         """Machine.current() should keep derived cache entries, not runtime config."""
         import archivebox.machine.models as models
         from archivebox.config.constants import CONSTANTS
@@ -157,11 +196,9 @@ class TestMachineModel(TestCase):
         node_path = active_lib_dir / "node"
         chrome_path.write_text("#!/bin/sh\n")
         node_path.write_text("#!/bin/sh\n")
-        external_path = "/tmp/archivebox-test-external-node"
-        open(external_path, "a").close()
-        self.addCleanup(lambda: chrome_path.exists() and chrome_path.unlink())
-        self.addCleanup(lambda: node_path.exists() and node_path.unlink())
-        self.addCleanup(lambda: os.path.exists(external_path) and os.remove(external_path))
+        external_path = Path("/tmp/archivebox-test-external-node")
+        external_path.touch()
+        cleanup_paths.extend([chrome_path, node_path, external_path])
         machine = Machine.current()
         machine.config = {
             "CHROME_BINARY": str(chrome_path),
@@ -170,24 +207,24 @@ class TestMachineModel(TestCase):
             "CHROME_ISOLATION": "snapshot",
             "CHROME_USER_DATA_DIR": "/tmp/profile",
             "CHROMIUM_VERSION": "123.4.5",
-            "YTDLP_BINARY": external_path,
+            "YTDLP_BINARY": str(external_path),
             "WGET_BINARY": "/tmp/archivebox-test-missing-wget",
         }
         machine.save(update_fields=["config"])
         models._CURRENT_MACHINE = machine
 
-        refreshed = Machine.current()
+        refreshed = Machine.current(refresh=True)
 
-        self.assertEqual(refreshed.config.get("CHROME_BINARY"), str(chrome_path))
-        self.assertEqual(refreshed.config.get("NODE_BINARY"), str(node_path))
-        self.assertNotIn("ABX_INSTALL_CACHE", refreshed.config)
-        self.assertNotIn("CHROME_ISOLATION", refreshed.config)
-        self.assertNotIn("CHROME_USER_DATA_DIR", refreshed.config)
-        self.assertNotIn("CHROMIUM_VERSION", refreshed.config)
-        self.assertNotIn("YTDLP_BINARY", refreshed.config)
-        self.assertNotIn("WGET_BINARY", refreshed.config)
+        assert refreshed.config.get("CHROME_BINARY") == str(chrome_path)
+        assert refreshed.config.get("NODE_BINARY") == str(node_path)
+        assert "ABX_INSTALL_CACHE" not in refreshed.config
+        assert "CHROME_ISOLATION" not in refreshed.config
+        assert "CHROME_USER_DATA_DIR" not in refreshed.config
+        assert "CHROMIUM_VERSION" not in refreshed.config
+        assert "YTDLP_BINARY" not in refreshed.config
+        assert "WGET_BINARY" not in refreshed.config
 
-    def test_get_config_auto_applies_current_machine_config(self):
+    def test_get_config_auto_applies_current_machine_config(self, cleanup_paths):
         """get_config() should include sanitized Machine.current() config by default."""
         import archivebox.machine.models as models
         from archivebox.config.common import get_config
@@ -196,7 +233,7 @@ class TestMachineModel(TestCase):
         chrome_path = lib_dir / "chromium"
         chrome_path.parent.mkdir(parents=True, exist_ok=True)
         chrome_path.write_text("#!/bin/sh\n")
-        self.addCleanup(lambda: chrome_path.exists() and chrome_path.unlink())
+        cleanup_paths.append(chrome_path)
         machine = Machine.current()
         machine.config = {
             "CHROME_BINARY": str(chrome_path),
@@ -208,58 +245,47 @@ class TestMachineModel(TestCase):
 
         config = get_config()
 
-        self.assertEqual(config.CHROME_BINARY, str(chrome_path))
-        self.assertEqual(config.CHROME_ISOLATION, "crawl")
+        assert config.CHROME_BINARY == str(chrome_path)
+        assert config.CHROME_ISOLATION == "crawl"
 
     def test_machine_manager_current(self):
         """Machine.objects.current() should return current machine."""
         machine = Machine.current()
-        self.assertIsNotNone(machine)
-        self.assertEqual(machine.id, Machine.current().id)
+        assert machine is not None
+        assert machine.id == Machine.current().id
 
 
-class TestNetworkInterfaceModel(TestCase):
+class TestNetworkInterfaceModel:
     """Test the NetworkInterface model."""
-
-    def setUp(self):
-        """Reset cached interface between tests."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        models._CURRENT_INTERFACE = None
 
     def test_networkinterface_current_creates_interface(self):
         """NetworkInterface.current() should create an interface if none exists."""
         interface = NetworkInterface.current()
 
-        self.assertIsNotNone(interface)
-        self.assertIsNotNone(interface.id)
-        self.assertIsNotNone(interface.machine)
-        self.assertIsNotNone(interface.ip_local)
+        assert interface is not None
+        assert interface.id is not None
+        assert interface.machine is not None
+        assert interface.ip_local is not None
 
     def test_networkinterface_current_returns_cached(self):
         """NetworkInterface.current() should return cached interface within recheck interval."""
         interface1 = NetworkInterface.current()
         interface2 = NetworkInterface.current()
 
-        self.assertEqual(interface1.id, interface2.id)
+        assert interface1.id == interface2.id
 
     def test_networkinterface_manager_current(self):
         """NetworkInterface.objects.current() should return current interface."""
         interface = NetworkInterface.current()
-        self.assertIsNotNone(interface)
+        assert interface is not None
 
 
-class TestBinaryModel(TestCase):
+class TestBinaryModel:
     """Test the Binary model."""
 
-    def setUp(self):
-        """Reset cached binaries and create a machine."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        models._CURRENT_BINARIES = {}
-        self.machine = Machine.current()
+    @pytest.fixture(autouse=True)
+    def setup_machine(self, machine):
+        self.machine = machine
 
     def test_binary_creation(self):
         """Binary should be created with default values."""
@@ -269,10 +295,10 @@ class TestBinaryModel(TestCase):
             binproviders="apt,brew,env",
         )
 
-        self.assertIsNotNone(binary.id)
-        self.assertEqual(binary.name, "wget")
-        self.assertEqual(binary.status, Binary.StatusChoices.QUEUED)
-        self.assertFalse(binary.is_valid)
+        assert binary.id is not None
+        assert binary.name == "wget"
+        assert binary.status == Binary.StatusChoices.QUEUED
+        assert not binary.is_valid
 
     def test_binary_is_valid(self):
         """Binary.is_valid should be True for installed binaries with a resolved path."""
@@ -284,7 +310,7 @@ class TestBinaryModel(TestCase):
             status=Binary.StatusChoices.INSTALLED,
         )
 
-        self.assertTrue(binary.is_valid)
+        assert binary.is_valid
 
     def test_binary_manager_get_valid_binary(self):
         """BinaryManager.get_valid_binary() should find valid binaries."""
@@ -302,9 +328,8 @@ class TestBinaryModel(TestCase):
 
         result = cast(BinaryManager, Binary.objects).get_valid_binary("wget")
 
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertEqual(result.abspath, "/usr/bin/wget")
+        assert result.abspath == "/usr/bin/wget"
 
     def test_binary_update_and_requeue(self):
         """Binary.update_and_requeue() should update fields and save."""
@@ -317,8 +342,8 @@ class TestBinaryModel(TestCase):
         )
 
         binary.refresh_from_db()
-        self.assertEqual(binary.status, Binary.StatusChoices.QUEUED)
-        self.assertGreater(binary.modified_at, old_modified)
+        assert binary.status == Binary.StatusChoices.QUEUED
+        assert binary.modified_at > old_modified
 
     def test_binary_from_json_preserves_provider_overrides(self):
         """Binary.from_json() should persist provider overrides unchanged."""
@@ -336,9 +361,8 @@ class TestBinaryModel(TestCase):
             },
         )
 
-        self.assertIsNotNone(binary)
         assert binary is not None
-        self.assertEqual(binary.overrides, overrides)
+        assert binary.overrides == overrides
 
     def test_binary_from_json_canonicalizes_path_like_names(self):
         """Binary.from_json() should store command names, not path cache values."""
@@ -350,9 +374,8 @@ class TestBinaryModel(TestCase):
             },
         )
 
-        self.assertIsNotNone(binary)
         assert binary is not None
-        self.assertEqual(binary.name, "trafilatura")
+        assert binary.name == "trafilatura"
 
     def test_binary_from_json_does_not_coerce_legacy_override_shapes(self):
         """Binary.from_json() should no longer translate legacy non-dict provider overrides."""
@@ -369,9 +392,8 @@ class TestBinaryModel(TestCase):
             },
         )
 
-        self.assertIsNotNone(binary)
         assert binary is not None
-        self.assertEqual(binary.overrides, overrides)
+        assert binary.overrides == overrides
 
     def test_binary_from_json_prefers_published_readability_package(self):
         """Binary.from_json() should rewrite readability's npm git URL to the published package."""
@@ -387,59 +409,43 @@ class TestBinaryModel(TestCase):
             },
         )
 
-        self.assertIsNotNone(binary)
         assert binary is not None
-        self.assertEqual(
-            binary.overrides,
-            {
-                "npm": {
-                    "install_args": ["readability-extractor"],
-                },
+        assert binary.overrides == {
+            "npm": {
+                "install_args": ["readability-extractor"],
             },
-        )
+        }
 
 
-class TestBinaryStateMachine(TestCase):
+class TestBinaryStateMachine:
     """Test the BinaryMachine state machine."""
 
-    def setUp(self):
-        """Create a machine and binary for state machine tests."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        self.machine = Machine.current()
-        self.binary = Binary.objects.create(
-            machine=self.machine,
-            name="test-binary",
-            binproviders="env",
-        )
+    @pytest.fixture(autouse=True)
+    def setup_binary(self, binary):
+        self.binary = binary
 
     def test_binary_state_machine_initial_state(self):
         """BinaryMachine should start in queued state."""
         sm = BinaryMachine(self.binary)
-        self.assertEqual(sm.current_state_value, Binary.StatusChoices.QUEUED)
+        assert sm.current_state_value == Binary.StatusChoices.QUEUED
 
     def test_binary_state_machine_can_start(self):
         """BinaryMachine.can_start() should check name and binproviders."""
         sm = BinaryMachine(self.binary)
-        self.assertTrue(sm.can_install())
+        assert sm.can_install()
 
         self.binary.binproviders = ""
         self.binary.save()
         sm = BinaryMachine(self.binary)
-        self.assertFalse(sm.can_install())
+        assert not sm.can_install()
 
 
-class TestProcessModel(TestCase):
+class TestProcessModel:
     """Test the Process model."""
 
-    def setUp(self):
-        """Create a machine for process tests."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        models._CURRENT_PROCESS = None
-        self.machine = Machine.current()
+    @pytest.fixture(autouse=True)
+    def setup_machine(self, machine):
+        self.machine = machine
 
     def test_process_creation(self):
         """Process should be created with default values."""
@@ -449,11 +455,11 @@ class TestProcessModel(TestCase):
             pwd="/tmp",
         )
 
-        self.assertIsNotNone(process.id)
-        self.assertEqual(process.cmd, ["echo", "hello"])
-        self.assertEqual(process.status, Process.StatusChoices.QUEUED)
-        self.assertIsNone(process.pid)
-        self.assertIsNone(process.exit_code)
+        assert process.id is not None
+        assert process.cmd == ["echo", "hello"]
+        assert process.status == Process.StatusChoices.QUEUED
+        assert process.pid is None
+        assert process.exit_code is None
 
     def test_process_to_jsonl(self):
         """Process.to_json() should serialize correctly."""
@@ -465,10 +471,10 @@ class TestProcessModel(TestCase):
         )
         json_data = process.to_json()
 
-        self.assertEqual(json_data["type"], "Process")
-        self.assertEqual(json_data["cmd"], ["echo", "hello"])
-        self.assertEqual(json_data["pwd"], "/tmp")
-        self.assertEqual(json_data["timeout"], 60)
+        assert json_data["type"] == "Process"
+        assert json_data["cmd"] == ["echo", "hello"]
+        assert json_data["pwd"] == "/tmp"
+        assert json_data["timeout"] == 60
 
     def test_process_update_and_requeue(self):
         """Process.update_and_requeue() should update fields and save."""
@@ -481,39 +487,32 @@ class TestProcessModel(TestCase):
         )
 
         process.refresh_from_db()
-        self.assertEqual(process.status, Process.StatusChoices.RUNNING)
-        self.assertEqual(process.pid, 12345)
-        self.assertIsNotNone(process.started_at)
+        assert process.status == Process.StatusChoices.RUNNING
+        assert process.pid == 12345
+        assert process.started_at is not None
 
 
-class TestProcessCurrent(TestCase):
+class TestProcessCurrent:
     """Test Process.current() method."""
-
-    def setUp(self):
-        """Reset caches."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        models._CURRENT_PROCESS = None
 
     def test_process_current_creates_record(self):
         """Process.current() should create a Process for current PID."""
         proc = Process.current()
 
-        self.assertIsNotNone(proc)
-        self.assertEqual(proc.pid, os.getpid())
-        self.assertEqual(proc.status, Process.StatusChoices.RUNNING)
-        self.assertIsNotNone(proc.machine)
-        self.assertIsNotNone(proc.iface)
-        self.assertEqual(proc.iface.machine_id, proc.machine_id)
-        self.assertIsNotNone(proc.started_at)
+        assert proc is not None
+        assert proc.pid == os.getpid()
+        assert proc.status == Process.StatusChoices.RUNNING
+        assert proc.machine is not None
+        assert proc.iface is not None
+        assert proc.iface.machine_id == proc.machine_id
+        assert proc.started_at is not None
 
     def test_process_current_caches(self):
         """Process.current() should cache the result."""
         proc1 = Process.current()
         proc2 = Process.current()
 
-        self.assertEqual(proc1.id, proc2.id)
+        assert proc1.id == proc2.id
 
     def test_process_detect_type_runner(self):
         """_detect_process_type should detect the background runner command."""
@@ -521,7 +520,7 @@ class TestProcessCurrent(TestCase):
         try:
             sys.argv = ["archivebox", "run", "--daemon"]
             result = Process._detect_process_type()
-            self.assertEqual(result, Process.TypeChoices.ORCHESTRATOR)
+            assert result == Process.TypeChoices.ORCHESTRATOR
         finally:
             sys.argv = old_argv
 
@@ -531,7 +530,7 @@ class TestProcessCurrent(TestCase):
         try:
             sys.argv = ["archivebox", "manage", "runner_watch", "--bind-url=http://127.0.0.1:8000"]
             result = Process._detect_process_type()
-            self.assertEqual(result, Process.TypeChoices.WORKER)
+            assert result == Process.TypeChoices.WORKER
         finally:
             sys.argv = old_argv
 
@@ -541,7 +540,7 @@ class TestProcessCurrent(TestCase):
         try:
             sys.argv = ["archivebox", "add", "http://example.com"]
             result = Process._detect_process_type()
-            self.assertEqual(result, Process.TypeChoices.CLI)
+            assert result == Process.TypeChoices.ADD
         finally:
             sys.argv = old_argv
 
@@ -551,17 +550,15 @@ class TestProcessCurrent(TestCase):
         try:
             sys.argv = ["/usr/bin/wget", "https://example.com"]
             result = Process._detect_process_type()
-            self.assertEqual(result, Process.TypeChoices.BINARY)
+            assert result == Process.TypeChoices.BINARY
         finally:
             sys.argv = old_argv
 
-    def test_process_proc_allows_interpreter_wrapped_script(self):
+    def test_process_proc_allows_interpreter_wrapped_script(self, tmp_path):
         """Process.proc should accept a script recorded in DB when wrapped by an interpreter in psutil."""
         import psutil
 
-        temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(temp_dir.cleanup)
-        script = Path(temp_dir.name) / "on_CrawlSetup__90_chrome_launch.daemon.bg.py"
+        script = tmp_path / "on_CrawlSetup__90_chrome_launch.daemon.bg.py"
         script.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
         process = subprocess.Popen(
             [sys.executable, str(script), "--url=https://example.com/"],
@@ -579,31 +576,29 @@ class TestProcessCurrent(TestCase):
                     process.kill()
                     process.wait(timeout=5)
 
-        self.addCleanup(cleanup_process)
-        os_proc = psutil.Process(process.pid)
-        proc = Process.objects.create(
-            machine=Machine.current(),
-            cmd=[str(script), "--url=https://example.com/"],
-            pid=process.pid,
-            status=Process.StatusChoices.RUNNING,
-            started_at=timezone.datetime.fromtimestamp(os_proc.create_time(), tz=timezone.get_current_timezone()),
-        )
+        try:
+            os_proc = psutil.Process(process.pid)
+            proc = Process.objects.create(
+                machine=Machine.current(),
+                cmd=[str(script), "--url=https://example.com/"],
+                pid=process.pid,
+                status=Process.StatusChoices.RUNNING,
+                started_at=timezone.datetime.fromtimestamp(os_proc.create_time(), tz=timezone.get_current_timezone()),
+            )
 
-        resolved_proc = proc.proc
-        self.assertIsNotNone(resolved_proc)
-        assert resolved_proc is not None
-        self.assertEqual(resolved_proc.pid, process.pid)
+            resolved_proc = proc.proc
+            assert resolved_proc is not None
+            assert resolved_proc.pid == process.pid
+        finally:
+            cleanup_process()
 
 
-class TestProcessHierarchy(TestCase):
+class TestProcessHierarchy:
     """Test Process parent/child relationships."""
 
-    def setUp(self):
-        """Create machine."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        self.machine = Machine.current()
+    @pytest.fixture(autouse=True)
+    def setup_machine(self, machine):
+        self.machine = machine
 
     def test_process_parent_child(self):
         """Process should track parent/child relationships."""
@@ -624,8 +619,8 @@ class TestProcessHierarchy(TestCase):
             started_at=timezone.now(),
         )
 
-        self.assertEqual(child.parent, parent)
-        self.assertIn(child, parent.children.all())
+        assert child.parent == parent
+        assert child in parent.children.all()
 
     def test_process_root(self):
         """Process.root should return the root of the hierarchy."""
@@ -648,9 +643,9 @@ class TestProcessHierarchy(TestCase):
             started_at=timezone.now(),
         )
 
-        self.assertEqual(grandchild.root, root)
-        self.assertEqual(child.root, root)
-        self.assertEqual(root.root, root)
+        assert grandchild.root == root
+        assert child.root == root
+        assert root.root == root
 
     def test_process_depth(self):
         """Process.depth should return depth in tree."""
@@ -666,19 +661,16 @@ class TestProcessHierarchy(TestCase):
             started_at=timezone.now(),
         )
 
-        self.assertEqual(root.depth, 0)
-        self.assertEqual(child.depth, 1)
+        assert root.depth == 0
+        assert child.depth == 1
 
 
-class TestProcessLifecycle(TestCase):
+class TestProcessLifecycle:
     """Test Process lifecycle methods."""
 
-    def setUp(self):
-        """Create machine."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        self.machine = Machine.current()
+    @pytest.fixture(autouse=True)
+    def setup_machine(self, machine):
+        self.machine = machine
 
     def test_process_is_running_current_pid(self):
         """is_running should be True for current PID."""
@@ -693,7 +685,7 @@ class TestProcessLifecycle(TestCase):
             started_at=proc_start,
         )
 
-        self.assertTrue(proc.is_running)
+        assert proc.is_running
 
     def test_process_is_running_fake_pid(self):
         """is_running should be False for non-existent PID."""
@@ -704,7 +696,7 @@ class TestProcessLifecycle(TestCase):
             started_at=timezone.now(),
         )
 
-        self.assertFalse(proc.is_running)
+        assert not proc.is_running
 
     def test_process_poll_detects_exit(self):
         """poll() should detect exited process."""
@@ -717,9 +709,9 @@ class TestProcessLifecycle(TestCase):
 
         exit_code = proc.poll()
 
-        self.assertIsNotNone(exit_code)
+        assert exit_code is not None
         proc.refresh_from_db()
-        self.assertEqual(proc.status, Process.StatusChoices.EXITED)
+        assert proc.status == Process.StatusChoices.EXITED
 
     def test_process_poll_normalizes_negative_exit_code(self):
         """poll() should normalize -1 exit codes to 137."""
@@ -733,9 +725,9 @@ class TestProcessLifecycle(TestCase):
 
         exit_code = proc.poll()
 
-        self.assertEqual(exit_code, 137)
+        assert exit_code == 137
         proc.refresh_from_db()
-        self.assertEqual(proc.exit_code, 137)
+        assert proc.exit_code == 137
 
     def test_process_terminate_dead_process(self):
         """terminate() should handle already-dead process."""
@@ -748,20 +740,17 @@ class TestProcessLifecycle(TestCase):
 
         result = proc.terminate()
 
-        self.assertFalse(result)
+        assert not result
         proc.refresh_from_db()
-        self.assertEqual(proc.status, Process.StatusChoices.EXITED)
+        assert proc.status == Process.StatusChoices.EXITED
 
 
-class TestProcessClassMethods(TestCase):
+class TestProcessClassMethods:
     """Test Process class methods for querying."""
 
-    def setUp(self):
-        """Create machine."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        self.machine = Machine.current()
+    @pytest.fixture(autouse=True)
+    def setup_machine(self, machine):
+        self.machine = machine
 
     def test_get_running(self):
         """get_running should return running processes."""
@@ -775,7 +764,7 @@ class TestProcessClassMethods(TestCase):
 
         running = Process.get_running(process_type=Process.TypeChoices.HOOK)
 
-        self.assertIn(proc, running)
+        assert proc in running
 
     def test_get_running_count(self):
         """get_running_count should count running processes."""
@@ -789,7 +778,7 @@ class TestProcessClassMethods(TestCase):
             )
 
         count = Process.get_running_count(process_type=Process.TypeChoices.HOOK)
-        self.assertGreaterEqual(count, 3)
+        assert count >= 3
 
     def test_cleanup_stale_running(self):
         """cleanup_stale_running should mark stale processes as exited."""
@@ -802,9 +791,9 @@ class TestProcessClassMethods(TestCase):
 
         cleaned = Process.cleanup_stale_running()
 
-        self.assertGreaterEqual(cleaned, 1)
+        assert cleaned >= 1
         stale.refresh_from_db()
-        self.assertEqual(stale.status, Process.StatusChoices.EXITED)
+        assert stale.status == Process.StatusChoices.EXITED
 
     def test_cleanup_stale_running_marks_timed_out_rows_exited(self):
         """cleanup_stale_running should retire RUNNING rows that exceed timeout + grace."""
@@ -818,9 +807,9 @@ class TestProcessClassMethods(TestCase):
 
         cleaned = Process.cleanup_stale_running()
 
-        self.assertGreaterEqual(cleaned, 1)
+        assert cleaned >= 1
         stale.refresh_from_db()
-        self.assertEqual(stale.status, Process.StatusChoices.EXITED)
+        assert stale.status == Process.StatusChoices.EXITED
 
     def test_cleanup_stale_running_marks_timed_out_live_hooks_exited(self):
         """Timed-out live hook rows should be retired in the DB without trying to kill the process."""
@@ -835,9 +824,9 @@ class TestProcessClassMethods(TestCase):
 
         cleaned = Process.cleanup_stale_running()
 
-        self.assertGreaterEqual(cleaned, 1)
+        assert cleaned >= 1
         stale.refresh_from_db()
-        self.assertEqual(stale.status, Process.StatusChoices.EXITED)
+        assert stale.status == Process.StatusChoices.EXITED
 
     def test_cleanup_orphaned_workers_marks_dead_root_children_exited(self):
         """cleanup_orphaned_workers should retire rows whose CLI/orchestrator root is gone."""
@@ -863,9 +852,9 @@ class TestProcessClassMethods(TestCase):
 
         cleaned = Process.cleanup_orphaned_workers()
 
-        self.assertEqual(cleaned, 1)
+        assert cleaned == 1
         child.refresh_from_db()
-        self.assertEqual(child.status, Process.StatusChoices.EXITED)
+        assert child.status == Process.StatusChoices.EXITED
 
     def test_cleanup_orphaned_workers_marks_non_running_children_exited(self):
         """cleanup_orphaned_workers should retire child rows whose OS process is already gone."""
@@ -879,52 +868,44 @@ class TestProcessClassMethods(TestCase):
 
         cleaned = Process.cleanup_orphaned_workers()
 
-        self.assertEqual(cleaned, 1)
+        assert cleaned == 1
         child.refresh_from_db()
-        self.assertEqual(child.status, Process.StatusChoices.EXITED)
-        self.assertIsNotNone(child.ended_at)
-        self.assertEqual(child.exit_code, 0)
+        assert child.status == Process.StatusChoices.EXITED
+        assert child.ended_at is not None
+        assert child.exit_code == 0
 
 
-class TestProcessStateMachine(TestCase):
+class TestProcessStateMachine:
     """Test the ProcessMachine state machine."""
 
-    def setUp(self):
-        """Create a machine and process for state machine tests."""
-        import archivebox.machine.models as models
-
-        models._CURRENT_MACHINE = None
-        self.machine = Machine.current()
-        self.process = Process.objects.create(
-            machine=self.machine,
-            cmd=["echo", "test"],
-            pwd="/tmp",
-        )
+    @pytest.fixture(autouse=True)
+    def setup_process(self, process):
+        self.process = process
 
     def test_process_state_machine_initial_state(self):
         """ProcessMachine should start in queued state."""
         sm = ProcessMachine(self.process)
-        self.assertEqual(sm.current_state_value, Process.StatusChoices.QUEUED)
+        assert sm.current_state_value == Process.StatusChoices.QUEUED
 
     def test_process_state_machine_can_start(self):
         """ProcessMachine.can_start() should check cmd and machine."""
         sm = ProcessMachine(self.process)
-        self.assertTrue(sm.can_start())
+        assert sm.can_start()
 
         self.process.cmd = []
         self.process.save()
         sm = ProcessMachine(self.process)
-        self.assertFalse(sm.can_start())
+        assert not sm.can_start()
 
     def test_process_state_machine_is_exited(self):
         """ProcessMachine.is_exited() should check exit_code."""
         sm = ProcessMachine(self.process)
-        self.assertFalse(sm.is_exited())
+        assert not sm.is_exited()
 
         self.process.exit_code = 0
         self.process.save()
         sm = ProcessMachine(self.process)
-        self.assertTrue(sm.is_exited())
+        assert sm.is_exited()
 
 
 if __name__ == "__main__":

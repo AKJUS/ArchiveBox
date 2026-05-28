@@ -550,6 +550,9 @@ def import_persona_from_source(
             "Profile copying is only available for local Chromium profile paths. CDP imports can only pull cookies and open-tab storage.",
         )
 
+    if not import_cookies and not capture_storage:
+        return result
+
     if source.kind == "cdp":
         export_success, auth_payload, export_message = export_browser_state(
             cdp_url=source.cdp_url,

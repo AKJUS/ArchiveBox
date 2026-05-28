@@ -181,6 +181,7 @@ def update(
     continuous: bool = False,
     index_only: bool = False,
     migrate_only: bool = False,
+    stop_daemon_stack: bool = True,
 ) -> None:
     """
     Update snapshots: migrate old dirs, reconcile DB, and re-queue for archiving.
@@ -227,7 +228,8 @@ def update(
         # Run migrations first to ensure DB schema is up-to-date
         print("[*] Checking for pending migrations...")
         check_migrations(auto_apply=True)
-        stop_existing_supervisord_process()
+        if stop_daemon_stack:
+            stop_existing_supervisord_process()
 
         while True:
             do_migrate = migrate_only or not index_only
@@ -373,7 +375,8 @@ def update(
         raise SystemExit(130)
     finally:
         command.mark_exited()
-        stop_existing_supervisord_process()
+        if stop_daemon_stack:
+            stop_existing_supervisord_process()
 
 
 def drain_old_archive_dirs(resume_from: str | None = None, batch_size: int = 100) -> dict[str, int]:
@@ -558,7 +561,7 @@ def process_all_db_snapshots(batch_size: int = 100, resume: str | None = None) -
         "updated_db": 0,
         "queued": 0,
         "sealed": 0,
-        "crawls_sealed": 0,
+        "crawls_queued": 0,
     }
     current_fs_version = Snapshot._fs_current_version()
 
@@ -635,7 +638,7 @@ def process_all_db_snapshots(batch_size: int = 100, resume: str | None = None) -
     queue_stale_fs_batch()
 
     now = timezone.now()
-    stats["crawls_sealed"] = (
+    stats["crawls_queued"] = (
         Crawl.objects.filter(
             status__in=[Crawl.StatusChoices.QUEUED, Crawl.StatusChoices.STARTED],
         )
@@ -647,12 +650,11 @@ def process_all_db_snapshots(batch_size: int = 100, resume: str | None = None) -
             ],
         )
         .update(
-            status=Crawl.StatusChoices.SEALED,
-            retry_at=None,
+            retry_at=now,
             modified_at=now,
         )
     )
-    stats["updated_db"] += stats["crawls_sealed"]
+    stats["updated_db"] += stats["crawls_queued"]
     return stats
 
 
@@ -777,7 +779,7 @@ Phase 2 (Process DB):
   Updated JSON:     {s2.get("updated_json", 0)}
   Updated DB rows:  {s2.get("updated_db", 0)}
   Sealed snapshots: {s2.get("sealed", 0)}
-  Sealed crawls:    {s2.get("crawls_sealed", 0)}
+  Queued crawls:    {s2.get("crawls_queued", 0)}
 """)
 
 

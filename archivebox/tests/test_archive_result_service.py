@@ -1,6 +1,4 @@
 from pathlib import Path
-from uuid import uuid4
-
 import pytest
 
 
@@ -31,45 +29,6 @@ def _create_snapshot():
         url="https://example.com",
         crawl=crawl,
         status=Snapshot.StatusChoices.STARTED,
-    )
-
-
-def _create_machine():
-    from archivebox.machine.models import Machine
-
-    return Machine.objects.create(
-        guid=f"test-guid-{uuid4()}",
-        hostname="test-host",
-        hw_in_docker=False,
-        hw_in_vm=False,
-        hw_manufacturer="Test",
-        hw_product="Test Product",
-        hw_uuid=f"test-hw-{uuid4()}",
-        os_arch="arm64",
-        os_family="darwin",
-        os_platform="macOS",
-        os_release="14.0",
-        os_kernel="Darwin",
-        stats={},
-        config={},
-    )
-
-
-def _create_iface(machine):
-    from archivebox.machine.models import NetworkInterface
-
-    return NetworkInterface.objects.create(
-        machine=machine,
-        mac_address="00:11:22:33:44:55",
-        ip_public="203.0.113.10",
-        ip_local="10.0.0.10",
-        dns_server="1.1.1.1",
-        hostname="test-host",
-        iface="en0",
-        isp="Test ISP",
-        city="Test City",
-        region="Test Region",
-        country="Test Country",
     )
 
 
@@ -423,15 +382,14 @@ def test_collect_output_metadata_detects_warc_gz_mimetype(tmp_path):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_process_started_hydrates_binary_and_iface_from_existing_binary_records(monkeypatch, tmp_path):
+def test_process_started_hydrates_binary_and_iface_from_existing_binary_records(tmp_path):
     from archivebox.machine.models import Binary, NetworkInterface
     from archivebox.machine.models import Process as MachineProcess
     from archivebox.services.process_service import ProcessService as ArchiveBoxProcessService
     from abx_dl.services.process_service import ProcessService as DlProcessService
 
-    machine = _create_machine()
-    iface = _create_iface(machine)
-    monkeypatch.setattr(NetworkInterface, "current", classmethod(lambda cls, refresh=False: iface))
+    iface = NetworkInterface.current()
+    machine = iface.machine
 
     binary = Binary.objects.create(
         machine=machine,
@@ -494,15 +452,14 @@ def test_process_started_hydrates_binary_and_iface_from_existing_binary_records(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_process_started_uses_node_binary_for_js_hooks_without_plugin_binary(monkeypatch, tmp_path):
+def test_process_started_uses_node_binary_for_js_hooks_without_plugin_binary(tmp_path):
     from archivebox.machine.models import Binary, NetworkInterface
     from archivebox.machine.models import Process as MachineProcess
     from archivebox.services.process_service import ProcessService as ArchiveBoxProcessService
     from abx_dl.services.process_service import ProcessService as DlProcessService
 
-    machine = _create_machine()
-    iface = _create_iface(machine)
-    monkeypatch.setattr(NetworkInterface, "current", classmethod(lambda cls, refresh=False: iface))
+    iface = NetworkInterface.current()
+    machine = iface.machine
 
     node = Binary.objects.create(
         machine=machine,
@@ -561,13 +518,12 @@ def test_process_started_uses_node_binary_for_js_hooks_without_plugin_binary(mon
     assert process.iface_id == iface.id
 
 
-def test_binary_event_reuses_existing_installed_binary_row(monkeypatch):
+def test_binary_event_reuses_existing_installed_binary_row():
     from archivebox.machine.models import Binary, Machine
     from archivebox.services.binary_service import BinaryService as ArchiveBoxBinaryService
     import asyncio
 
-    machine = _create_machine()
-    monkeypatch.setattr(Machine, "current", classmethod(lambda cls: machine))
+    machine = Machine.current()
 
     binary = Binary.objects.create(
         machine=machine,
@@ -584,7 +540,7 @@ def test_binary_event_reuses_existing_installed_binary_row(monkeypatch):
         name="wget",
         plugin_name="wget",
         output_dir="/tmp/wget",
-        binproviders="provider",
+        binproviders=binary.binproviders,
     )
 
     async def run_event():
@@ -599,4 +555,4 @@ def test_binary_event_reuses_existing_installed_binary_row(monkeypatch):
     assert binary.abspath == "/bin/sh"
     assert binary.version == "9.9.9"
     assert binary.binprovider == "env"
-    assert binary.binproviders == "provider"
+    assert binary.binproviders == "env,apt,brew"

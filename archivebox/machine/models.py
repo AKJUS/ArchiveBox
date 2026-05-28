@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from statemachine import State, registry
 
+from django.db import IntegrityError
 from django.db import models
 from django.db.models import Q, QuerySet
 from django.utils import timezone
@@ -346,14 +347,32 @@ class NetworkInterface(ModelWithHealthStats):
                 return _CURRENT_INTERFACE
             _CURRENT_INTERFACE = None
         net_info = get_host_network()
-        _CURRENT_INTERFACE, _ = cls.objects.update_or_create(
+        lookup = dict(
             machine=machine,
             ip_public=net_info.pop("ip_public"),
             ip_local=net_info.pop("ip_local"),
             mac_address=net_info.pop("mac_address"),
             dns_server=net_info.pop("dns_server"),
-            defaults=net_info,
         )
+        try:
+            _CURRENT_INTERFACE = cls.objects.get(**lookup)
+        except cls.DoesNotExist:
+            try:
+                _CURRENT_INTERFACE = cls.objects.create(**lookup, **net_info)
+            except IntegrityError:
+                _CURRENT_INTERFACE = cls.objects.get(**lookup)
+        else:
+            # Avoid update_or_create() here: command startup calls this before
+            # leadership handoff, and SQLite should not take a write lock unless
+            # the cached interface metadata is actually stale.
+            if refresh or timezone.now() >= _CURRENT_INTERFACE.modified_at + timedelta(seconds=NETWORK_INTERFACE_RECHECK_INTERVAL):
+                updates = ["modified_at"]
+                for key, value in net_info.items():
+                    if getattr(_CURRENT_INTERFACE, key) != value:
+                        setattr(_CURRENT_INTERFACE, key, value)
+                        updates.append(key)
+                if len(updates) > 1:
+                    _CURRENT_INTERFACE.save(update_fields=updates)
         return _CURRENT_INTERFACE
 
 
@@ -578,6 +597,9 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
                     "retry_at": None,
                 },
             )
+            from archivebox.config.common import get_config
+
+            binary.symlink_to_lib_bin(get_config().LIB_BIN_DIR)
             return binary
 
         # Case 2: From binaries.json - create queued binary (needs installation)
@@ -608,6 +630,9 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
                     "retry_at": None,
                 },
             )
+            from archivebox.config.common import get_config
+
+            binary.symlink_to_lib_bin(get_config().LIB_BIN_DIR)
             return binary
 
         return None

@@ -743,11 +743,18 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
         from abx_dl.limits import CrawlLimitState
         from archivebox.config.common import get_config
 
-        if not (self.output_dir / ".abx-dl" / "limits.json").exists():
-            return ""
         config = get_config(crawl=self, include_machine=False)
-        config["CRAWL_DIR"] = str(self.output_dir)
-        return CrawlLimitState.from_config(config).get_stop_reason()
+        if (self.output_dir / ".abx-dl" / "limits.json").exists():
+            config["CRAWL_DIR"] = str(self.output_dir)
+            stop_reason = CrawlLimitState.from_config(config).get_stop_reason()
+            if stop_reason:
+                return stop_reason
+
+        max_urls = int(config.CRAWL_MAX_URLS or 0)
+        if max_urls > 0 and self.snapshot_set.count() >= max_urls and self.count_urls_for_limit() >= max_urls:
+            return "crawl_max_urls"
+
+        return ""
 
     def add_url(self, entry: dict) -> bool:
         """

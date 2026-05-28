@@ -61,13 +61,16 @@ def test_core_api_crud_uses_token_auth_and_persists_side_effects_over_server(tmp
             json={
                 "urls": [recursive_test_site["root_url"]],
                 "max_depth": 2,
-                "max_urls": 7,
-                "crawl_max_size": 0,
-                "snapshot_max_size": 0,
                 "tags": ["api-depth-two"],
                 "label": "api crawl",
                 "notes": "created through REST API",
-                "config": {"PLUGINS": "wget,parse_html_urls", "URL_ALLOWLIST": r"127\.0\.0\.1[:/].*"},
+                "config": {
+                    "PLUGINS": "wget,parse_html_urls",
+                    "URL_ALLOWLIST": r"127\.0\.0\.1[:/].*",
+                    "CRAWL_MAX_URLS": 7,
+                    "CRAWL_MAX_SIZE": "0",
+                    "SNAPSHOT_MAX_SIZE": "0",
+                },
             },
             timeout=10,
         )
@@ -75,9 +78,9 @@ def test_core_api_crud_uses_token_auth_and_persists_side_effects_over_server(tmp
         crawl_payload = crawl_response.json()
         crawl_id = crawl_payload["id"]
         assert crawl_payload["max_depth"] == 2
-        assert crawl_payload["max_urls"] == 7
         assert crawl_payload["tags_str"] == "api-depth-two"
         assert crawl_payload["config"]["PLUGINS"] == "wget,parse_html_urls"
+        assert crawl_payload["config"]["CRAWL_MAX_URLS"] == 7
 
         snapshot_response = requests.post(
             f"http://127.0.0.1:{port}/api/v1/core/snapshots",

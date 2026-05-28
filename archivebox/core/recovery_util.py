@@ -21,16 +21,13 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
         "orphaned_processes": Process.cleanup_orphaned_workers(),
         "orphaned_chrome": Process.cleanup_orphaned_chrome() if include_chrome else 0,
         "queued_crawls_unlocked": 0,
-        "sealed_crawl_locks_cleared": 0,
         "sealed_snapshots": 0,
         "unlocked_snapshots": 0,
         "requeued_snapshots": 0,
         "queued_snapshots_unlocked": 0,
-        "sealed_snapshot_locks_cleared": 0,
         "requeued_archiveresults": 0,
         "sealed_crawls": 0,
         "unlocked_crawls": 0,
-        "requeued_crawls": 0,
         "sealed_queued_snapshots": 0,
         "sealed_queued_crawls": 0,
     }
@@ -327,8 +324,6 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
     )
     cleaned["unlocked_crawls"] += future_started_crawls.update(retry_at=Coalesce("next_child_retry", Value(now)), modified_at=now)
 
-    cleaned["requeued_crawls"] = 0
-
     warning_recoveries = {
         "stale_processes": "marked stale running Process row(s) exited",
         "orphaned_processes": "marked orphaned worker/hook Process row(s) exited",
@@ -343,7 +338,6 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
         "queued_snapshots_unlocked": "repaired queued Snapshot row(s) with retry_at=NULL",
         "requeued_archiveresults": "requeued ArchiveResult row(s) left in BACKOFF",
         "requeued_snapshots": "reopened sealed Snapshot row(s) with unfinished ArchiveResults",
-        "requeued_crawls": "reopened sealed Crawl row(s) with active child Snapshots",
         "sealed_queued_snapshots": "sealed stale queued Snapshot row(s) whose ArchiveResults were already final",
         "sealed_queued_crawls": "sealed stale queued Crawl row(s) whose Snapshots were already final",
     }

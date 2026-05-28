@@ -247,7 +247,6 @@ def test_add_view_applies_plugin_config_overrides(client, admin_user, monkeypatc
 
 def test_add_view_public_submission_ignores_plugin_and_custom_config(client, admin_user, monkeypatch):
     monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
-    monkeypatch.setattr("archivebox.services.runner.ensure_background_runner", lambda: True)
 
     response = client.post(
         reverse("add"),
@@ -297,12 +296,9 @@ def test_add_view_public_submission_ignores_plugin_and_custom_config(client, adm
     assert crawl.schedule is None
 
 
-def test_add_view_starts_background_runner_after_creating_crawl(client, admin_user, monkeypatch):
+def test_add_view_queues_crawl_and_snapshots_for_background_runner(client, admin_user, monkeypatch):
     monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
     client.force_login(admin_user)
-
-    runner_calls = []
-    monkeypatch.setattr("archivebox.services.runner.ensure_background_runner", lambda: runner_calls.append(True) or True)
 
     response = client.post(
         reverse("add"),
@@ -326,7 +322,16 @@ def test_add_view_starts_background_runner_after_creating_crawl(client, admin_us
     )
 
     assert response.status_code == 302
-    assert runner_calls == [True]
+    crawl = Crawl.objects.order_by("-created_at").first()
+    assert crawl is not None
+    assert crawl.status == Crawl.StatusChoices.QUEUED
+    assert crawl.retry_at is not None
+
+    snapshots = list(crawl.snapshot_set.order_by("url"))
+    assert len(snapshots) == 1
+    assert snapshots[0].url == "https://example.com"
+    assert snapshots[0].status == Snapshot.StatusChoices.QUEUED
+    assert snapshots[0].retry_at is not None
 
 
 def test_add_view_extracts_urls_from_mixed_text_input(client, admin_user, monkeypatch):

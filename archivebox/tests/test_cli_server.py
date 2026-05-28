@@ -6,12 +6,10 @@ Verify server can start (basic smoke tests only, no full server testing).
 
 import os
 import asyncio
-import builtins
 import json
 import subprocess
 import sys
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 
 def test_sqlite_connections_use_explicit_30_second_busy_timeout():
@@ -78,87 +76,82 @@ def test_reload_workers_use_current_interpreter_and_supervisord_managed_runner()
     assert watcher["command"] == f"{sys.executable} -m archivebox manage runner_watch --bind-url=http://127.0.0.1:8000"
 
 
-def test_start_server_workers_starts_plugin_owned_sonic_worker(monkeypatch):
-    from archivebox.workers import supervisord_util
+def _free_port():
+    import socket
 
-    supervisor = Mock()
-    supervisor.getPID.return_value = 123
-    started_workers = []
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
-    monkeypatch.setattr(supervisord_util, "get_or_create_supervisord_process", lambda daemonize=False: supervisor)
-    monkeypatch.setattr(supervisord_util, "tail_multiple_worker_logs", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        supervisord_util,
-        "get_sonic_supervisord_worker_from_plugin",
-        lambda config: {
-            "name": "worker_sonic",
-            "command": "sonic -c /data/sonic/config.cfg",
-            "stdout_logfile": "logs/worker_sonic.log",
-        },
+
+def test_server_daemon_starts_real_plugin_owned_sonic_worker(archivebox_daemon_server):
+    server = archivebox_daemon_server(
+        USE_INDEXING_BACKEND="True",
+        SEARCH_BACKEND_ENGINE="sqlite",
     )
-    monkeypatch.setattr(
-        supervisord_util,
-        "start_worker",
-        lambda _supervisor, worker, lazy=False: started_workers.append((worker["name"], lazy)) or {"name": worker["name"]},
-    )
-    monkeypatch.setattr("archivebox.config.common.get_config", lambda: SimpleNamespace(TMP_DIR="/tmp"))
+    state = server.wait_for_workers(("worker_daphne", "worker_sonic", "worker_runner"))
 
-    supervisord_util.start_server_workers(daemonize=True, debug=False)
-
-    assert started_workers == [
-        ("worker_daphne", False),
-        ("worker_sonic", False),
-        ("worker_runner", False),
-    ]
+    assert state["worker_daphne"]["statename"] == "RUNNING", state
+    assert state["worker_runner"]["statename"] == "RUNNING", state
+    assert state["worker_sonic"]["statename"] == "RUNNING", state
+    assert "sonic" in state["worker_sonic"]["name"]
 
 
-def test_missing_plugin_owned_sonic_worker_is_optional(monkeypatch):
+def test_sonic_worker_is_disabled_by_real_indexing_config(tmp_path):
     from archivebox.workers.supervisord_util import get_sonic_supervisord_worker_from_plugin
 
-    original_import = builtins.__import__
+    worker = get_sonic_supervisord_worker_from_plugin(
+        SimpleNamespace(
+            DATA_DIR=str(tmp_path),
+            SEARCH_BACKEND_ENGINE="sqlite",
+            USE_INDEXING_BACKEND=False,
+            SEARCH_BACKEND_SONIC_HOST_NAME="127.0.0.1",
+            SEARCH_BACKEND_SONIC_PORT=_free_port(),
+            SEARCH_BACKEND_SONIC_PASSWORD="SecretPassword",
+            SONIC_BINARY="sonic",
+        ),
+    )
 
-    def fake_import(name, *args, **kwargs):
-        if name == "abx_plugins.plugins.search_backend_sonic.daemon":
-            raise ModuleNotFoundError("No module named 'abx_plugins.plugins.search_backend_sonic.daemon'", name=name)
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    assert get_sonic_supervisord_worker_from_plugin(SimpleNamespace()) is None
+    assert worker is None
 
 
-def test_sonic_daemon_event_handler_requires_running_supervised_worker(monkeypatch):
+def test_sonic_daemon_event_handler_accepts_real_running_worker(archivebox_daemon_server):
     from abx_dl.events import ProcessStdoutEvent
     from abx_dl.orchestrator import create_bus
     from archivebox.search.sonic_daemon import register_sonic_daemon_event_handler
+    from abx_plugins.plugins.search_backend_sonic.daemon import prepare_sonic_daemon
 
-    supervisor = Mock()
-    monkeypatch.setattr("archivebox.workers.supervisord_util.get_existing_supervisord_process", lambda: supervisor)
-    monkeypatch.setattr(
-        "archivebox.workers.supervisord_util.get_worker",
-        lambda _supervisor, name: {"name": name, "statename": "RUNNING", "description": "pid 123"},
+    sonic_port = _free_port()
+    server = archivebox_daemon_server(
+        USE_INDEXING_BACKEND="True",
+        SEARCH_BACKEND_ENGINE="sqlite",
+        SEARCH_BACKEND_SONIC_PORT=str(sonic_port),
     )
-    monkeypatch.setattr("abx_plugins.plugins.search_backend_sonic.daemon.is_port_listening", lambda host, port: True)
+    state = server.wait_for_workers(("worker_sonic",))
+    assert state["worker_sonic"]["statename"] == "RUNNING", state
+
+    daemon_event = prepare_sonic_daemon(
+        SimpleNamespace(
+            DATA_DIR=str(server.data_dir),
+            SEARCH_BACKEND_ENGINE="sqlite",
+            USE_INDEXING_BACKEND=True,
+            SEARCH_BACKEND_SONIC_HOST_NAME="127.0.0.1",
+            SEARCH_BACKEND_SONIC_PORT=sonic_port,
+            SEARCH_BACKEND_SONIC_PASSWORD="SecretPassword",
+            SONIC_BINARY="sonic",
+        ),
+    )
 
     async def run_test():
-        bus = create_bus(name="test_sonic_daemon_event_handler_requires_running_supervised_worker")
+        bus = create_bus(name="test_sonic_daemon_event_handler_accepts_real_running_worker")
         try:
             register_sonic_daemon_event_handler(bus)
-            await bus.emit(
+            event = await bus.emit(
                 ProcessStdoutEvent(
-                    line=json.dumps(
-                        {
-                            "type": "SonicDaemonStartEvent",
-                            "worker_name": "worker_sonic",
-                            "url": "tcp://127.0.0.1:1491",
-                            "host": "127.0.0.1",
-                            "port": 1491,
-                            "config_path": "/data/sonic/config.cfg",
-                            "output_dir": "/data/sonic",
-                        },
-                    ),
+                    line=json.dumps(daemon_event.to_record()),
                 ),
             ).now()
+            await event.event_results_list()
         finally:
             await bus.destroy()
 

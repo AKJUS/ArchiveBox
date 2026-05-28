@@ -6,7 +6,6 @@ from django.contrib.auth.models import UserManager
 from django.urls import reverse
 
 from archivebox.personas.importers import (
-    PersonaImportResult,
     discover_persona_template_profiles,
     import_persona_from_source,
     resolve_browser_profile_source,
@@ -40,6 +39,21 @@ def _make_profile_source(tmp_path):
         user_data_dir=user_data_dir,
         profile_dir="Default",
         browser_binary="/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+    )
+
+
+def _make_persona_template_source(name="TemplatePersona"):
+    from archivebox.config.constants import CONSTANTS
+
+    user_data_dir = CONSTANTS.PERSONAS_DIR / name / "chrome_profile"
+    profile_dir = user_data_dir / "Default"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    (profile_dir / "Preferences").write_text('{"profile":{"name":"Default"}}')
+    (profile_dir / "Bookmarks").write_text('{"roots":{}}')
+    (profile_dir / "Cache").mkdir(exist_ok=True)
+    (profile_dir / "Cache" / "volatile").write_text("skip")
+    return next(
+        profile for profile in discover_persona_template_profiles(personas_dir=CONSTANTS.PERSONAS_DIR) if profile.source_name == name
     )
 
 
@@ -79,90 +93,63 @@ def test_discover_persona_template_profiles_finds_chrome_profile_dirs(tmp_path):
     assert discovered[0].user_data_dir == chrome_profile.resolve()
 
 
-def test_discover_persona_template_profiles_finds_home_abx_personas(monkeypatch, tmp_path):
+def test_discover_persona_template_profiles_finds_data_dir_personas():
     from archivebox.config.constants import CONSTANTS
 
-    monkeypatch.setattr(CONSTANTS, "PERSONAS_DIR", tmp_path / "missing-data-personas")
-    monkeypatch.setattr("archivebox.personas.importers.Path.home", lambda: tmp_path)
-
-    chrome_profile = tmp_path / ".config" / "abx" / "personas" / "HomePersona" / "chrome_profile"
-    default_profile = chrome_profile / "Default"
-    default_profile.mkdir(parents=True)
-    (default_profile / "Preferences").write_text("{}")
+    source = _make_persona_template_source("DataDirPersona")
 
     discovered = discover_persona_template_profiles()
 
-    assert len(discovered) == 1
-    assert discovered[0].browser == "persona"
-    assert discovered[0].source_name == "HomePersona"
-    assert discovered[0].profile_dir == "Default"
-    assert discovered[0].user_data_dir == chrome_profile.resolve()
+    matching = [profile for profile in discovered if profile.source_name == "DataDirPersona"]
+    assert len(matching) == 1
+    assert matching[0].browser == "persona"
+    assert matching[0].profile_dir == "Default"
+    assert matching[0].user_data_dir == source.user_data_dir
+    assert matching[0].user_data_dir.parent.parent == CONSTANTS.PERSONAS_DIR.resolve()
 
 
-def test_persona_admin_add_view_renders_import_ui(client, admin_user, monkeypatch, tmp_path):
-    source = _make_profile_source(tmp_path)
-    monkeypatch.setattr("archivebox.personas.forms.discover_local_browser_profiles", lambda: [source])
-    monkeypatch.setattr("archivebox.personas.admin.discover_local_browser_profiles", lambda: [source])
+def test_persona_admin_add_view_renders_import_ui(client, admin_user):
+    source = _make_persona_template_source("RenderImportPersona")
 
     client.login(username="personaadmin", password="testpassword")
     response = client.get(reverse("admin:personas_persona_add"), HTTP_HOST=ADMIN_HOST)
 
     assert response.status_code == 200
     assert b"Bootstrap a persona from a real browser session" in response.content
-    assert b"Google Chrome / Default" in response.content
+    assert source.source_name.encode() in response.content
+    assert b"Persona Template" in response.content
     assert b"auth.json" in response.content
     assert b"Plugin Config" in response.content
     assert b'name="plugin_config__wget__WGET_TIMEOUT"' in response.content
 
 
-def test_import_persona_from_source_copies_user_agent_to_persona_config(admin_user, monkeypatch, tmp_path):
+def test_import_persona_from_source_copies_profile_without_browser_export(admin_user):
     from archivebox.personas.models import Persona
 
-    source = _make_profile_source(tmp_path)
+    source = _make_persona_template_source("ImporterTemplatePersona")
     persona = Persona.objects.create(name="AgentPersona", created_by=admin_user)
-
-    def fake_export_browser_state(**kwargs):
-        return True, {"user_agent": "Mozilla/5.0 Test Imported UA"}, "ok"
-
-    monkeypatch.setattr("archivebox.personas.importers.export_browser_state", fake_export_browser_state)
 
     result = import_persona_from_source(
         persona,
         source,
-        copy_profile=False,
+        copy_profile=True,
         import_cookies=False,
         capture_storage=False,
     )
 
-    persona.refresh_from_db()
-    assert result.user_agent_imported is True
-    assert persona.config["USER_AGENT"] == "Mozilla/5.0 Test Imported UA"
+    copied_profile = persona.path / "chrome_profile" / "Default"
+    assert result.profile_copied is True
+    assert result.cookies_imported is False
+    assert result.storage_captured is False
+    assert result.user_agent_imported is False
+    assert (copied_profile / "Preferences").read_text() == '{"profile":{"name":"Default"}}'
+    assert not (copied_profile / "Cache").exists()
 
 
-def test_persona_admin_add_post_runs_shared_importer(client, admin_user, monkeypatch, tmp_path):
+def test_persona_admin_add_post_runs_shared_importer(client, admin_user):
     from archivebox.personas.models import Persona
 
-    source = _make_profile_source(tmp_path)
-    monkeypatch.setattr("archivebox.personas.forms.discover_local_browser_profiles", lambda: [source])
-    monkeypatch.setattr("archivebox.personas.admin.discover_local_browser_profiles", lambda: [source])
-
-    calls = {}
-
-    def fake_import(persona, selected_source, **kwargs):
-        calls["persona_name"] = persona.name
-        calls["source"] = selected_source
-        calls["kwargs"] = kwargs
-        (persona.path / "cookies.txt").parent.mkdir(parents=True, exist_ok=True)
-        (persona.path / "cookies.txt").write_text("# Netscape HTTP Cookie File\n")
-        (persona.path / "auth.json").write_text('{"TYPE":"auth","cookies":[],"localStorage":{},"sessionStorage":{}}\n')
-        return PersonaImportResult(
-            source=selected_source,
-            profile_copied=True,
-            cookies_imported=True,
-            storage_captured=True,
-        )
-
-    monkeypatch.setattr("archivebox.personas.forms.import_persona_from_source", fake_import)
+    source = _make_persona_template_source("AdminPostTemplatePersona")
 
     client.login(username="personaadmin", password="testpassword")
     response = client.post(
@@ -175,8 +162,6 @@ def test_persona_admin_add_post_runs_shared_importer(client, admin_user, monkeyp
             "import_mode": "discovered",
             "import_discovered_profile": source.choice_value,
             "import_copy_profile": "on",
-            "import_extract_cookies": "on",
-            "import_capture_storage": "on",
             "_save": "Save",
         },
         HTTP_HOST=ADMIN_HOST,
@@ -184,21 +169,12 @@ def test_persona_admin_add_post_runs_shared_importer(client, admin_user, monkeyp
 
     assert response.status_code == 302
     persona = Persona.objects.get(name="ImportedPersona")
-    assert calls["persona_name"] == "ImportedPersona"
-    assert calls["source"].profile_dir == "Default"
-    assert calls["kwargs"] == {
-        "copy_profile": True,
-        "import_cookies": True,
-        "capture_storage": True,
-    }
-    assert persona.COOKIES_FILE.endswith("cookies.txt")
-    assert persona.AUTH_STORAGE_FILE.endswith("auth.json")
+    assert (persona.path / "chrome_profile" / "Default" / "Preferences").exists()
+    assert not persona.COOKIES_FILE
+    assert not persona.AUTH_STORAGE_FILE
 
 
-def test_persona_admin_saves_typed_plugin_config(client, admin_user, monkeypatch):
-    monkeypatch.setattr("archivebox.personas.forms.discover_local_browser_profiles", lambda: [])
-    monkeypatch.setattr("archivebox.personas.admin.discover_local_browser_profiles", lambda: [])
-
+def test_persona_admin_saves_typed_plugin_config(client, admin_user):
     client.login(username="personaadmin", password="testpassword")
     response = client.post(
         reverse("admin:personas_persona_add"),

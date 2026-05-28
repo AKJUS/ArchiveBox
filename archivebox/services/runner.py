@@ -8,9 +8,11 @@ import signal
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Mapping
 from contextlib import nullcontext
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -57,6 +59,7 @@ from abxbus.event_handler import EventHandlerAbortedError, EventHandlerCancelled
 from archivebox.config.configset import BaseConfigSet
 from archivebox.core.recovery_util import recover_orchestrator_state
 from archivebox.search.sonic_daemon import register_sonic_daemon_event_handler
+from archivebox.workers.models import ACTIVE_STATE_LEASE_SECONDS
 
 from .archive_result_service import ArchiveResultService
 from .binary_service import BinaryService
@@ -222,8 +225,12 @@ class CrawlRunner:
         self._run_task: asyncio.Task[None] | None = None
         self._skip_wait_until_idle = False
         self._signal_abort_requested = False
+        self._last_lease_heartbeat_at = 0.0
 
     def _install_signal_handlers(self) -> list[tuple[signal.Signals, Any, bool]]:
+        if threading.current_thread() is not threading.main_thread():
+            return []
+
         loop = asyncio.get_running_loop()
         installed: list[tuple[signal.Signals, Any, bool]] = []
         for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
@@ -410,7 +417,10 @@ class CrawlRunner:
                 if not self.snapshot_tasks:
                     return
                 continue
-            done, _pending = await asyncio.wait(pending_tasks, return_when=asyncio.FIRST_COMPLETED)
+            await self.heartbeat_active_leases()
+            done, _pending = await asyncio.wait(pending_tasks, timeout=10.0, return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                continue
             for task in done:
                 for snapshot_id, tracked_task in list(self.snapshot_tasks.items()):
                     if tracked_task is task:
@@ -431,6 +441,29 @@ class CrawlRunner:
                 stop_scheduling = True
             if not stop_scheduling:
                 await self.enqueue_pending_snapshots_from_projection()
+
+    async def heartbeat_active_leases(self) -> None:
+        if self._run_task is None:
+            return
+        now_monotonic = time.monotonic()
+        if now_monotonic - self._last_lease_heartbeat_at < 10.0:
+            return
+        self._last_lease_heartbeat_at = now_monotonic
+        lease_until = timezone.now() + timedelta(seconds=ACTIVE_STATE_LEASE_SECONDS)
+        active_snapshot_ids = [snapshot_id for snapshot_id, task in self.snapshot_tasks.items() if not task.done()]
+
+        from archivebox.crawls.models import Crawl
+        from archivebox.core.models import Snapshot
+
+        await Crawl.objects.filter(id=self.crawl.id, status=Crawl.StatusChoices.STARTED).aupdate(
+            retry_at=lease_until,
+            modified_at=timezone.now(),
+        )
+        if active_snapshot_ids:
+            await Snapshot.objects.filter(id__in=active_snapshot_ids, status=Snapshot.StatusChoices.STARTED).aupdate(
+                retry_at=lease_until,
+                modified_at=timezone.now(),
+            )
 
     async def drain_snapshot_tasks(self) -> None:
         task_errors: list[Exception] = []
@@ -474,7 +507,7 @@ class CrawlRunner:
             return
         pending_snapshot_ids = await sync_to_async(
             lambda: list(
-                self.crawl.snapshot_set.filter(status=Snapshot.StatusChoices.QUEUED)
+                self.crawl.snapshot_set.filter(status__in=[Snapshot.StatusChoices.QUEUED, Snapshot.StatusChoices.STARTED])
                 .exclude(id__in=active_snapshot_ids)
                 .filter(retry_at__lte=timezone.now())
                 .order_by("depth", "created_at")
@@ -529,7 +562,7 @@ class CrawlRunner:
         if self.crawl.is_paused:
             return []
         pending_snapshots = list(
-            self.crawl.snapshot_set.filter(status=Snapshot.StatusChoices.QUEUED)
+            self.crawl.snapshot_set.filter(status__in=[Snapshot.StatusChoices.QUEUED, Snapshot.StatusChoices.STARTED])
             .filter(retry_at__lte=timezone.now())
             .order_by("depth", "created_at"),
         )
@@ -909,6 +942,24 @@ class CrawlRunner:
             if snapshot["status"] == "sealed" and not self.selected_plugins:
                 await sync_to_async(run_snapshot_maintenance, thread_sensitive=True)(snapshot_id)
                 return
+            snapshot_selected_plugins = self.selected_plugins
+            if snapshot["status"] == "started":
+                _reset_count, running_count = await sync_to_async(
+                    lambda: reset_abandoned_snapshot_results(snapshot["_snapshot"]),
+                    thread_sensitive=True,
+                )()
+                if running_count:
+                    await sync_to_async(
+                        lambda: snapshot["_snapshot"].update_and_requeue(
+                            retry_at=timezone.now() + timedelta(seconds=ACTIVE_STATE_LEASE_SECONDS),
+                        ),
+                        thread_sensitive=True,
+                    )()
+                    return
+                snapshot_selected_plugins = snapshot_selected_plugins or await sync_to_async(
+                    queued_plugins_for_snapshot,
+                    thread_sensitive=True,
+                )(snapshot["id"])
             if snapshot["depth"] > 0 and CrawlLimitState.from_config(snapshot["config"]).get_stop_reason() in (
                 "crawl_max_size",
                 "crawl_timeout",
@@ -918,7 +969,11 @@ class CrawlRunner:
             config = _normalize_runtime_config(snapshot["config"])
             derived_config = _normalize_runtime_config(self.derived_config)
             output_dir = Path(snapshot["output_dir"])
-            plugins = self.runtime_plugins()
+            plugins = (
+                filter_plugins(self.plugins, snapshot_selected_plugins, include_providers=True)
+                if snapshot_selected_plugins
+                else self.plugins
+            )
             abx_snapshot = AbxSnapshot(
                 id=snapshot["id"],
                 url=snapshot["url"],
@@ -1007,17 +1062,41 @@ def run_crawl(
     show_progress: bool = True,
 ) -> None:
     from archivebox.crawls.models import Crawl
+    from django.db import close_old_connections
 
-    crawl = Crawl.objects.get(id=crawl_id)
-    asyncio.run(
-        CrawlRunner(
-            crawl,
-            snapshot_ids=snapshot_ids,
-            selected_plugins=selected_plugins,
-            process_discovered_snapshots_inline=process_discovered_snapshots_inline,
-            show_progress=show_progress,
-        ).run(),
-    )
+    def run_in_current_thread() -> None:
+        close_old_connections()
+        try:
+            crawl = Crawl.objects.get(id=crawl_id)
+            asyncio.run(
+                CrawlRunner(
+                    crawl,
+                    snapshot_ids=snapshot_ids,
+                    selected_plugins=selected_plugins,
+                    process_discovered_snapshots_inline=process_discovered_snapshots_inline,
+                    show_progress=show_progress,
+                ).run(),
+            )
+        finally:
+            close_old_connections()
+
+    if threading.current_thread() is threading.main_thread():
+        run_in_current_thread()
+        return
+
+    errors: list[BaseException] = []
+
+    def run_in_worker_thread() -> None:
+        try:
+            run_in_current_thread()
+        except BaseException as err:
+            errors.append(err)
+
+    worker = threading.Thread(target=run_in_worker_thread, name=f"archivebox-crawl-{crawl_id}")
+    worker.start()
+    worker.join()
+    if errors:
+        raise errors[0]
 
 
 async def _run_binary(binary_id: str) -> None:
@@ -1090,6 +1169,23 @@ def queued_plugins_for_snapshot(snapshot_id: str) -> list[str] | None:
     return None
 
 
+def reset_abandoned_snapshot_results(snapshot) -> tuple[int, int]:
+    from archivebox.core.models import ArchiveResult
+
+    reset_count = 0
+    running_count = 0
+    for result in snapshot.archiveresult_set.filter(
+        status__in=[ArchiveResult.StatusChoices.STARTED, ArchiveResult.StatusChoices.BACKOFF],
+    ).select_related("process"):
+        process = result.process
+        if process is not None and process.is_running:
+            running_count += 1
+            continue
+        result.reset_for_retry()
+        reset_count += 1
+    return reset_count, running_count
+
+
 def run_snapshot_maintenance(snapshot_id: str) -> bool:
     from archivebox.core.models import ArchiveResult, Snapshot
 
@@ -1119,11 +1215,54 @@ def run_due_crawl(crawl, *, lock_seconds: int) -> bool:
     if crawl.status in (crawl.StatusChoices.QUEUED, crawl.StatusChoices.STARTED):
         from archivebox.core.models import Snapshot
 
+        now = timezone.now()
         snapshot_count = crawl.snapshot_set.count()
-        due_nonsealed_snapshots = crawl.snapshot_set.filter(status=Snapshot.StatusChoices.QUEUED, retry_at__lte=timezone.now()).exists()
-        if snapshot_count and not due_nonsealed_snapshots:
-            crawl.retry_at = None
-            crawl.save(update_fields=["retry_at", "modified_at"])
+        due_active_snapshots = crawl.snapshot_set.filter(
+            status__in=[Snapshot.StatusChoices.QUEUED, Snapshot.StatusChoices.STARTED],
+            retry_at__lte=now,
+        ).exists()
+        if snapshot_count and not due_active_snapshots:
+            if crawl.is_finished():
+                if crawl.status == crawl.StatusChoices.STARTED:
+                    crawl.sm.seal()
+                else:
+                    crawl.update_and_requeue(
+                        status=crawl.StatusChoices.SEALED,
+                        retry_at=None,
+                    )
+                return True
+
+            # retry_at is the only queue/ownership signal the runner sees.
+            # Clearing it on an unfinished crawl hides the row forever, so keep
+            # future snapshots scheduled and repair NULL queued child locks here.
+            unlocked_children = crawl.snapshot_set.filter(
+                status=Snapshot.StatusChoices.QUEUED,
+                retry_at__isnull=True,
+            ).update(
+                retry_at=now,
+                modified_at=now,
+            )
+            if unlocked_children:
+                crawl.update_and_requeue(status=crawl.StatusChoices.STARTED, retry_at=now)
+                return True
+
+            next_snapshot_retry = (
+                crawl.snapshot_set.filter(
+                    status__in=[
+                        Snapshot.StatusChoices.QUEUED,
+                        Snapshot.StatusChoices.STARTED,
+                        Snapshot.StatusChoices.PAUSED,
+                    ],
+                    retry_at__gt=now,
+                )
+                .order_by("retry_at", "created_at")
+                .values_list("retry_at", flat=True)
+                .first()
+            )
+            crawl.update_and_requeue(
+                status=crawl.StatusChoices.STARTED,
+                retry_at=next_snapshot_retry or now + timedelta(seconds=10),
+            )
             return True
         if not crawl.claim_processing_lock(lock_seconds=lock_seconds):
             return False
@@ -1187,6 +1326,12 @@ def run_due_snapshot(snapshot, *, lock_seconds: int) -> bool:
             )
             return True
         return run_snapshot_maintenance(str(snapshot.id))
+
+    if snapshot.status == Snapshot.StatusChoices.STARTED:
+        _reset_count, running_count = reset_abandoned_snapshot_results(snapshot)
+        if running_count:
+            snapshot.update_and_requeue(retry_at=timezone.now() + timedelta(seconds=ACTIVE_STATE_LEASE_SECONDS))
+            return True
 
     if not snapshot.claim_processing_lock(lock_seconds=lock_seconds):
         return False

@@ -171,6 +171,7 @@ def cli_update(request: HttpRequest, args: UpdateCommandSchema):
         resume=args.resume,
         batch_size=args.batch_size,
         continuous=args.continuous,
+        stop_daemon_stack=False,
     )
     stdout = getattr(request, "stdout", None)
     stderr = getattr(request, "stderr", None)

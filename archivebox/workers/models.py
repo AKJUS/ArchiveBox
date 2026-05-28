@@ -31,6 +31,7 @@ default_status_field: models.CharField = models.CharField(
 )
 default_retry_at_field: models.DateTimeField = models.DateTimeField(default=timezone.now, null=True, blank=True, db_index=True)
 RETRY_AT_MAX = datetime.max.replace(tzinfo=UTC)
+ACTIVE_STATE_LEASE_SECONDS = 60
 
 ObjectState = State | str
 ObjectStateList = Iterable[ObjectState]
@@ -299,19 +300,11 @@ class BaseModelWithStateMachine(models.Model, MachineMixin):
     def get_queue(cls):
         """
         Get the sorted and filtered QuerySet of objects that are ready for processing.
-        Objects are ready if:
-        - status is not in FINAL_STATES
-        - retry_at is in the past (or now)
+        retry_at is the only scheduler signal; callers branch on status after selection.
         """
-        return (
-            cls.objects.filter(
-                retry_at__lte=timezone.now(),
-            )
-            .exclude(
-                status__in=cls.FINAL_STATES,
-            )
-            .order_by("retry_at")
-        )
+        return cls.objects.filter(
+            retry_at__lte=timezone.now(),
+        ).order_by("retry_at")
 
     @classmethod
     def claim_for_worker(cls, obj: "BaseModelWithStateMachine", lock_seconds: int = 60) -> bool:

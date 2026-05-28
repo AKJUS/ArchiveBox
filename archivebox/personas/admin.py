@@ -132,6 +132,11 @@ class PersonaAdmin(ConfigEditorMixin, BaseModelAdmin):
     def get_fieldsets(self, request, obj=None):
         return self.change_fieldsets if obj else self.add_fieldsets
 
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        if kwargs.get("fields"):
+            kwargs["fields"] = [field for field in kwargs["fields"] if field != "permissions"]
+        return super().get_form(request, obj=obj, change=change, **kwargs)
+
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         context["detected_profile_count"] = len(discover_local_browser_profiles())
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)

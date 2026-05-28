@@ -178,6 +178,106 @@ def test_runner_task_context_clears_inherited_abxbus_handler_context(tmp_path):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_snapshot_started_state_keeps_retry_at_lease():
+    from archivebox.base_models.models import get_or_create_system_user_pk
+    from archivebox.crawls.models import Crawl
+    from archivebox.core.models import Snapshot
+    from django.utils import timezone
+
+    before = timezone.now()
+    crawl = Crawl.objects.create(
+        urls="https://example.com",
+        created_by_id=get_or_create_system_user_pk(),
+        status=Crawl.StatusChoices.STARTED,
+        retry_at=before,
+    )
+    snapshot = Snapshot.objects.create(
+        url="https://example.com",
+        crawl=crawl,
+        status=Snapshot.StatusChoices.QUEUED,
+        retry_at=before,
+    )
+
+    assert snapshot.tick_claimed(lock_seconds=60) is True
+
+    snapshot.refresh_from_db()
+    assert snapshot.status == Snapshot.StatusChoices.STARTED
+    assert snapshot.retry_at is not None
+    assert snapshot.retry_at > before
+
+
+@pytest.mark.django_db(transaction=True)
+def test_crawl_start_event_keeps_retry_at_lease():
+    from abx_dl.events import CrawlStartEvent
+    from abx_dl.orchestrator import create_bus
+    from archivebox.base_models.models import get_or_create_system_user_pk
+    from archivebox.crawls.models import Crawl
+    from archivebox.core.models import Snapshot
+    from archivebox.services.crawl_service import CrawlService
+    from django.utils import timezone
+
+    before = timezone.now()
+    crawl = Crawl.objects.create(
+        urls="https://example.com",
+        created_by_id=get_or_create_system_user_pk(),
+        status=Crawl.StatusChoices.QUEUED,
+        retry_at=before,
+    )
+    snapshot = Snapshot.objects.create(
+        url="https://example.com",
+        crawl=crawl,
+        status=Snapshot.StatusChoices.QUEUED,
+        retry_at=before,
+    )
+    bus = create_bus(name="test_crawl_start_event_keeps_retry_at_lease")
+    CrawlService(bus, crawl_id=str(crawl.id))
+
+    async def run_event():
+        try:
+            await bus.emit(
+                CrawlStartEvent(
+                    url=snapshot.url,
+                    snapshot_id=str(snapshot.id),
+                    output_dir=str(crawl.output_dir),
+                ),
+            ).now()
+            await bus.wait_until_idle()
+        finally:
+            await bus.destroy(clear=False)
+
+    asyncio.run(run_event())
+
+    crawl.refresh_from_db()
+    assert crawl.status == Crawl.StatusChoices.STARTED
+    assert crawl.retry_at is not None
+    assert crawl.retry_at > before
+
+
+@pytest.mark.django_db(transaction=True)
+def test_snapshot_queue_selection_is_retry_at_only_for_sealed_maintenance():
+    from archivebox.base_models.models import get_or_create_system_user_pk
+    from archivebox.crawls.models import Crawl
+    from archivebox.core.models import Snapshot
+    from django.utils import timezone
+
+    now = timezone.now()
+    crawl = Crawl.objects.create(
+        urls="https://example.com",
+        created_by_id=get_or_create_system_user_pk(),
+        status=Crawl.StatusChoices.SEALED,
+        retry_at=None,
+    )
+    snapshot = Snapshot.objects.create(
+        url="https://example.com",
+        crawl=crawl,
+        status=Snapshot.StatusChoices.SEALED,
+        retry_at=now,
+    )
+
+    assert Snapshot.get_queue().filter(id=snapshot.id).exists()
+
+
+@pytest.mark.django_db(transaction=True)
 def test_machine_service_persists_only_derived_config_events(tmp_path):
     from abx_dl.events import MachineEvent
     from abx_dl.orchestrator import create_bus
@@ -829,7 +929,8 @@ def test_crawl_completed_event_requeues_active_snapshots():
     )
 
     bus = create_bus(name=f"test_crawl_completed_active_snapshots_{str(crawl.id).replace('-', '_')}")
-    CrawlService(bus, crawl_id=str(crawl.id))
+    service = CrawlService(bus, crawl_id=str(crawl.id))
+    assert service is not None
 
     async def emit_completed() -> None:
         try:
@@ -839,7 +940,7 @@ def test_crawl_completed_event_requeues_active_snapshots():
                 output_dir=str(crawl.output_dir),
             )
             emitted = bus.emit(event)
-            await emitted.now()
+            await emitted.wait()
             await emitted.event_results_list()
             await bus.wait_until_idle()
         finally:
@@ -875,7 +976,8 @@ def test_crawl_cleanup_event_requeues_unfinished_crawl():
     )
 
     bus = create_bus(name=f"test_crawl_cleanup_requeues_unfinished_{str(crawl.id).replace('-', '_')}")
-    CrawlService(bus, crawl_id=str(crawl.id))
+    service = CrawlService(bus, crawl_id=str(crawl.id))
+    assert service is not None
 
     async def emit_cleanup() -> None:
         try:
@@ -885,7 +987,7 @@ def test_crawl_cleanup_event_requeues_unfinished_crawl():
                 output_dir=str(crawl.output_dir),
             )
             emitted = bus.emit(event)
-            await emitted.now()
+            await emitted.wait()
             await emitted.event_results_list()
             await bus.wait_until_idle()
         finally:
@@ -899,12 +1001,12 @@ def test_crawl_cleanup_event_requeues_unfinished_crawl():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_crawl_cleanup_event_seals_finished_crawl():
+def test_crawl_completed_event_seals_finished_crawl():
     from archivebox.base_models.models import get_or_create_system_user_pk
     from archivebox.crawls.models import Crawl
     from archivebox.core.models import Snapshot
     from archivebox.services.crawl_service import CrawlService
-    from abx_dl.events import CrawlCleanupEvent
+    from abx_dl.events import CrawlCompletedEvent
     from abx_dl.orchestrator import create_bus
     from django.utils import timezone
 
@@ -921,18 +1023,19 @@ def test_crawl_cleanup_event_seals_finished_crawl():
         retry_at=None,
     )
 
-    bus = create_bus(name=f"test_crawl_cleanup_finished_crawl_{str(crawl.id).replace('-', '_')}")
-    CrawlService(bus, crawl_id=str(crawl.id))
+    bus = create_bus(name=f"test_crawl_completed_finished_crawl_{str(crawl.id).replace('-', '_')}")
+    service = CrawlService(bus, crawl_id=str(crawl.id))
+    assert service is not None
 
     async def emit_cleanup() -> None:
         try:
-            event = CrawlCleanupEvent(
+            event = CrawlCompletedEvent(
                 url="https://example.com",
                 snapshot_id=str(snapshot.id),
                 output_dir=str(crawl.output_dir),
             )
             emitted = bus.emit(event)
-            await emitted.now()
+            await emitted.wait()
             await emitted.event_results_list()
             await bus.wait_until_idle()
         finally:
@@ -946,7 +1049,7 @@ def test_crawl_cleanup_event_seals_finished_crawl():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_snapshot_completed_event_seals_finished_crawl():
+def test_snapshot_completed_event_defers_finished_crawl_seal():
     from archivebox.base_models.models import get_or_create_system_user_pk
     from archivebox.crawls.models import Crawl
     from archivebox.core.models import Snapshot
@@ -988,12 +1091,12 @@ def test_snapshot_completed_event_seals_finished_crawl():
     snapshot.refresh_from_db()
     crawl.refresh_from_db()
     assert snapshot.status == Snapshot.StatusChoices.SEALED
-    assert crawl.status == Crawl.StatusChoices.SEALED
-    assert crawl.retry_at is None
+    assert crawl.status == Crawl.StatusChoices.STARTED
+    assert crawl.retry_at is not None
 
 
 @pytest.mark.django_db(transaction=True)
-def test_snapshot_completed_event_bus_seals_finished_crawl():
+def test_snapshot_completed_event_bus_defers_finished_crawl_seal():
     from archivebox.base_models.models import get_or_create_system_user_pk
     from archivebox.crawls.models import Crawl
     from archivebox.core.models import Snapshot
@@ -1039,5 +1142,5 @@ def test_snapshot_completed_event_bus_seals_finished_crawl():
     snapshot.refresh_from_db()
     crawl.refresh_from_db()
     assert snapshot.status == Snapshot.StatusChoices.SEALED
-    assert crawl.status == Crawl.StatusChoices.SEALED
-    assert crawl.retry_at is None
+    assert crawl.status == Crawl.StatusChoices.STARTED
+    assert crawl.retry_at is not None

@@ -1,10 +1,10 @@
 __package__ = "archivebox.core"
 
-from typing import TYPE_CHECKING, Optional, Any, cast
+from typing import TYPE_CHECKING, Optional, Any
 from collections.abc import Iterable, Sequence
 import uuid
 from archivebox.uuid_compat import uuid7
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import os
 import json
@@ -54,7 +54,7 @@ from archivebox.base_models.models import (
     ModelWithHealthStats,
     get_or_create_system_user_pk,
 )
-from archivebox.workers.models import RETRY_AT_MAX, ModelWithStateMachine, BaseStateMachine
+from archivebox.workers.models import ACTIVE_STATE_LEASE_SECONDS, RETRY_AT_MAX, ModelWithStateMachine, BaseStateMachine
 from archivebox.workers.tasks import bg_archive_snapshot
 from archivebox.crawls.models import Crawl
 from archivebox.machine.models import Binary
@@ -3157,7 +3157,7 @@ class SnapshotMachine(BaseStateMachine):
     def enter_started(self):
         """Just mark as started. The shared runner creates ArchiveResults and runs hooks."""
         self.snapshot.status = Snapshot.StatusChoices.STARTED
-        self.snapshot.retry_at = None  # No more polling
+        self.snapshot.retry_at = timezone.now() + timedelta(seconds=ACTIVE_STATE_LEASE_SECONDS)
         self.snapshot.save(update_fields=["status", "retry_at", "modified_at"])
 
     @sealed.enter
@@ -3170,20 +3170,10 @@ class SnapshotMachine(BaseStateMachine):
             status=Snapshot.StatusChoices.SEALED,
         )
 
-        # Check if this is the last snapshot for the parent crawl - if so, seal the crawl
-        if self.snapshot.crawl:
-            crawl = self.snapshot.crawl
-            remaining_active = Snapshot.objects.filter(
-                crawl=crawl,
-                status__in=[
-                    Snapshot.StatusChoices.QUEUED,
-                    Snapshot.StatusChoices.STARTED,
-                    Snapshot.StatusChoices.PAUSED,
-                ],
-            ).count()
-
-            if remaining_active == 0 and crawl.status == crawl.StatusChoices.STARTED:
-                cast(Any, crawl).sm.seal()
+        # Crawl finalization is handled by the runner/CrawlService cleanup
+        # phase. Sealing the parent crawl here races recursive discovery:
+        # Snapshot hooks can write urls.jsonl just before this state transition,
+        # and the runner still needs to enqueue those child snapshots.
 
 
 class ArchiveResult(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWithNotes):
