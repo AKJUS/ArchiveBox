@@ -710,6 +710,28 @@ class TestUrlRouting:
             mode="danger-onedomain-fullreplay",
         )
 
+    def test_default_base_url_preserves_runtime_listen_port(self) -> None:
+        self._run(
+            """
+            client = Client()
+
+            assert get_admin_host() == "admin.archivebox.localhost:8766"
+            assert get_web_host() == "web.archivebox.localhost:8766"
+            assert build_admin_url("/admin/") == "http://admin.archivebox.localhost:8766/admin/"
+
+            resp = client.get("/admin/login/", HTTP_HOST="127.0.0.1:8766")
+            assert resp.status_code in (301, 302)
+            assert resp["Location"] == "http://admin.archivebox.localhost:8766/admin/login/"
+
+            print("OK")
+            """,
+            mode="safe-subdomains-fullreplay",
+            env_overrides={
+                "LISTEN_HOST": "127.0.0.1:8766",
+                "BASE_URL": "",
+            },
+        )
+
     def test_onedomain_base_url_overrides_are_preserved_for_external_links(self) -> None:
         self._run(
             """

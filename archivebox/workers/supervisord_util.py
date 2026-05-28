@@ -88,6 +88,37 @@ def _fallback_supervisord_process_from_db():
     return None
 
 
+def _live_supervisord_processes_from_db():
+    """Return live supervisord parents recorded for this DATA_DIR.
+
+    The socket/config files are generated runtime projection and can move when
+    TMP_DIR changes or falls back. Process rows are the durable coordination
+    state, so takeover/shutdown must stop every live supervisord recorded for
+    this collection, not only the one reachable at the current socket path.
+    """
+
+    try:
+        from archivebox.machine.models import Machine, Process
+
+        Process.cleanup_stale_running(machine=Machine.current())
+        rows = Process.objects.filter(
+            machine=Machine.current(),
+            process_type=Process.TypeChoices.SUPERVISORD,
+            status=Process.StatusChoices.RUNNING,
+            pwd=str(CONSTANTS.DATA_DIR),
+        ).order_by("-started_at", "-created_at")
+        live = []
+        for process in rows.iterator(chunk_size=20):
+            proc = process.proc
+            if proc is not None:
+                live.append((process, proc))
+            else:
+                process.mark_exited(exit_code=0)
+        return live
+    except Exception:
+        return []
+
+
 RUNNER_WORKER = {
     "name": "worker_runner",
     "command": _shell_join([sys.executable, "-m", "archivebox", "run", "--daemon"]),
@@ -350,8 +381,13 @@ def stop_existing_supervisord_process():
     stop_grace_seconds = configured_stopwaitsecs(tuple(_desired_supervisord_workers.values()))
 
     supervisor = get_existing_supervisord_process()
+    supervisor_pid = None
     supervisor_shutdown_requested = False
     if supervisor is not None:
+        try:
+            supervisor_pid = supervisor.getPID()
+        except Exception:
+            supervisor_pid = None
         # Ask supervisord to stop each worker first so child shutdown follows
         # each worker's own stopasgroup/killasgroup/stopwaitsecs settings. The
         # direct psutil kill path below is only the final cleanup bound.
@@ -397,28 +433,39 @@ def stop_existing_supervisord_process():
             except (BrokenPipeError, OSError):
                 pass
             finally:
+                stopped_pid = _supervisord_proc.pid
                 _supervisord_proc = None
+        else:
+            stopped_pid = None
+
+        live_supervisord = _live_supervisord_processes_from_db()
+        if stopped_pid is not None:
+            live_supervisord = [(process, proc) for process, proc in live_supervisord if proc.pid != stopped_pid]
+        if not live_supervisord:
+            proc = _fallback_supervisord_process_from_db()
+            live_supervisord = [] if proc is None else [(None, proc)]
+        if not live_supervisord:
             return
 
-        proc = _fallback_supervisord_process_from_db()
-        if proc is None:
-            return
-
-        try:
-            print(f"[🦸‍♂️] Stopping supervisord process (pid={proc.pid})...")
-            children = proc.children(recursive=True)
-            if not supervisor_shutdown_requested:
-                proc.terminate()
-                for child in children:
-                    try:
-                        child.terminate()
-                    except psutil.NoSuchProcess:
-                        pass
-            wait_psutil_and_kill_children(proc, children, timeout=stop_grace_seconds)
-        except psutil.NoSuchProcess:
-            pass
-        except (BrokenPipeError, OSError, psutil.TimeoutExpired):
-            pass
+        for process, proc in live_supervisord:
+            try:
+                print(f"[🦸‍♂️] Stopping older supervisord process (pid={proc.pid})...")
+                children = proc.children(recursive=True)
+                if not supervisor_shutdown_requested or supervisor is None or proc.pid != supervisor_pid:
+                    proc.terminate()
+                    for child in children:
+                        try:
+                            child.terminate()
+                        except psutil.NoSuchProcess:
+                            pass
+                wait_psutil_and_kill_children(proc, children, timeout=stop_grace_seconds)
+                if process is not None:
+                    process.mark_exited(exit_code=0)
+            except psutil.NoSuchProcess:
+                if process is not None:
+                    process.mark_exited(exit_code=0)
+            except (BrokenPipeError, OSError, psutil.TimeoutExpired, Fault):
+                pass
     finally:
         try:
             # clear PID file and socket file

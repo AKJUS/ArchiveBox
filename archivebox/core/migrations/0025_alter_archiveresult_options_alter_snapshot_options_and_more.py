@@ -151,70 +151,77 @@ class Migration(migrations.Migration):
             field=models.DateTimeField(blank=True, db_index=True, default=django.utils.timezone.now, null=True),
         ),
         # NOTE: bookmarked_at, created_at, and downloaded_at already added by migration 0023
-        migrations.AddField(
-            model_name="snapshot",
-            name="config",
-            field=models.JSONField(default=dict),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="current_step",
-            field=models.PositiveSmallIntegerField(
-                db_index=True,
-                default=0,
-                help_text="Current hook step being executed (0-9). Used for sequential hook execution.",
-            ),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="depth",
-            field=models.PositiveSmallIntegerField(db_index=True, default=0),
-        ),
-        # NOTE: downloaded_at already added by migration 0023 so it can preserve
-        # v0.7.x updated / v0.8.x downloaded_at values without a duplicate table rebuild.
-        # NOTE: fs_version already added by migration 0023 with default='0.8.0'
-        # NOTE: modified_at already added by migration 0023
-        migrations.AddField(
-            model_name="snapshot",
-            name="notes",
-            field=models.TextField(blank=True, default=""),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="num_uses_failed",
-            field=models.PositiveIntegerField(default=0),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="num_uses_succeeded",
-            field=models.PositiveIntegerField(default=0),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="parent_snapshot",
-            field=models.ForeignKey(
-                blank=True,
-                help_text="Parent snapshot that discovered this URL (for recursive crawling)",
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name="child_snapshots",
-                to="core.snapshot",
-            ),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="retry_at",
-            field=models.DateTimeField(blank=True, db_index=True, default=django.utils.timezone.now, null=True),
-        ),
-        migrations.AddField(
-            model_name="snapshot",
-            name="status",
-            field=models.CharField(
-                choices=[("queued", "Queued"), ("started", "Started"), ("sealed", "Sealed")],
-                db_index=True,
-                default="queued",
-                max_length=15,
-            ),
+        # 0023 rebuilds core_snapshot with these columns already present so it
+        # can preserve legacy status/retry_at/config data in one tight SQLite
+        # table copy. Keep this migration state-only: running normal AddField
+        # operations here causes SQLite to rebuild the table from the pre-0025
+        # state and repopulate existing columns with defaults, reopening sealed
+        # migrated rows as queued.
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="config",
+                    field=models.JSONField(default=dict),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="current_step",
+                    field=models.PositiveSmallIntegerField(
+                        db_index=True,
+                        default=0,
+                        help_text="Current hook step being executed (0-9). Used for sequential hook execution.",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="depth",
+                    field=models.PositiveSmallIntegerField(db_index=True, default=0),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="notes",
+                    field=models.TextField(blank=True, default=""),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="num_uses_failed",
+                    field=models.PositiveIntegerField(default=0),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="num_uses_succeeded",
+                    field=models.PositiveIntegerField(default=0),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="parent_snapshot",
+                    field=models.ForeignKey(
+                        blank=True,
+                        help_text="Parent snapshot that discovered this URL (for recursive crawling)",
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="child_snapshots",
+                        to="core.snapshot",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="retry_at",
+                    field=models.DateTimeField(blank=True, db_index=True, default=django.utils.timezone.now, null=True),
+                ),
+                migrations.AddField(
+                    model_name="snapshot",
+                    name="status",
+                    field=models.CharField(
+                        choices=[("queued", "Queued"), ("started", "Started"), ("sealed", "Sealed")],
+                        db_index=True,
+                        default="queued",
+                        max_length=15,
+                    ),
+                ),
+            ],
         ),
         migrations.AddField(
             model_name="tag",
