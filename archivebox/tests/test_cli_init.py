@@ -8,6 +8,8 @@ import os
 import subprocess
 
 import pytest
+from django.utils import timezone
+from django.db import connections
 from django.db.migrations.recorder import MigrationRecorder
 
 from archivebox.config.common import get_config
@@ -163,6 +165,23 @@ def test_init_is_idempotent(tmp_path):
     with use_archivebox_db(tmp_path):
         count = MigrationRecorder.Migration.objects.count()
     assert count > 0
+
+
+def test_init_refuses_database_migrated_by_newer_code(tmp_path):
+    """A downgraded ArchiveBox build must fail before serving a newer DB schema."""
+    os.chdir(tmp_path)
+    result = subprocess.run(["archivebox", "init"], capture_output=True, text=True)
+    assert result.returncode == 0
+
+    with use_archivebox_db(tmp_path):
+        MigrationRecorder.Migration.objects.create(app="crawls", name="9999_future_test", applied=timezone.now())
+        connections["default"].commit()
+
+    result = subprocess.run(["archivebox", "init"], capture_output=True, text=True)
+    assert result.returncode == 3
+    assert "migrated by a newer version of ArchiveBox" in result.stderr
+    assert "crawls.9999_future_test" in result.stderr
+    assert "archivebox manage migrate crawls " in result.stderr
 
 
 def test_init_with_existing_data_preserves_snapshots(tmp_path, process, disable_extractors_dict):

@@ -58,10 +58,34 @@ def check_data_folder(config=None, **config_kwargs) -> None:
 
 def check_migrations(*, blocking: bool = True, auto_apply: bool = False, cancel_delay: int = 3) -> list[str]:
     from archivebox import DATA_DIR
-    from archivebox.misc.db import apply_migrations, pending_migrations
+    from archivebox.misc.db import apply_migrations, migration_state, pending_migrations
 
-    pending = pending_migrations()
+    pending, missing_from_code, rollback_targets = migration_state()
     is_migrating = any(arg in sys.argv for arg in ["makemigrations", "migrate", "init"])
+
+    if missing_from_code:
+        print(
+            "[red][X] This collection was migrated by a newer version of ArchiveBox than the one currently running.[/red]",
+            file=sys.stderr,
+        )
+        print(f"    {DATA_DIR}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("    [violet]Hint:[/violet] Upgrade ArchiveBox / pull the latest Docker image, then restart:", file=sys.stderr)
+        print("        docker compose pull && docker compose up -d", file=sys.stderr)
+        print(file=sys.stderr)
+        print("    Applied migrations missing from this build:", file=sys.stderr)
+        for migration in missing_from_code[:10]:
+            print(f"        {migration}", file=sys.stderr)
+        if len(missing_from_code) > 10:
+            print(f"        ... and {len(missing_from_code) - 10} more", file=sys.stderr)
+        print(file=sys.stderr)
+        print(
+            "    If you intentionally downgraded and need to roll the DB back, run this with a build that contains those migrations:",
+            file=sys.stderr,
+        )
+        for app, target in sorted(rollback_targets.items()):
+            print(f"        archivebox manage migrate {app} {target}", file=sys.stderr)
+        raise SystemExit(3)
 
     if pending and not is_migrating:
         print("[red][X] This collection was created with an older version of ArchiveBox and must be upgraded first.[/red]", file=sys.stderr)

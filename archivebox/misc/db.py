@@ -122,7 +122,7 @@ def migration_lock(stdout: TextIO | None = None):
 
 
 @enforce_types
-def pending_migrations(out_dir: Path = DATA_DIR) -> list[str]:
+def migration_state(out_dir: Path = DATA_DIR) -> tuple[list[str], list[str], dict[str, str]]:
     """Cheaply compare migration files to django_migrations without invoking migrate."""
     from django.apps import apps
     from django.db import connection
@@ -140,6 +140,7 @@ def pending_migrations(out_dir: Path = DATA_DIR) -> list[str]:
 
     applied = retry_sqlite_locks(applied_rows, label="checking applied migrations")
     disk_migrations: set[tuple[str, str]] = set()
+    app_labels = {app_config.label for app_config in apps.get_app_configs()}
     for app_config in apps.get_app_configs():
         module_name, explicit = MigrationLoader.migrations_module(app_config.label)
         if module_name is None:
@@ -156,7 +157,26 @@ def pending_migrations(out_dir: Path = DATA_DIR) -> list[str]:
         for migration_file in Path(module_file).parent.glob("[0-9][0-9][0-9][0-9]_*.py"):
             disk_migrations.add((app_config.label, migration_file.stem))
 
-    return [f"{app}.{name}" for app, name in sorted(disk_migrations - applied)]
+    applied = {(app, name) for app, name in applied if app in app_labels}
+    pending = [f"{app}.{name}" for app, name in sorted(disk_migrations - applied)]
+    missing_pairs = sorted(applied - disk_migrations)
+    missing_from_code = [f"{app}.{name}" for app, name in missing_pairs]
+    rollback_targets = {
+        app: (
+            max(name for disk_app, name in disk_migrations if disk_app == app)
+            if any(disk_app == app for disk_app, _name in disk_migrations)
+            else "zero"
+        )
+        for app, _name in missing_pairs
+    }
+    return pending, missing_from_code, rollback_targets
+
+
+@enforce_types
+def pending_migrations(out_dir: Path = DATA_DIR) -> list[str]:
+    """Return migration files on disk that have not been applied yet."""
+    pending, _missing_from_code, _rollback_targets = migration_state(out_dir=out_dir)
+    return pending
 
 
 @enforce_types

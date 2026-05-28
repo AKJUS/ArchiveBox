@@ -29,6 +29,7 @@ def init(force: bool = False, quick: bool = False, install: bool = False) -> Non
     from archivebox.config.common import get_config
     from archivebox.config.collection import write_config_file
     from archivebox.misc.db import apply_migrations
+    from archivebox.misc.checks import check_migrations
 
     config = get_config()
 
@@ -91,6 +92,7 @@ def init(force: bool = False, quick: bool = False, install: bool = False) -> Non
     from archivebox.config.django import setup_django
 
     setup_django()
+    check_migrations(blocking=True, auto_apply=False)
 
     for migration_line in apply_migrations(DATA_DIR):
         sys.stdout.write(f"    {migration_line}\n")
