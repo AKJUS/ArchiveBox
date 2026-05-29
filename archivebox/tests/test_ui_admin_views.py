@@ -1152,13 +1152,20 @@ class TestAdminSnapshotListView:
 
 
 class TestCrawlScheduleAdmin:
-    def test_crawlschedule_add_view_renders_and_saves(self, client, admin_user, crawl):
+    def test_crawlschedule_change_view_renders_and_saves(self, client, admin_user, crawl):
         from archivebox.crawls.models import CrawlSchedule
 
+        schedule = CrawlSchedule.objects.create(
+            label="Nightly crawl",
+            notes="",
+            schedule="0 0 * * *",
+            template=crawl,
+            created_by=admin_user,
+        )
         client.login(username="testadmin", password="testpassword")
 
-        add_url = reverse("admin:crawls_crawlschedule_add")
-        get_response = client.get(add_url, HTTP_HOST=ADMIN_HOST)
+        change_url = reverse("admin:crawls_crawlschedule_change", args=[schedule.pk])
+        get_response = client.get(change_url, HTTP_HOST=ADMIN_HOST)
 
         assert get_response.status_code == 200
         assert b"Schedule Info" in get_response.content
@@ -1166,11 +1173,11 @@ class TestCrawlScheduleAdmin:
         assert b"No Snapshots yet..." not in get_response.content
 
         post_response = client.post(
-            add_url,
+            change_url,
             {
-                "label": "Nightly crawl",
-                "notes": "",
-                "schedule": "0 0 * * *",
+                "label": "Morning crawl",
+                "notes": "updated",
+                "schedule": "0 8 * * *",
                 "template": str(crawl.pk),
                 "created_by": str(admin_user.pk),
                 "_save": "Save",
@@ -1179,7 +1186,10 @@ class TestCrawlScheduleAdmin:
         )
 
         assert post_response.status_code == 302
-        schedule = CrawlSchedule.objects.get(label="Nightly crawl")
+        schedule.refresh_from_db()
+        assert schedule.label == "Morning crawl"
+        assert schedule.notes == "updated"
+        assert schedule.schedule == "0 8 * * *"
         assert schedule.template_id == crawl.pk
         assert schedule.created_by_id == admin_user.pk
 

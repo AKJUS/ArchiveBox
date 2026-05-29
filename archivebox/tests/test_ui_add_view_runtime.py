@@ -151,7 +151,7 @@ def test_add_view_depth_two_crawl_renders_outputs_over_server(tmp_path, recursiv
                 "notes": "created from running-server web ui",
                 "persona": "Default",
                 "permissions": "public",
-                "index_only": "",
+                "start_paused": "",
                 "config": "{}",
                 "csrfmiddlewaretoken": csrf_match.group(1),
             },

@@ -7,6 +7,7 @@ from archivebox.config.common import get_config
 from archivebox.core.models import Snapshot, Tag
 from archivebox.crawls.models import Crawl
 from archivebox.personas.models import Persona
+from archivebox.workers.models import RETRY_AT_MAX
 
 
 pytestmark = pytest.mark.django_db
@@ -48,6 +49,7 @@ def test_add_view_renders_tag_editor_and_url_filter_fields(client, admin_user, m
         "snapshot_max_size",
         "delete_after",
         "crawl_max_concurrent_snapshots",
+        "start_paused",
         "notes",
     }.issubset(form.fields)
     assert b'name="url_filters_only_new"' in response.content
@@ -66,6 +68,8 @@ def test_add_view_admin_renders_plugin_config_grid(client, admin_user, monkeypat
     assert response.context["can_override_crawl_config"] is True
     assert form.plugin_groups
     assert any(card["config_fields"] for group in form.plugin_groups for card in group["plugins"])
+    assert b"Index only dry run" not in response.content
+    assert b"Start paused" in response.content
 
 
 def test_add_view_embeds_selected_persona_config_for_ui_hydration(client, admin_user, monkeypatch):
@@ -145,7 +149,7 @@ def test_add_view_creates_crawl_with_tag_and_url_filter_overrides(client, admin_
             "schedule": "",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "config": "{}",
         },
         HTTP_HOST=ADMIN_HOST,
@@ -190,7 +194,7 @@ def test_add_view_unchecked_only_new_sets_crawl_override(client, admin_user, mon
             "schedule": "",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "config": "{}",
         },
         HTTP_HOST=ADMIN_HOST,
@@ -226,7 +230,7 @@ def test_add_view_selected_persona_wins_over_stale_config_override(client, admin
             "schedule": "",
             "persona": "Private",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "config": '{"DEFAULT_PERSONA": "Default"}',
         },
         HTTP_HOST=ADMIN_HOST,
@@ -264,7 +268,7 @@ def test_add_view_applies_plugin_config_overrides(client, admin_user, monkeypatc
             "schedule": "",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "main_plugins": ["wget"],
             "plugin_config__wget__WGET_TIMEOUT": "77",
             "plugin_config__wget__WGET_WARC_ENABLED": "false",
@@ -305,7 +309,7 @@ def test_add_view_public_submission_ignores_plugin_and_custom_config(client, adm
             "schedule": "daily",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "on",
+            "start_paused": "on",
             "main_plugins": ["wget"],
             "plugin_config__twocaptcha__TWOCAPTCHA_API_KEY": "posted-token",
             "plugin_config__wget__WGET_TIMEOUT": "77",
@@ -331,6 +335,7 @@ def test_add_view_public_submission_ignores_plugin_and_custom_config(client, adm
     assert "NODE_BINARY" not in crawl.config
     assert "TWOCAPTCHA_API_KEY" not in crawl.config
     assert "INDEX_ONLY" not in crawl.config
+    assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.schedule is None
 
 
@@ -354,7 +359,7 @@ def test_add_view_queues_crawl_for_background_runner(client, admin_user, monkeyp
             "schedule": "",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "config": "{}",
         },
         HTTP_HOST=ADMIN_HOST,
@@ -366,6 +371,41 @@ def test_add_view_queues_crawl_for_background_runner(client, admin_user, monkeyp
     assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.retry_at is not None
     assert crawl.snapshot_set.count() == 0
+
+
+def test_add_view_start_paused_creates_paused_crawl_without_snapshots(client, admin_user, monkeypatch):
+    monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
+    client.force_login(admin_user)
+
+    response = client.post(
+        reverse("add"),
+        data={
+            "url": "https://example.com/paused",
+            "tag": "",
+            "depth": "1",
+            "max_urls": "0",
+            "crawl_max_size": "0",
+            "snapshot_max_size": "0",
+            "url_filters_allowlist": "",
+            "url_filters_denylist": "",
+            "url_filters_only_new": "1",
+            "notes": "",
+            "schedule": "",
+            "persona": "Default",
+            "permissions": "public",
+            "start_paused": "on",
+            "config": "{}",
+        },
+        HTTP_HOST=ADMIN_HOST,
+    )
+
+    assert response.status_code == 302, response.context["form"].errors if response.context else response.content.decode()
+    crawl = Crawl.objects.order_by("-created_at").first()
+    assert crawl is not None
+    assert crawl.status == Crawl.StatusChoices.PAUSED
+    assert crawl.retry_at == RETRY_AT_MAX
+    assert crawl.snapshot_set.count() == 0
+    assert "INDEX_ONLY" not in crawl.config
 
 
 def test_add_view_extracts_urls_from_mixed_text_input(client, admin_user, monkeypatch):
@@ -396,7 +436,7 @@ def test_add_view_extracts_urls_from_mixed_text_input(client, admin_user, monkey
             "schedule": "",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "config": "{}",
         },
         HTTP_HOST=ADMIN_HOST,
@@ -444,7 +484,7 @@ def test_add_view_trims_trailing_punctuation_from_markdown_urls(client, admin_us
             "schedule": "",
             "persona": "Default",
             "permissions": "public",
-            "index_only": "",
+            "start_paused": "",
             "config": "{}",
         },
         HTTP_HOST=ADMIN_HOST,

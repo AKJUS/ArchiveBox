@@ -743,6 +743,8 @@ select {
 }
 
 .preset-btn {
+  display: inline-flex;
+  align-items: center;
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
@@ -750,6 +752,8 @@ select {
   border: 1px solid #ced4da;
   border-radius: 4px;
   cursor: pointer;
+  color: inherit;
+  text-decoration: none;
   transition: all 0.2s;
   white-space: nowrap;
 }
@@ -770,6 +774,33 @@ select {
   color: #004882;
   border-color: #b7d3ea;
   background-color: #f5fbff;
+}
+
+.persona-preset-wrap {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.persona-preset-wrap .persona-preset-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 10px;
+}
+
+.persona-edit-btn {
+  margin-left: -1px;
+  padding: 6px 8px;
+  color: #004882;
+  border-color: #b7d3ea;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  background-color: #eaf5ff;
+}
+
+.persona-create-btn {
+  color: #116329;
+  border-color: #b6e3c6;
+  background-color: #f0fff4;
 }
 
 /* Advanced section (collapsible) */

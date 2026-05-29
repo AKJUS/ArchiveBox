@@ -70,6 +70,7 @@ from archivebox.core.host_utils import (
 )
 from archivebox.core.forms import AddLinkForm, get_plugin_config_binary_urls
 from archivebox.crawls.models import Crawl
+from archivebox.workers.models import RETRY_AT_MAX
 from archivebox.hooks import (
     BUILTIN_PLUGINS_DIR,
     USER_PLUGINS_DIR,
@@ -1178,7 +1179,7 @@ class AddView(UserPassesTestMixin, FormView):
         plugins = ",".join(form.cleaned_data.get("plugins", [])) if can_override_crawl_config else ""
         schedule = form.cleaned_data.get("schedule", "").strip() if can_override_crawl_config else ""
         persona = form.cleaned_data.get("persona")
-        index_only = form.cleaned_data.get("index_only", False) if can_override_crawl_config else False
+        start_paused = form.cleaned_data.get("start_paused", False) if can_override_crawl_config else False
         notes = form.cleaned_data.get("notes", "")
         url_filters = form.cleaned_data.get("url_filters") or {}
         plugin_config = form.cleaned_data.get("plugin_config") or {}
@@ -1215,8 +1216,6 @@ class AddView(UserPassesTestMixin, FormView):
         # Store only explicit crawl-scoped overrides. Persona/machine/plugin
         # defaults are resolved at hook runtime via get_config(...).
         config = {}
-        if index_only:
-            config["INDEX_ONLY"] = True
         if plugins:
             config["PLUGINS"] = plugins
         effective_config = get_config(persona=persona, user=self.request.user) if persona else get_config(user=self.request.user)
@@ -1255,7 +1254,8 @@ class AddView(UserPassesTestMixin, FormView):
             created_by_id=created_by_id,
             config=config,
             persona_id=persona.id if persona else None,
-            retry_at=None if index_only else timezone.now(),
+            status=Crawl.StatusChoices.PAUSED if start_paused else Crawl.StatusChoices.QUEUED,
+            retry_at=RETRY_AT_MAX if start_paused else timezone.now(),
         )
 
         # 3. create a CrawlSchedule if schedule is provided
@@ -1273,7 +1273,7 @@ class AddView(UserPassesTestMixin, FormView):
             crawl.schedule = crawl_schedule
             crawl.safe_update({"schedule": crawl_schedule}, refresh=False)
 
-        if not index_only:
+        if not start_paused:
             from archivebox.services.runner import ensure_background_runner
 
             ensure_background_runner()
@@ -1378,8 +1378,8 @@ class WebAddView(AddView):
                 "config": "{}",
             },
         )
-        if defaults_form.fields["index_only"].initial:
-            form_data["index_only"] = "on"
+        if defaults_form.fields["start_paused"].initial:
+            form_data["start_paused"] = "on"
 
         form = self.form_class(data=form_data)
         if not form.is_valid():

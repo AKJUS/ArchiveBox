@@ -71,6 +71,7 @@ PLUGIN_GROUP_DEFINITIONS = (
         (
             "staticfile",
             "responses",
+            "chrome_screencast",
             "ytdlp",
             "gallerydl",
             "git",
@@ -697,8 +698,8 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
         initial="public",
         required=True,
     )
-    index_only = forms.BooleanField(
-        label="Index only dry run (add crawl but don't archive yet)",
+    start_paused = forms.BooleanField(
+        label="Start paused",
         initial=False,
         required=False,
     )

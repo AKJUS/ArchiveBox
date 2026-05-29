@@ -247,8 +247,12 @@
 
                     <div class="plugin-presets">
                         <span class="preset-label">Quick Select:</span>
+                        <a href="/admin/personas/persona/add/" class="preset-btn persona-create-btn" target="_blank" rel="noopener" title="Create new profile / import from Chrome">+ 👤</a>
                         {% for persona in recent_personas %}
-                        <button type="button" class="preset-btn persona-preset-btn" data-persona="{{ persona.name }}" title="Use {{ persona.name }} persona">👤 {{ persona.name }}</button>
+                        <span class="persona-preset-wrap">
+                            <button type="button" class="preset-btn persona-preset-btn" data-persona="{{ persona.name }}" title="Use {{ persona.name }} persona">👤 {{ persona.name }}</button>
+                            <a href="/admin/personas/persona/{{ persona.pk }}/change/" class="preset-btn persona-edit-btn" target="_blank" rel="noopener" title="Edit {{ persona.name }} persona">✎</a>
+                        </span>
                         {% endfor %}
                         <button type="button" class="preset-btn" data-preset="text-only">📄 Text Only</button>
                         <button type="button" class="preset-btn" data-preset="select-all">✓ Select All</button>
@@ -280,12 +284,12 @@
                         </div>
 
                         <div class="form-field checkbox-field">
-                            {{ form.index_only }}
-                            {{ form.index_only.label_tag }}
-                            {% if form.index_only.errors %}
-                                <div class="error">{{ form.index_only.errors }}</div>
+                            {{ form.start_paused }}
+                            {{ form.start_paused.label_tag }}
+                            {% if form.start_paused.errors %}
+                                <div class="error">{{ form.start_paused.errors }}</div>
                             {% endif %}
-                            <div class="help-text">Create the crawl and queue snapshots without running archive plugins yet.</div>
+                            <div class="help-text">Create the crawl in a paused state. No snapshots will be created until you resume it.</div>
                         </div>
 
                         <div class="form-field">
