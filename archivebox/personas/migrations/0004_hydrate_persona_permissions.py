@@ -86,6 +86,33 @@ def flush_batch(cursor, table_name, batch):
     )
 
 
+def _ensure_permissions_column(cursor):
+    """Backfill the ``permissions`` generated column on ``personas_persona``.
+
+    Long-lived dev DBs have ``personas/0003_persona_permissions`` marked
+    applied in ``django_migrations`` but the historical migration with that
+    name predates the current GeneratedField design — the column never made
+    it onto the table. Without this guard, the hydration query below fails
+    with ``no such column: personas_persona.permissions``. Fresh installs
+    already have the column, so this is a no-op on first-time setup.
+    """
+    cursor.execute("PRAGMA table_info(personas_persona)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if "permissions" in existing_cols:
+        return
+    # See crawls/0016 — SQLite ALTER TABLE only allows VIRTUAL generated
+    # columns; the runtime model's STORED declaration only applies to fresh
+    # installs where the column lands during initial table creation.
+    cursor.execute(
+        "ALTER TABLE personas_persona "
+        "ADD COLUMN permissions varchar(16) "
+        "GENERATED ALWAYS AS (json_extract(config, '$.PERMISSIONS')) VIRTUAL",
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS personas_persona_permissions_idx ON personas_persona (permissions)",
+    )
+
+
 def hydrate_persona_permissions(apps, schema_editor):
     Persona = apps.get_model("personas", "Persona")
     User = apps.get_model("auth", "User")
@@ -94,6 +121,7 @@ def hydrate_persona_permissions(apps, schema_editor):
     default_permissions = resolve_permissions(base_config, "public")
     table_name = schema_editor.quote_name(Persona._meta.db_table)
     cursor = schema_editor.connection.cursor()
+    _ensure_permissions_column(cursor)
     batch = []
     missing_permissions = Q(permissions__isnull=True) | (Q(permissions__isnull=False) & ~Q(permissions__in=VALID_PERMISSIONS))
 

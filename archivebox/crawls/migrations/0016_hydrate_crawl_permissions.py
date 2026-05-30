@@ -86,6 +86,38 @@ def flush_batch(cursor, table_name, batch):
     )
 
 
+def _ensure_permissions_column(cursor):
+    """Backfill the ``permissions`` generated column on ``crawls_crawl``.
+
+    Long-lived dev DBs (cabbage's demo + beta-tester collections) have
+    ``crawls/0013_crawl_permissions`` marked applied in ``django_migrations``
+    but the *historical* migration with that name did something unrelated —
+    the actual ``permissions`` column never made it onto the table. Without
+    this guard the hydration query below fails with ``no such column:
+    crawls_crawl.permissions`` and bricks startup. Fresh installs already
+    have the column (added by the current 0013), so this is a safe no-op
+    in that case.
+    """
+    cursor.execute("PRAGMA table_info(crawls_crawl)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if "permissions" in existing_cols:
+        return
+    # SQLite ``ALTER TABLE ADD COLUMN`` only supports VIRTUAL generated
+    # columns (STORED is rejected with "cannot add a STORED column"). The
+    # current model declares ``db_persist=True`` so fresh installs get a
+    # STORED column via Django's initial table creation, but on legacy DBs
+    # we have to settle for VIRTUAL — runtime behavior is equivalent (the
+    # expression is evaluated on read instead of write), and Django's
+    # field-level queries don't care which storage mode SQLite uses under
+    # the hood. Index creation on a virtual column is still supported.
+    cursor.execute(
+        "ALTER TABLE crawls_crawl ADD COLUMN permissions varchar(16) GENERATED ALWAYS AS (json_extract(config, '$.PERMISSIONS')) VIRTUAL",
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS crawls_crawl_permissions_idx ON crawls_crawl (permissions)",
+    )
+
+
 def hydrate_crawl_permissions(apps, schema_editor):
     Crawl = apps.get_model("crawls", "Crawl")
     User = apps.get_model("auth", "User")
@@ -94,6 +126,7 @@ def hydrate_crawl_permissions(apps, schema_editor):
     default_permissions = resolve_permissions(base_config, "public")
     table_name = schema_editor.quote_name(Crawl._meta.db_table)
     cursor = schema_editor.connection.cursor()
+    _ensure_permissions_column(cursor)
     batch = []
     missing_permissions = Q(permissions__isnull=True) | (Q(permissions__isnull=False) & ~Q(permissions__in=VALID_PERMISSIONS))
 
