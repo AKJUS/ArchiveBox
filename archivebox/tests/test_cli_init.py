@@ -185,6 +185,37 @@ def test_init_refuses_database_migrated_by_newer_code(tmp_path):
     assert "archivebox manage migrate crawls " in result.stderr
 
 
+def test_init_recovers_from_pre_squash_dev_history(tmp_path):
+    """Pre-squash dev DBs (rows for migrations now absorbed by ``replaces=``)
+    must NOT trip the newer-DB guard — every historical squash would otherwise
+    brick beta-tester collections that pre-date the squash commit."""
+    os.chdir(tmp_path)
+    result = subprocess.run(["archivebox", "init"], capture_output=True, text=True)
+    assert result.returncode == 0
+
+    # Sampling — one name per affected app, all listed in the ``replaces=``
+    # declarations of the current squash anchors. If any of these get treated
+    # as missing-from-code, dev DBs that ran the historical chain pre-squash
+    # would refuse to start.
+    historical_pre_squash_rows = [
+        ("api", "0002_alter_apitoken_options"),
+        ("api", "0009_rename_created_apitoken_created_at_and_more"),
+        ("core", "0023_alter_archiveresult_options_archiveresult_abid_and_more"),
+        ("core", "0074_alter_snapshot_downloaded_at"),
+        ("core", "0075_crawl"),
+        ("machine", "0002_alter_machine_stats_installedbinary"),
+        ("machine", "0004_alter_installedbinary_abspath_and_more"),
+    ]
+    with use_archivebox_db(tmp_path):
+        for app, name in historical_pre_squash_rows:
+            MigrationRecorder.Migration.objects.create(app=app, name=name, applied=timezone.now())
+        connections["default"].commit()
+
+    result = subprocess.run(["archivebox", "init"], capture_output=True, text=True)
+    assert result.returncode == 0, f"init refused to recover pre-squash dev DB.\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert "migrated by a newer version of ArchiveBox" not in result.stderr
+
+
 def test_init_with_existing_data_preserves_snapshots(tmp_path, process, disable_extractors_dict):
     """Test that re-running init preserves existing snapshot data."""
     os.chdir(tmp_path)
