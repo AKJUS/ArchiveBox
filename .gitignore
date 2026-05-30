@@ -63,3 +63,6 @@ ArchiveBox.conf
 # vim
 *.sw?
 .vscode
+
+# Local Claude Code task locks (not project state)
+.claude/scheduled_tasks.lock
