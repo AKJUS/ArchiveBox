@@ -199,7 +199,7 @@ def test_add_view_depth_two_crawl_renders_outputs_over_server(tmp_path, recursiv
         assert list((tmp_path / "archive/users").rglob("snapshots/**/wget/**/*.html"))
 
         progress = session.get(
-            f"http://127.0.0.1:{port}/admin/live-progress/",
+            f"http://127.0.0.1:{port}/progress.json",
             headers={"Host": f"admin.archivebox.localhost:{port}"},
             timeout=10,
         )

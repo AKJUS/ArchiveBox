@@ -792,6 +792,9 @@ def serve_static_with_byterange_support(request, path, document_root=None, show_
         bool(request.GET.get("preview")) and content_type.startswith("image/") and not content_type.startswith("image/svg+xml")
     )
     preview_as_mhtml_html = bool(request.GET.get("preview")) and fullpath.suffix.lower() in {".mhtml", ".mht"}
+    preview_as_archivewebpage_html = bool(request.GET.get("preview")) and (
+        fullpath.suffix.lower() in {".wacz", ".warc"} or fullpath.name.lower().endswith(".warc.gz")
+    )
 
     # Respect the If-Modified-Since header for non-markdown responses.
     if not (content_type.startswith("text/plain") or content_type.startswith("text/html")):
@@ -858,6 +861,50 @@ def serve_static_with_byterange_support(request, path, document_root=None, show_
             )
         except Exception:
             pass
+
+    if preview_as_archivewebpage_html:
+        # POLICY EXCEPTION: archivebox normally does not depend on any specific
+        # plugin. The WACZ/WARC embedded-replay viewer (ui.js + sw.js + the
+        # rendered preview HTML) is plugin-owned, but it has to be served at
+        # plugin-defined paths on the snapshot host so the same-origin service
+        # worker registration works. There is no clean generic "plugin
+        # contributes a preview handler" extension hook in archivebox yet, so
+        # we conditionally import the archivewebpage plugin's
+        # ``replay_preview`` module here. If the plugin is not installed, the
+        # import fails and we fall through to default static-file serving.
+        try:
+            from abx_plugins.plugins.archivewebpage import replay_preview as _awp_preview
+        except ImportError:
+            _awp_preview = None
+        if _awp_preview is not None:
+            try:
+                raw_query = request.GET.copy()
+                raw_query.pop("preview", None)
+                raw_output_path = request.path
+                if raw_query:
+                    raw_output_path = f"{raw_output_path}?{raw_query.urlencode()}"
+                snapshot_url_fallback = getattr(request, "archivebox_snapshot_url", "") or ""
+                rendered = _awp_preview.render_preview_html(
+                    fullpath.name,
+                    raw_output_path,
+                    wacz_path=fullpath,
+                    fallback_url=snapshot_url_fallback,
+                )
+                response = HttpResponse(rendered, content_type="text/html; charset=utf-8")
+                response.headers["Last-Modified"] = http_date(statobj.st_mtime)
+                if etag:
+                    response.headers["ETag"] = etag
+                    response.headers["Cache-Control"] = f"{_cache_policy(config=config)}, max-age=31536000, immutable"
+                else:
+                    response.headers["Cache-Control"] = f"{_cache_policy(config=config)}, max-age=60, stale-while-revalidate=300"
+                response.headers["Content-Disposition"] = f'inline; filename="{fullpath.stem}.html"'
+                for key, value in _awp_preview.preview_response_headers().items():
+                    response.headers[key] = value
+                if encoding:
+                    response.headers["Content-Encoding"] = encoding
+                return response
+            except Exception:
+                pass
 
     if preview_as_mhtml_html:
         try:

@@ -98,7 +98,6 @@ def _free_port():
 
 def test_server_daemon_starts_real_plugin_owned_sonic_worker(archivebox_daemon_server):
     server = archivebox_daemon_server(
-        USE_INDEXING_BACKEND="True",
         SEARCH_BACKEND_ENGINE="sqlite",
     )
     state = server.wait_for_workers(("worker_daphne", "worker_sonic", "worker_runner"))
@@ -109,14 +108,14 @@ def test_server_daemon_starts_real_plugin_owned_sonic_worker(archivebox_daemon_s
     assert "sonic" in state["worker_sonic"]["name"]
 
 
-def test_sonic_worker_is_disabled_by_real_indexing_config(tmp_path):
+def test_sonic_worker_is_disabled_when_sonic_disabled_and_engine_not_sonic(tmp_path):
     from archivebox.workers.supervisord_util import get_sonic_supervisord_worker_from_plugin
 
     worker = get_sonic_supervisord_worker_from_plugin(
         SimpleNamespace(
             DATA_DIR=str(tmp_path),
-            SEARCH_BACKEND_ENGINE="sqlite",
-            USE_INDEXING_BACKEND=False,
+            SEARCH_BACKEND_ENGINE="ripgrep",
+            SEARCH_BACKEND_SONIC_ENABLED=False,
             SEARCH_BACKEND_SONIC_HOST_NAME="127.0.0.1",
             SEARCH_BACKEND_SONIC_PORT=_free_port(),
             SEARCH_BACKEND_SONIC_PASSWORD="SecretPassword",
@@ -135,8 +134,7 @@ def test_sonic_daemon_event_handler_accepts_real_running_worker(archivebox_daemo
 
     sonic_port = _free_port()
     server = archivebox_daemon_server(
-        USE_INDEXING_BACKEND="True",
-        SEARCH_BACKEND_ENGINE="sqlite",
+        SEARCH_BACKEND_ENGINE="sonic",
         SEARCH_BACKEND_SONIC_PORT=str(sonic_port),
     )
     state = server.wait_for_workers(("worker_sonic",))
@@ -145,8 +143,7 @@ def test_sonic_daemon_event_handler_accepts_real_running_worker(archivebox_daemo
     daemon_event = prepare_sonic_daemon(
         SimpleNamespace(
             DATA_DIR=str(server.data_dir),
-            SEARCH_BACKEND_ENGINE="sqlite",
-            USE_INDEXING_BACKEND=True,
+            SEARCH_BACKEND_ENGINE="sonic",
             SEARCH_BACKEND_SONIC_HOST_NAME="127.0.0.1",
             SEARCH_BACKEND_SONIC_PORT=sonic_port,
             SEARCH_BACKEND_SONIC_PASSWORD="SecretPassword",
@@ -192,7 +189,6 @@ def test_supervisord_sync_does_not_start_duplicate_sonic_listener(tmp_path, proc
         SimpleNamespace(
             DATA_DIR=str(tmp_path),
             SEARCH_BACKEND_ENGINE="sonic",
-            USE_INDEXING_BACKEND=True,
             SEARCH_BACKEND_SONIC_HOST_NAME="127.0.0.1",
             SEARCH_BACKEND_SONIC_PORT=sonic_port,
             SEARCH_BACKEND_SONIC_PASSWORD="SecretPassword",

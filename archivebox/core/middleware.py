@@ -21,6 +21,7 @@ from archivebox.core.host_utils import (
     build_web_url,
     get_api_host,
     get_admin_host,
+    get_base_host,
     get_listen_host,
     get_listen_subdomain,
     get_public_host,
@@ -36,14 +37,32 @@ ADMIN_LOGIN_HINT_COOKIE = "archivebox_admin_logged_in"
 
 
 def _admin_login_hint_cookie_domain(config) -> str | None:
+    """Resolve the parent domain to scope the cross-subdomain login hint.
+
+    NOTE: this cookie carries only the single bit "user is logged in on
+    admin somewhere"; it MUST NOT be confused with the session cookie,
+    which stays admin-host-scoped (see core/settings.py
+    SESSION_COOKIE_DOMAIN comment — admin/public is a security boundary).
+
+    Returns the hostname portion of ``get_base_host`` (which respects
+    ``BASE_URL`` and falls back to the local-bind mapping). Strips the
+    port — cookie ``Domain=`` attributes don't include ports. Returns
+    ``None`` when subdomain routing is off, the base host is empty, or
+    the base host is an IP / bare ``localhost`` (browsers reject
+    cross-host cookies for those).
+    """
     if not config.USES_SUBDOMAIN_ROUTING:
         return None
-    listen_host, _listen_port = split_host_port(get_listen_host(config=config))
+    base_host = get_base_host(config=config)
+    if not base_host:
+        return None
+    hostname, _port = split_host_port(base_host)
+    if not hostname or hostname == "localhost":
+        return None
     try:
-        ipaddress.ip_address(listen_host)
+        ipaddress.ip_address(hostname)
     except ValueError:
-        if listen_host and listen_host != "localhost":
-            return listen_host
+        return hostname
     return None
 
 
@@ -166,12 +185,32 @@ def HostRoutingMiddleware(get_response):
         if request.path.startswith("/static/") or request.path in {"/favicon.ico", "/robots.txt"}:
             return get_response(request)
 
+        # In subdomain mode with no explicit BASE_URL we can't safely emit
+        # ``admin.``/``web.``/``snap-*.`` redirects: every URL builder uses the
+        # request's own Host (via the request-host fallback in get_base_url),
+        # so prepending ``admin.`` to whatever the client sent produces a
+        # redirect chain of ``admin.admin.admin.<host>``. Pass the request
+        # through; the misconfig banner on the rendered page tells the user
+        # to pin BASE_URL so the redirects can resume.
+        if config.USES_SUBDOMAIN_ROUTING and not config.BASE_URL:
+            return get_response(request)
+
         if config.USES_SUBDOMAIN_ROUTING and not host_matches(request_host, admin_host):
+            # ``/add`` is admin-only unless ``PUBLIC_ADD_VIEW`` is on. Without
+            # this redirect, hitting it on public.* falls into AddView's
+            # auth check, bounces through ``/accounts/login/?next=/add/`` →
+            # ``/admin/login/?next=/add/``, and Django admin's LoginView
+            # silently drops ``next`` when the user already has an admin
+            # session — dumping the user on the admin homepage instead of
+            # the add form. Routing the request to admin.* directly lets
+            # AddView run on the host where the session lives.
+            add_should_redirect = not config.PUBLIC_ADD_VIEW and (request.path == "/add" or request.path.startswith("/add/"))
             if (
                 request.path == "/admin"
                 or request.path.startswith("/admin/")
                 or request.path == "/accounts"
                 or request.path.startswith("/accounts/")
+                or add_should_redirect
             ):
                 target = build_admin_url(request.path, request=request)
                 if request.META.get("QUERY_STRING"):
@@ -262,7 +301,13 @@ def HostRoutingMiddleware(get_response):
                 target = f"{target}?{request.META['QUERY_STRING']}"
             return redirect(target)
 
-        if admin_host or web_host:
+        if (admin_host or web_host) and config.BASE_URL:
+            # Only force a canonical-host redirect when BASE_URL was set
+            # explicitly. If BASE_URL is empty (e.g. 0.7.3 → 0.9.0 upgrade
+            # where the user has CSRF_TRUSTED_ORIGINS but never set BASE_URL),
+            # the subdomain we'd redirect to may not actually resolve in the
+            # user's reverse proxy — serve the request as-is instead and let
+            # the misconfig banner surface the problem in the page.
             target = build_web_url(request.path, request=request)
             if target:
                 if request.META.get("QUERY_STRING"):

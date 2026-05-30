@@ -1605,7 +1605,11 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
 
         from archivebox.cli.archivebox_add import add
 
-        add(urls=urls, bg=True)
+        # "Archive Now" is an explicit user re-archive — force ONLY_NEW=False
+        # on the resulting crawl so existing snapshots don't cause the crawl to
+        # seal immediately with zero new snapshots (the default ONLY_NEW=True
+        # would skip any URLs that have ever been archived before).
+        add(urls=urls, bg=True, config={"ONLY_NEW": False})
 
         messages.success(
             request,

@@ -99,12 +99,6 @@ def test_key_value_widget_shows_array_and_object_examples_and_binary_rules(monke
                 "default": [],
                 "description": "Extra arguments to append to wget command",
             },
-            "SAVE_ALLOWLIST": {
-                "plugin": "base",
-                "type": "object",
-                "default": {},
-                "description": "Regex allowlist mapped to enabled methods",
-            },
             "WGET_BINARY": {
                 "plugin": "wget",
                 "type": "string",
@@ -117,7 +111,6 @@ def test_key_value_widget_shows_array_and_object_examples_and_binary_rules(monke
     html = str(KeyValueWidget().render("config", {}, attrs={"id": "id_config"}))
 
     assert 'Example: ["--extra-arg"]' in html
-    assert 'Example: {"^https://example\\\\.com": ["wget"]}' in html
     assert "Example: wget or /usr/bin/wget" in html
     assert "validateBinaryValue_id_config" in html
     assert "meta.key.endsWith('_BINARY')" in html

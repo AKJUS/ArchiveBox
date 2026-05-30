@@ -278,12 +278,6 @@ class SnapshotQuerySet(models.QuerySet):
     def search(self, patterns: list[str]) -> "SnapshotQuerySet":
         """Search snapshots using the configured search backend"""
         from archivebox.search import query_search_index
-        from archivebox.misc.logging import stderr
-
-        if not get_config().USE_SEARCHING_BACKEND:
-            stderr()
-            stderr("[X] The search backend is not enabled, set config.USE_SEARCHING_BACKEND = True", color="red")
-            raise SystemExit(2)
 
         qsearch = self.none()
         for pattern in patterns:
@@ -3060,8 +3054,6 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
         from archivebox.misc.logging_util import printable_filesize
 
         output_dir = Path(out_dir) if out_dir is not None else self.output_dir
-        config = get_config()
-        SAVE_ARCHIVE_DOT_ORG = config.get("SAVE_ARCHIVE_DOT_ORG", True)
         TITLE_LOADING_MSG = "Not yet archived..."
 
         preview_priority = [
@@ -3104,8 +3096,6 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
             "status": "archived" if is_archived else "not yet archived",
             "status_color": "success" if is_archived else "danger",
             "oldest_archive_date": ts_to_date_str(self.oldest_archive_date),
-            "SAVE_ARCHIVE_DOT_ORG": SAVE_ARCHIVE_DOT_ORG,
-            "PREVIEW_ORIGINALS": config.PREVIEW_ORIGINALS,
             "best_preview_path": best_preview_path,
             "best_result": best_result,
             "archiveresults": outputs,

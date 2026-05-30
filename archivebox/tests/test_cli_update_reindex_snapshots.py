@@ -88,9 +88,7 @@ def test_reindex_snapshots_resets_existing_search_results_and_reruns_requested_p
     (output_dir / "dom" / "output.html").write_text("<html><body>Example searchable text</body></html>")
 
     original_engine = os.environ.get("SEARCH_BACKEND_ENGINE")
-    original_indexing = os.environ.get("USE_INDEXING_BACKEND")
     os.environ["SEARCH_BACKEND_ENGINE"] = "sqlite"
-    os.environ["USE_INDEXING_BACKEND"] = "true"
     try:
         stats = reindex_snapshots(
             Snapshot.objects.filter(id=snapshot.id),
@@ -102,10 +100,6 @@ def test_reindex_snapshots_resets_existing_search_results_and_reruns_requested_p
             os.environ.pop("SEARCH_BACKEND_ENGINE", None)
         else:
             os.environ["SEARCH_BACKEND_ENGINE"] = original_engine
-        if original_indexing is None:
-            os.environ.pop("USE_INDEXING_BACKEND", None)
-        else:
-            os.environ["USE_INDEXING_BACKEND"] = original_indexing
 
     result.refresh_from_db()
 

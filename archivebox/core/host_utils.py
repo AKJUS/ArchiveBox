@@ -9,6 +9,7 @@ from archivebox.config.common import get_config
 
 _SNAPSHOT_ID_RE = re.compile(r"^[0-9a-fA-F-]{8,36}$")
 _SNAPSHOT_SUBDOMAIN_RE = re.compile(r"^snap-(?P<suffix>[0-9a-fA-F]{12})$")
+_ROLE_SUBDOMAIN_LABELS = ("admin", "web", "api", "public")
 
 
 def split_host_port(host: str) -> tuple[str, str | None]:
@@ -29,11 +30,82 @@ def _normalize_base_url(value: str | None) -> str:
     parsed = urlparse(base)
     if not parsed.netloc:
         return ""
-    return f"{parsed.scheme}://{parsed.netloc}"
+    # Accept ``*.<host>`` as a synonym for ``<host>`` so users can paste the
+    # wildcard-friendly form (e.g. from the banner suggestion) without it
+    # leaking ``*.`` into every downstream URL. Subdomain routing already
+    # prepends the appropriate role label (admin/web/api/snap-*) at build
+    # time, so the bare base host is what we want to store.
+    netloc = parsed.netloc
+    while netloc.startswith("*."):
+        netloc = netloc[2:]
+    if not netloc:
+        return ""
+    return f"{parsed.scheme}://{netloc}"
 
 
 def normalize_base_url(value: str | None) -> str:
     return _normalize_base_url(value)
+
+
+def _csrf_trusted_origins(config) -> list[str]:
+    raw = (config.CSRF_TRUSTED_ORIGINS or "").strip()
+    if not raw:
+        return []
+    seen: list[str] = []
+    for entry in raw.split(","):
+        normalized = _normalize_base_url(entry.strip())
+        if normalized and normalized not in seen:
+            seen.append(normalized)
+    return seen
+
+
+def _allowed_hosts(config) -> set[str]:
+    raw = (config.ALLOWED_HOSTS or "").strip()
+    if not raw:
+        return set()
+    return {entry.strip().lower() for entry in raw.split(",") if entry.strip() and entry.strip() != "*"}
+
+
+def derive_base_url_from_csrf(config: dict[str, Any] | None = None, **config_kwargs: Any) -> str:
+    """Pick a single CSRF_TRUSTED_ORIGINS entry to act as the implicit BASE_URL.
+
+    0.7.3 → 0.9.0 upgrade path: any reverse-proxied 0.7.3 deployment already
+    had ``CSRF_TRUSTED_ORIGINS=https://archive.example.com`` set (required for
+    admin login to work). On upgrade, ``BASE_URL`` is the new knob — but it
+    defaults to empty, and falling through to ``BIND_ADDR`` produces an
+    unreachable URL like ``http://0.0.0.0:8000``. If the user has exactly one
+    CSRF origin we treat it as the implicit BASE_URL so links/redirects keep
+    pointing at the public hostname they already configured.
+
+    Returns ``""`` when the inference is ambiguous (multiple origins) or
+    impossible (none set) so callers fall through to their next strategy.
+    """
+    config = config or get_config(**config_kwargs)
+    origins = _csrf_trusted_origins(config)
+    if len(origins) == 1:
+        return origins[0]
+    return ""
+
+
+def request_host_is_explicitly_allowed(request_host: str, config) -> bool:
+    """True if the incoming Host is in ALLOWED_HOSTS or matches a CSRF origin.
+
+    Used by ``get_base_url`` to honour the request's own Host header when the
+    operator hasn't pinned ``BASE_URL`` explicitly. The check is intentionally
+    strict — we won't trust arbitrary Host headers, only ones the user has
+    already opted into via ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS.
+    """
+    if not request_host:
+        return False
+    host, _ = split_host_port(request_host)
+    allowed = _allowed_hosts(config)
+    if host in allowed:
+        return True
+    for origin in _csrf_trusted_origins(config):
+        origin_host, _ = split_host_port(urlparse(origin).netloc)
+        if origin_host == host:
+            return True
+    return False
 
 
 def get_listen_host(config: dict[str, Any] | None = None, **config_kwargs: Any) -> str:
@@ -50,8 +122,46 @@ def _with_port(host: str, port: str | None) -> str:
     return f"{host}:{port}" if port else host
 
 
+def strip_role_subdomain(host: str) -> str:
+    """Strip leading ``admin.`` / ``web.`` / ``api.`` / ``public.`` / ``snap-*.``
+    labels from a host (preserving the port). Strips repeatedly so an
+    already-compounded host like ``snap-X.snap-X.<base>`` reduces all the
+    way down to ``<base>``.
+
+    Used when we want to recover the canonical base host from a request that
+    arrived on a role subdomain — otherwise builders that prepend their own
+    role label (e.g. ``snap-X.``) compound onto the existing prefix and you
+    get ``snap-X.snap-X.snap-X.<base>`` on every click.
+    """
+    if not host:
+        return ""
+    hostname, port = split_host_port(host)
+    while hostname and "." in hostname:
+        head, _sep, rest = hostname.partition(".")
+        if head in _ROLE_SUBDOMAIN_LABELS or _SNAPSHOT_SUBDOMAIN_RE.match(head):
+            hostname = rest
+            continue
+        break
+    return _with_port(hostname, port)
+
+
 def _is_local_bind_host(host: str) -> bool:
     return host in {"", "0.0.0.0", "::", "127.0.0.1", "::1", "localhost"}
+
+
+def canonical_base_host_for_request(request_host: str) -> str:
+    """Strip role subdomains and remap loopback hostnames to ``archivebox.localhost``.
+
+    Used by the banner suggestion and the in-browser pin endpoint: when the
+    user is hitting the server on raw ``localhost:9292`` or ``127.0.0.1:9292``
+    we want to suggest the wildcard-friendly ``archivebox.localhost`` family
+    instead, so the eventual pinned ``BASE_URL`` plays nicely with subdomain
+    routing without forcing the user to add a /etc/hosts entry.
+    """
+    hostname, port = split_host_port(strip_role_subdomain(request_host or ""))
+    if _is_local_bind_host(hostname):
+        hostname = "archivebox.localhost"
+    return _with_port(hostname, port)
 
 
 def _root_host_from_listen(config: dict[str, Any] | None = None, **config_kwargs: Any) -> str:
@@ -67,6 +177,13 @@ def get_base_url(request=None, config: dict[str, Any] | None = None, **config_kw
     if override:
         return override
 
+    # A) Implicit BASE_URL from a single CSRF_TRUSTED_ORIGINS entry. Catches
+    # 0.7.3 → 0.9.0 upgrades where users already set CSRF_TRUSTED_ORIGINS
+    # for their reverse-proxy login but never set BASE_URL.
+    csrf_derived = derive_base_url_from_csrf(config)
+    if csrf_derived:
+        return csrf_derived
+
     scheme = request.scheme if request else "http"
     if request:
         req_host, req_port = split_host_port(request.get_host())
@@ -74,6 +191,17 @@ def get_base_url(request=None, config: dict[str, Any] | None = None, **config_kw
             return f"{scheme}://{_with_port('archivebox.localhost', req_port)}"
         if _is_local_bind_host(req_host):
             return f"{scheme}://{_with_port('archivebox.localhost', req_port)}"
+        # C) Per-request fallback: when ``BASE_URL`` is unset and CSRF didn't
+        # give us a single origin, trust the request's Host header — but first
+        # peel off any ``admin.`` / ``web.`` / ``api.`` / ``public.`` /
+        # ``snap-*.`` label. Otherwise the URL builders below prepend their own
+        # role label onto a host that already carries one, producing the
+        # ``snap-X.snap-X.snap-X.<base>`` compounding bug. Django has already
+        # admitted the host via ALLOWED_HOSTS; the misconfig banner surfaces
+        # the case where the resulting URL doesn't match what the operator
+        # probably intended.
+        canonical_host = strip_role_subdomain(request.get_host())
+        return f"{scheme}://{canonical_host}"
 
     root_host = _root_host_from_listen(config=config)
     return f"{scheme}://{root_host}" if root_host else ""

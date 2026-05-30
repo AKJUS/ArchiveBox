@@ -8,10 +8,8 @@ from enum import Enum
 from django.http import HttpRequest
 
 from ninja import Router, Schema
-from pydantic import Field
 
 from archivebox.misc.util import ansi_to_html
-from archivebox.config.common import get_config
 
 
 # from .auth import API_AUTH_METHODS
@@ -67,8 +65,7 @@ class AddCommandSchema(Schema):
     snapshot_max_size: int = 0
     parser: str = "auto"
     plugins: str = ""
-    update: bool = Field(default_factory=lambda: not get_config().ONLY_NEW)
-    overwrite: bool = False
+    only_new: bool | None = None
     index_only: bool = False
 
 
@@ -92,8 +89,7 @@ class ScheduleCommandSchema(Schema):
     every: str | None = None
     tag: str = ""
     depth: int = 0
-    overwrite: bool = False
-    update: bool = Field(default_factory=lambda: not get_config().ONLY_NEW)
+    only_new: bool | None = None
     clear: bool = False
 
 
@@ -121,6 +117,9 @@ class RemoveCommandSchema(Schema):
 def cli_add(request: HttpRequest, args: AddCommandSchema):
     from archivebox.cli.archivebox_add import add
 
+    config_overrides: dict[str, object] = {}
+    if args.only_new is not None:
+        config_overrides["ONLY_NEW"] = bool(args.only_new)
     crawl, snapshots = add(
         urls=args.urls,
         snapshot_ids=args.snapshot_ids,
@@ -130,13 +129,12 @@ def cli_add(request: HttpRequest, args: AddCommandSchema):
         crawl_max_size=args.crawl_max_size,
         crawl_timeout=args.crawl_timeout,
         snapshot_max_size=args.snapshot_max_size,
-        update=args.update,
         index_only=args.index_only,
-        overwrite=args.overwrite,
         plugins=args.plugins,
         parser=args.parser,
         bg=True,  # Always run in background for API calls
         created_by_id=request.user.pk,
+        config=config_overrides or None,
     )
 
     snapshot_ids = [str(snapshot_id) for snapshot_id in snapshots.values_list("id", flat=True)]
@@ -188,6 +186,9 @@ def cli_update(request: HttpRequest, args: UpdateCommandSchema):
 def cli_schedule(request: HttpRequest, args: ScheduleCommandSchema):
     from archivebox.cli.archivebox_schedule import schedule
 
+    config_overrides: dict[str, object] = {}
+    if args.only_new is not None:
+        config_overrides["ONLY_NEW"] = bool(args.only_new)
     result = schedule(
         import_path=args.import_path,
         add=args.add,
@@ -199,8 +200,7 @@ def cli_schedule(request: HttpRequest, args: ScheduleCommandSchema):
         every=args.every,
         tag=args.tag,
         depth=args.depth,
-        overwrite=args.overwrite,
-        update=args.update,
+        config=config_overrides or None,
     )
 
     stdout = getattr(request, "stdout", None)

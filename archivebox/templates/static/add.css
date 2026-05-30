@@ -98,6 +98,20 @@ select {
   min-height: 40px;
 }
 
+/* Crawl subtitle (grey explanation under the title) */
+.crawl-subtitle {
+  max-width: 760px;
+  margin: 4px auto 16px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.crawl-subtitle strong {
+  color: #475569;
+  font-weight: 600;
+}
+
 /* Crawl explanation box */
 .crawl-explanation {
   background-color: #e8f4f8;
@@ -111,6 +125,28 @@ select {
   margin: 0;
   line-height: 1.6;
   color: #333;
+}
+
+#add-form .crawl-tip a {
+  text-decoration: none !important;
+}
+
+.crawl-tip-url {
+  padding: 2px 6px;
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.crawl-tip-url-prefix {
+  color: #6b7280;
+}
+
+.crawl-tip-url-target {
+  color: #116329;
+  font-weight: 600;
 }
 
 /* Form sections */
@@ -792,6 +828,18 @@ a.preset-btn:active {
   color: #004882;
   border-color: #b7d3ea;
   background-color: #f5fbff;
+}
+
+.persona-preset-btn.persona-preset-btn-active {
+  color: #ffffff;
+  border-color: #004882;
+  background-color: #004882;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.persona-preset-btn.persona-preset-btn-active:hover {
+  background-color: #003060;
+  border-color: #003060;
 }
 
 .persona-preset-wrap {

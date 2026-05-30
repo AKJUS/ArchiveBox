@@ -210,6 +210,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "archivebox.core.context_processors.archivebox_globals",
             ],
         },
     },
@@ -371,12 +372,17 @@ api_base_url = normalize_base_url(get_api_base_url())
 if api_base_url and api_base_url not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(api_base_url)
 
-# automatically fix case when user sets ALLOWED_HOSTS (e.g. to archivebox.example.com)
-# but forgets to add https://archivebox.example.com to CSRF_TRUSTED_ORIGINS
+# Auto-extend CSRF_TRUSTED_ORIGINS with the explicit ALLOWED_HOSTS entries so
+# users who set ALLOWED_HOSTS=archivebox.example.com don't have to also list
+# https://archivebox.example.com under CSRF_TRUSTED_ORIGINS. (The previous
+# per-host WARNING print was just noise — the auto-append below is the actual
+# fix, and the effective CSRF_TRUSTED_ORIGINS gets surfaced once at startup
+# from archivebox_server.py.)
 for hostname in ALLOWED_HOSTS:
+    if hostname == "*":
+        continue
     https_endpoint = f"https://{hostname}"
-    if hostname != "*" and https_endpoint not in CSRF_TRUSTED_ORIGINS:
-        print(f"[!] WARNING: {https_endpoint} from ALLOWED_HOSTS should be added to CSRF_TRUSTED_ORIGINS")
+    if https_endpoint not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(https_endpoint)
 
 SECURE_BROWSER_XSS_FILTER = True
@@ -386,6 +392,12 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False
 SESSION_COOKIE_HTTPONLY = True
+# Auth cookies are intentionally scoped to the exact host that set them so
+# the admin session is NOT readable from public.* / web.* / api.* — that
+# split is a security boundary, not a UX choice. Subdomains that need to
+# render an "is the user logged in?" indicator must use the single-bit
+# `archivebox_admin_logged_in` hint cookie set by core/middleware.py
+# (which IS scoped to the listen-host parent), never widen these.
 SESSION_COOKIE_DOMAIN = None
 CSRF_COOKIE_DOMAIN = None
 SESSION_COOKIE_AGE = 1209600  # 2 weeks

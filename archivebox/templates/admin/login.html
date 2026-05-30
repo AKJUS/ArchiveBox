@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load i18n static %}
+{% load i18n static core_tags %}
 
 {% block extrastyle %}{{ block.super }}<link rel="stylesheet" type="text/css" href="{% static "admin/css/login.css" %}">
 {{ form.media }}
@@ -7,11 +7,11 @@
 
 {% block bodyclass %}{{ block.super }} login{% endblock %}
 
+<a href="{% url 'Home' %}">
 {% block branding %}<h1>ArchiveBox Admin</h1>{% endblock %}
-
-{% block usertools %}
+</a>
 <br/>
-  <a href="{% url 'Home' %}">Back to Main Index</a>
+{% block usertools %}
 {% endblock %}
 
 {% block nav-global %}{% endblock %}
@@ -53,22 +53,16 @@
 
 <br/>
 <form action="{{ app_path }}" method="post" id="login-form">{% csrf_token %}
-  <div class="form-row">
+  <div class="form-row" style="gap: 0;">
     {{ form.username.errors }}
     {{ form.username.label_tag }} {{ form.username }}
   </div>
-  <div class="form-row">
+  <div class="form-row" style="gap: 0;">
     {{ form.password.errors }}
     {{ form.password.label_tag }} {{ form.password }}
     <input type="hidden" name="next" value="{{ next }}">
   </div>
-  {% url 'admin_password_reset' as password_reset_url %}
-  {% if password_reset_url %}
-  <div class="password-reset-link">
-    <a href="{{ password_reset_url }}">{% trans 'Forgotten your password or username?' %}</a>
-  </div>
-  {% endif %}
-  <div class="submit-row">
+  <div class="submit-row" style="border: none;">
     <label>&nbsp;</label><input type="submit" value="{% trans 'Log in' %}">
   </div>
 </form>
@@ -77,22 +71,20 @@
   <br/><br/>
   <hr/>
   <br/>
-  If you forgot your password, <a href="/accounts/password_reset/">reset it here</a> or run:<br/>
+  To create a new admin user or reset a password, run:<br/>
 <pre>
-archivebox manage changepassword USERNAME
+cd data/   # run commands inside your data folder
+archivebox manage createsuperuser &lt;username&gt;
+archivebox manage changepassword &lt;username&gt;
 </pre>
-
-  <br/><br/>
-  <hr/>
-  <br/>
-  To create a new admin user, run the following:
 <pre>
-archivebox manage createsuperuser
-</pre>
-  <br/>
-  <hr/>
 
-  <small><i>(cd into your archive folder before running commands)</i></small>
+</pre>
+  {% has_real_admin_users as real_admins_exist %}
+  {% if not real_admins_exist %}
+  (or set env vars <code>ADMIN_USERNAME</code> + <code>ADMIN_PASSWORD</code>)
+  {% endif %}
+  <br/>
 </center>
 
 

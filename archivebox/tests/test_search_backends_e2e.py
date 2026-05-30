@@ -26,8 +26,6 @@ def test_real_fulltext_search_backends_survive_reindex_transition(tmp_path):
                 "SAVE_WARC": "False",
                 "WGET_WARC_ENABLED": "False",
                 "WGET_TIMEOUT": "20",
-                "USE_SEARCHING_BACKEND": "true",
-                "USE_INDEXING_BACKEND": "true",
             },
         )
         if env:
@@ -66,8 +64,6 @@ def test_real_fulltext_search_backends_survive_reindex_transition(tmp_path):
             "USE_COLOR": "False",
             "SHOW_PROGRESS": "False",
             "SEARCH_BACKEND_ENGINE": "sonic",
-            "USE_SEARCHING_BACKEND": "true",
-            "USE_INDEXING_BACKEND": "true",
             "SEARCH_BACKEND_SONIC_PORT": str(sonic_port),
         },
     )

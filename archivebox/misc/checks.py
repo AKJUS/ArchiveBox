@@ -61,7 +61,7 @@ def check_migrations(*, blocking: bool = True, auto_apply: bool = False, cancel_
     from archivebox.misc.db import apply_migrations, migration_state, pending_migrations
 
     pending, missing_from_code, rollback_targets = migration_state()
-    is_migrating = any(arg in sys.argv for arg in ["makemigrations", "migrate", "init"])
+    is_migrating = any(arg in sys.argv for arg in ["makemigrations", "migrate", "init"]) or os.environ.get("ARCHIVEBOX_WANTS_INIT") == "1"
 
     if missing_from_code:
         print(
@@ -240,7 +240,9 @@ def check_data_dir_permissions(config=None, **config_kwargs):
     # Check /lib dir permissions
     check_lib_dir(lib_dir, throw=False, must_exist=True, config=config)
 
-    os.umask(0o777 - int(config.DIR_OUTPUT_PERMISSIONS, base=8))
+    # Derive directory mode from file mode by OR-ing the execute bits (matches
+    # the old DIR_OUTPUT_PERMISSIONS=755 vs OUTPUT_PERMISSIONS=644 convention).
+    os.umask(0o777 - (int(config.OUTPUT_PERMISSIONS, base=8) | 0o111))
 
 
 def check_tmp_dir(tmp_dir=None, throw=False, quiet=False, must_exist=True, config=None, **config_kwargs):

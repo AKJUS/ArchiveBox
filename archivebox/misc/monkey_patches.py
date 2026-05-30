@@ -59,7 +59,7 @@ class ModifiedAccessLogGenerator(access.AccessLogGenerator):
             return
         if "GET /health/" in request:
             return
-        if "GET /admin/live-progress/" in request and (time_taken is None or time_taken < 1.0):
+        if "GET /progress.json" in request and (time_taken is None or time_taken < 1.0):
             return
         if "GET /api/v1/crawls/crawl/" in request and "/files/chrome_screencast/latest.jpg" in request:
             return

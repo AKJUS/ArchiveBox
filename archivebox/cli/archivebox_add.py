@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import rich_click as click
 
@@ -58,11 +58,10 @@ def add(
     parser: str = "auto",
     plugins: str = "",
     persona: str = "Default",
-    overwrite: bool = False,
-    update: bool | None = None,
     index_only: bool = False,
     bg: bool = False,
     created_by_id: int | None = None,
+    config: dict[str, Any] | None = None,
 ) -> tuple[Crawl, QuerySet[Snapshot]]:
     """Add a new URL or list of URLs to your archive.
 
@@ -87,10 +86,11 @@ def add(
     from archivebox.config.permissions import USER, HOSTNAME
     from archivebox.config.common import get_config
 
-    config = get_config()
+    config_overrides = dict(config or {})
+    runtime_config = get_config()
     crawl_max_concurrent_snapshots_override = crawl_max_concurrent_snapshots is not None
     if crawl_max_concurrent_snapshots is None:
-        crawl_max_concurrent_snapshots = config.CRAWL_MAX_CONCURRENT_SNAPSHOTS
+        crawl_max_concurrent_snapshots = runtime_config.CRAWL_MAX_CONCURRENT_SNAPSHOTS
     crawl_max_concurrent_snapshots = int(crawl_max_concurrent_snapshots)
 
     if depth not in (0, 1, 2, 3, 4):
@@ -119,8 +119,6 @@ def add(
     created_by_id = created_by_id or get_or_create_system_user_pk()
     created_by = get_user_model().objects.filter(pk=created_by_id).first()
     started_at = timezone.now()
-    if update is None:
-        update = not config.ONLY_NEW
 
     if isinstance(urls, str):
         url_list = [line.strip() for line in urls.splitlines() if line.strip()]
@@ -157,9 +155,7 @@ def add(
 
     crawl_config = {
         "PERMISSIONS": str(effective_persona_config.PERMISSIONS),
-        **({"ONLY_NEW": not update} if bool(not update) != bool(effective_persona_config.ONLY_NEW) else {}),
         **({"INDEX_ONLY": True} if index_only else {}),
-        **({"OVERWRITE": True} if overwrite else {}),
         **({"PLUGINS": plugins} if plugins else {}),
         **(
             {"CRAWL_MAX_CONCURRENT_SNAPSHOTS": crawl_max_concurrent_snapshots}
@@ -175,6 +171,11 @@ def add(
         **({"URL_ALLOWLIST": url_allowlist} if url_allowlist else {}),
         **({"URL_DENYLIST": url_denylist} if url_denylist else {}),
     }
+    # Caller-supplied overrides (e.g. {"ONLY_NEW": False}) are the highest
+    # priority — they win over persona/plugin/env defaults and get stamped
+    # directly onto crawl.config so the runtime resolution and admin UI both
+    # reflect them faithfully.
+    crawl_config.update(config_overrides)
 
     crawl = Crawl.objects.create(
         urls=urls_content,
@@ -314,8 +315,13 @@ def add(
 @click.option("--parser", default="auto", help="Parser for reading input URLs (auto, txt, html, rss, json, jsonl, netscape, ...)")
 @click.option("--plugins", "-p", default="", help="Comma-separated list of plugins to run e.g. title,favicon,screenshot,singlefile,...")
 @click.option("--persona", default="Default", help="Authentication profile to use when archiving")
-@click.option("--overwrite", "-F", is_flag=True, help="Overwrite existing data if URLs have been archived previously")
-@click.option("--update", is_flag=True, default=None, help="Retry any previously skipped/failed URLs when re-adding them")
+@click.option(
+    "--only-new/--no-only-new",
+    "only_new",
+    default=None,
+    help="Skip URLs that already have a snapshot (default: inherit from ONLY_NEW config). "
+    "Pass --no-only-new to force re-archive of URLs that already exist.",
+)
 @click.option("--index-only", is_flag=True, help="Just add the URLs to the index without archiving them now")
 @click.option("--bg", is_flag=True, help="Run archiving in background (queue work and return immediately)")
 @click.argument("urls", nargs=-1, type=click.Path())
@@ -344,6 +350,12 @@ def main(**kwargs):
             raise click.BadParameter(str(err), param_hint="--snapshot-max-size") from err
         if kwargs.get("crawl_max_concurrent_snapshots") is not None and int(kwargs["crawl_max_concurrent_snapshots"]) < 1:
             raise click.BadParameter("crawl_max_concurrent_snapshots must be at least 1.", param_hint="--crawl-max-concurrent-snapshots")
+
+        # Translate --only-new/--no-only-new into a crawl config override.
+        # add() takes config overrides as a dict; no per-flag kwargs.
+        only_new = kwargs.pop("only_new", None)
+        if only_new is not None:
+            kwargs["config"] = {"ONLY_NEW": bool(only_new)}
 
         add(urls=urls, **kwargs)
 

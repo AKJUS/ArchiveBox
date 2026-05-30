@@ -33,7 +33,6 @@ PluginSchemaDocuments = dict[str, dict[str, Any]]
 
 _STDOUT_CONSOLE = Console()
 _STDERR_CONSOLE = Console(stderr=True)
-_WARNED_SERVER_SECURITY_MODES: set[str] = set()
 _WARNED_ARCHIVING_CONFIGS: set[tuple[int, bool]] = set()
 
 
@@ -126,12 +125,8 @@ class StorageConfig(BaseConfigSet):
     CUSTOM_TEMPLATES_DIR: Path = Field(default=CONSTANTS.CUSTOM_TEMPLATES_DIR)
 
     OUTPUT_PERMISSIONS: str = Field(default="644")
-    RESTRICT_FILE_NAMES: str = Field(default="windows")
     ENFORCE_ATOMIC_WRITES: bool = Field(default=True)
     ALLOW_NO_UNIX_SOCKETS: bool = Field(default=False, alias="ARCHIVEBOX_ALLOW_NO_UNIX_SOCKETS")
-
-    # not supposed to be user settable:
-    DIR_OUTPUT_PERMISSIONS: str = Field(default="755")  # computed from OUTPUT_PERMISSIONS
 
 
 class GeneralConfig(BaseConfigSet):
@@ -158,7 +153,6 @@ class ServerConfig(BaseConfigSet):
     SERVER_SECURITY_MODE: str = Field(default="safe-subdomains-fullreplay")
 
     SNAPSHOTS_PER_PAGE: int = Field(default=40)
-    PREVIEW_ORIGINALS: bool = Field(default=True)
     FOOTER_INFO: str = Field(
         default="Content is hosted for personal archiving purposes only.  Contact server owner for any takedown requests.",
     )
@@ -241,39 +235,6 @@ class DatabaseConfig(BaseConfigSet):
     SQLITE_LOCK_RETRY_INTERVAL: float = Field(default=5.0, alias="ARCHIVEBOX_SQLITE_LOCK_RETRY_INTERVAL", gt=0)
 
 
-def _print_server_security_mode_warning(config: ServerConfig) -> None:
-    if not config.IS_LOWER_SECURITY_MODE:
-        return
-    if config.SERVER_SECURITY_MODE in _WARNED_SERVER_SECURITY_MODES:
-        return
-
-    rprint(
-        f"[yellow][!] WARNING: ArchiveBox is running with SERVER_SECURITY_MODE={config.SERVER_SECURITY_MODE}[/yellow]",
-        file=sys.stderr,
-    )
-    rprint(
-        "[yellow]    Archived pages may share an origin with privileged app routes in this mode.[/yellow]",
-        file=sys.stderr,
-    )
-    rprint(
-        "[yellow]    To switch to the safer isolated setup:[/yellow]",
-        file=sys.stderr,
-    )
-    rprint(
-        "[yellow]    1. Set SERVER_SECURITY_MODE=safe-subdomains-fullreplay[/yellow]",
-        file=sys.stderr,
-    )
-    rprint(
-        "[yellow]    2. Point *.archivebox.localhost (or your chosen base domain) at this server[/yellow]",
-        file=sys.stderr,
-    )
-    rprint(
-        "[yellow]    3. Configure wildcard DNS/TLS or your reverse proxy so admin., web., api., and snapshot subdomains resolve[/yellow]",
-        file=sys.stderr,
-    )
-    _WARNED_SERVER_SECURITY_MODES.add(config.SERVER_SECURITY_MODE)
-
-
 class ArchivingConfig(BaseConfigSet):
     toml_section_header: str = "ARCHIVING_CONFIG"
 
@@ -285,17 +246,10 @@ class ArchivingConfig(BaseConfigSet):
         default="",
         description="Comma-separated plugin selection override used by the UI and API.",
     )
-    ENABLED_EXTRACTORS: str = Field(
-        default="",
-        description="Legacy comma-separated plugin selection override.",
-    )
 
     ONLY_NEW: bool = Field(default=True)
-    OVERWRITE: bool = Field(default=False)
 
     TIMEOUT: int = Field(default=60)
-    MAX_URL_ATTEMPTS: int = Field(default=50)
-    MAX_DEPTH: int = Field(default=0)
     CRAWL_MAX_URLS: int = Field(default=0)
     CRAWL_MAX_SIZE: int = Field(default=0)
     CRAWL_TIMEOUT: int = Field(default=0, description="Maximum total crawl runtime in seconds (0 = unlimited).")
@@ -314,9 +268,6 @@ class ArchivingConfig(BaseConfigSet):
 
     URL_DENYLIST: str = Field(default=r"\.(css|js|otf|ttf|woff|woff2|gstatic\.com|googleapis\.com/css)(\?.*)?$", alias="URL_BLACKLIST")
     URL_ALLOWLIST: str | None = Field(default=None, alias="URL_WHITELIST")
-
-    SAVE_ALLOWLIST: dict[str, list[str]] = Field(default={})  # mapping of regex patterns to list of archive methods
-    SAVE_DENYLIST: dict[str, list[str]] = Field(default={})
 
     DEFAULT_PERSONA: str = Field(default="Default")
     PERMISSIONS: str = Field(
@@ -375,30 +326,6 @@ class ArchivingConfig(BaseConfigSet):
     def URL_DENYLIST_PTN(self) -> re.Pattern:
         return re.compile(self.URL_DENYLIST, CONSTANTS.ALLOWDENYLIST_REGEX_FLAGS)
 
-    @property
-    def SAVE_ALLOWLIST_PTNS(self) -> dict[re.Pattern, list[str]]:
-        return (
-            {
-                # regexp: methods list
-                re.compile(key, CONSTANTS.ALLOWDENYLIST_REGEX_FLAGS): val
-                for key, val in self.SAVE_ALLOWLIST.items()
-            }
-            if self.SAVE_ALLOWLIST
-            else {}
-        )
-
-    @property
-    def SAVE_DENYLIST_PTNS(self) -> dict[re.Pattern, list[str]]:
-        return (
-            {
-                # regexp: methods list
-                re.compile(key, CONSTANTS.ALLOWDENYLIST_REGEX_FLAGS): val
-                for key, val in self.SAVE_DENYLIST.items()
-            }
-            if self.SAVE_DENYLIST
-            else {}
-        )
-
 
 def parse_delete_after(value) -> timedelta | None:
     if value is None:
@@ -435,11 +362,7 @@ def parse_delete_after(value) -> timedelta | None:
 class SearchBackendConfig(BaseConfigSet):
     toml_section_header: str = "SEARCH_BACKEND_CONFIG"
 
-    USE_INDEXING_BACKEND: bool = Field(default=True)
-    USE_SEARCHING_BACKEND: bool = Field(default=True)
-
     SEARCH_BACKEND_ENGINE: str = Field(default="ripgrep")
-    SEARCH_PROCESS_HTML: bool = Field(default=True)
 
 
 def _plugin_user_config_value(value: Any) -> str:
@@ -517,7 +440,6 @@ class ArchiveBoxBaseConfig(
     DATA_DIR: Path = Field(default=CONSTANTS.DATA_DIR)
     ABX_RUNTIME: str = Field(default="archivebox")
     CRAWL_DIR: Path | None = Field(default=None)
-    CRAWL_OUTPUT_DIR: Path | None = Field(default=None)
     SNAP_DIR: Path | None = Field(default=None)
     computed_config_keys: ClassVar[tuple[str, ...]] = COMPUTED_CONFIG_KEYS
 
@@ -653,13 +575,8 @@ def get_config(
         scope_overrides.update(crawl.config)
 
     if crawl is not None:
-        crawl_output_dir = None
-        if not overrides or "CRAWL_OUTPUT_DIR" not in overrides or "CRAWL_DIR" not in overrides:
-            crawl_output_dir = crawl.output_dir
-        if not overrides or "CRAWL_OUTPUT_DIR" not in overrides:
-            scope_overrides["CRAWL_OUTPUT_DIR"] = crawl_output_dir
         if not overrides or "CRAWL_DIR" not in overrides:
-            scope_overrides["CRAWL_DIR"] = crawl_output_dir
+            scope_overrides["CRAWL_DIR"] = crawl.output_dir
 
     if snapshot is not None and snapshot.config:
         scope_overrides.update(snapshot.config)
@@ -704,7 +621,6 @@ def get_config(
     if archiving_warning_key not in _WARNED_ARCHIVING_CONFIGS:
         config.warn_if_invalid()
         _WARNED_ARCHIVING_CONFIGS.add(archiving_warning_key)
-    _print_server_security_mode_warning(config)
     return config
 
 

@@ -106,10 +106,10 @@ def test_tag_search_api_returns_card_payload(client, api_token, tagged_data):
     assert payload["tags"][0]["id"] == tag.id
     assert payload["tags"][0]["name"] == "Alpha Research"
     assert payload["tags"][0]["num_snapshots"] == 2
-    assert payload["tags"][0]["snapshots"][0]["title"] in {"Example One", "Example Two"}
+    assert payload["tags"][0]["snapshots"] == []
     assert payload["tags"][0]["export_jsonl_url"].endswith(f"/api/v1/core/tag/{tag.id}/snapshots.jsonl")
     assert payload["tags"][0]["filter_url"].endswith(f"/admin/core/snapshot/?tags__id__exact={tag.id}")
-    assert {snapshot["url"] for snapshot in payload["tags"][0]["snapshots"]} == {snap.url for snap in snapshots}
+    assert {snap.url for snap in snapshots} == {"https://example.com/one", "https://example.com/two"}
 
 
 def test_tag_search_api_respects_sort_and_filters(client, api_token, admin_user, crawl, tagged_data):

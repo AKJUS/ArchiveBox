@@ -649,7 +649,7 @@ class TestAdminSnapshotListView:
             status=ArchiveResult.StatusChoices.QUEUED,
         )
 
-        response = client.get("/admin/live-progress/", HTTP_HOST=ADMIN_HOST)
+        response = client.get("/progress.json", HTTP_HOST=ADMIN_HOST)
 
         assert response.status_code == 200
         payload = response.json()
@@ -688,7 +688,7 @@ class TestAdminSnapshotListView:
             start_ts=now - timedelta(minutes=5),
         )
 
-        response = client.get("/admin/live-progress/", HTTP_HOST=ADMIN_HOST)
+        response = client.get("/progress.json", HTTP_HOST=ADMIN_HOST)
 
         assert response.status_code == 200
         payload = response.json()
@@ -1833,7 +1833,6 @@ class TestPublicIndexSearch:
         from archivebox.core.views import PublicIndexView
 
         monkeypatch.setenv("SEARCH_BACKEND_ENGINE", "ripgrep")
-        monkeypatch.setenv("USE_INDEXING_BACKEND", "false")
         metadata_snapshot = Snapshot.objects.create(
             url="https://public-example.com/google-meta",
             title="Google Metadata Match",

@@ -23,14 +23,38 @@
     border-radius: 6px;
 }
 
-.plugin-group-header {
+.plugin-group > .plugin-group-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     gap: 12px;
-    margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 2px solid #004882;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+}
+
+.plugin-group[open] > .plugin-group-header {
+    margin-bottom: 12px;
+}
+
+.plugin-group > .plugin-group-header::-webkit-details-marker {
+    display: none;
+}
+
+.plugin-group-caret {
+    display: inline-block;
+    color: #004882;
+    font-size: 11px;
+    line-height: 1;
+    transition: transform 0.15s ease;
+    width: 12px;
+    flex: 0 0 12px;
+}
+
+.plugin-group[open] > .plugin-group-header > .plugin-group-caret {
+    transform: rotate(90deg);
 }
 
 .plugin-group-header label {
@@ -38,6 +62,11 @@
     color: #004882;
     font-size: 15px;
     font-weight: 700;
+    cursor: pointer;
+}
+
+.plugin-group-header .select-all-btn {
+    margin-left: auto;
 }
 
 .plugin-group-note {
@@ -83,7 +112,8 @@
 .plugin-card-main {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto auto auto;
-    gap: 8px;
+    column-gap: 8px;
+    row-gap: 2px;
     align-items: start;
     min-width: 0;
     padding: 8px 10px;
@@ -150,43 +180,43 @@
 }
 
 .plugin-config-form .plugin-choice-description {
-    grid-column: 2;
+    grid-column: 1 / -1;
     grid-row: 2;
-    display: inline-block;
+    display: block !important;
     min-width: 0;
-    margin-left: 0;
-    color: #7a7a7a !important;
-    font-size: 12px;
+    width: 100%;
+    margin: 0;
+    color: #7a7a7a;
+    font-size: 12px !important;
+    font-weight: 400;
+    line-height: 1.35;
     text-align: left;
-    text-decoration: none !important;
+    cursor: pointer;
+    user-select: none;
 }
 
-.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:link,
-.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:visited,
-.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:active {
-    color: #7a7a7a !important;
-    text-decoration: none !important;
+.plugin-config-form .plugin-choice-description:hover {
+    color: #4b5563;
+    text-decoration: underline;
 }
 
-.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:hover,
-.plugin-config-form .plugin-checkboxes label a.plugin-choice-description:focus {
-    color: #4b5563 !important;
-    text-decoration: underline !important;
+.plugin-config-toggle-hack {
+    display: none;
 }
 
-.plugin-config-details {
+.plugin-config-marker {
     grid-column: 5;
     grid-row: 1;
     min-width: 0;
 }
 
-.plugin-card-main--static .plugin-config-details {
+.plugin-card-main--static .plugin-config-marker {
     grid-column: 4;
 }
 
 .plugin-card-badge,
-.plugin-config-details summary {
-    display: inline-flex;
+.plugin-config-form .plugin-config-marker {
+    display: inline-flex !important;
     align-items: center;
     gap: 6px;
     min-height: 26px;
@@ -195,12 +225,17 @@
     border-radius: 999px;
     background: #f8fafc;
     color: #475569;
-    font-size: 12px;
+    font-size: 12px !important;
     font-weight: 700;
     cursor: pointer;
     list-style: none;
     user-select: none;
     white-space: nowrap;
+}
+
+.plugin-config-marker:hover {
+    background: #eef4fa;
+    color: #1f2937;
 }
 
 .plugin-card-badge {
@@ -237,31 +272,30 @@
     grid-column: 3;
 }
 
-.plugin-config-details summary::-webkit-details-marker {
-    display: none;
-}
-
-.plugin-config-details summary:before {
+.plugin-config-marker::before {
     content: "▶";
     display: inline-block;
     font-size: 10px;
     transition: transform 0.2s;
 }
 
-.plugin-config-details[open] {
-    grid-column: 1 / -1;
-    grid-row: 2;
+.plugin-config-toggle-hack:checked ~ .plugin-card-main .plugin-config-marker::before {
+    transform: rotate(90deg);
+}
+
+.plugin-config-details {
     width: 100%;
     min-width: 0;
+    margin-top: 0;
+    padding-top: 0;
+    display: none;
+}
+
+.plugin-config-toggle-hack:checked ~ .plugin-config-details {
+    display: block;
+    margin-top: 8px;
     padding-top: 8px;
-}
-
-.plugin-config-details[open] summary {
-    margin-bottom: 8px;
-}
-
-.plugin-config-details[open] summary:before {
-    transform: rotate(90deg);
+    border-top: 1px solid #eef0f3;
 }
 
 .plugin-config-count {
@@ -277,8 +311,8 @@
     font-size: 11px;
 }
 
-.plugin-config-meta,
 .plugin-config-empty {
+    grid-column: 1 / -1;
     margin-bottom: 8px;
     padding: 7px 9px;
     border: 1px solid #e5edf5;
@@ -287,6 +321,34 @@
     color: #64748b;
     font-size: 12px;
     line-height: 1.4;
+}
+
+.plugin-config-uses {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid #e5edf5;
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.plugin-config-uses a {
+    color: #475569;
+    text-decoration: none;
+}
+
+.plugin-config-uses a:hover {
+    color: #1f2937;
+    text-decoration: underline;
+}
+
+.plugin-config-uses code {
+    padding: 1px 5px;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 999px;
+    font-size: 11px;
 }
 
 .plugin-config-grid {
@@ -350,7 +412,9 @@
 }
 
 .plugin-config-field textarea {
-    min-height: 70px;
+    min-height: 0 !important;
+    height: auto !important;
+    field-sizing: content;
     resize: vertical;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -404,13 +468,18 @@
         grid-template-columns: minmax(0, 1fr) auto auto auto;
     }
 
-    .plugin-config-details,
-    .plugin-card-main--static .plugin-config-details {
+    .plugin-config-marker,
+    .plugin-card-main--static .plugin-config-marker {
         grid-column: 1 / -1;
+        grid-row: 3;
+        justify-content: flex-start;
+    }
+
+    .plugin-choice-description {
         grid-row: 2;
     }
 
-    .plugin-group-header {
+    .plugin-group > .plugin-group-header {
         flex-direction: column;
         align-items: flex-start;
         gap: 10px;
@@ -421,18 +490,19 @@
     <div class="plugin-groups-grid">
         {% for group in plugin_groups %}
             {% if group.plugins %}
-                <div class="plugin-group">
-                    <div class="plugin-group-header">
+                <details class="plugin-group"{% if group.field_name != "metadata_plugins" and group.field_name != "postprocessing_plugins" %} open{% endif %}>
+                    <summary class="plugin-group-header">
+                        <span class="plugin-group-caret" aria-hidden="true">▶</span>
                         <label>{{ group.title }}</label>
                         {% if group.note %}
                             <span class="plugin-group-note">{{ group.note }}</span>
                         {% endif %}
                         {% if group.show_selectors and group.select_all_group %}
-                            <button type="button" class="select-all-btn" data-group="{{ group.select_all_group }}">
+                            <button type="button" class="select-all-btn" data-group="{{ group.select_all_group }}" onclick="event.stopPropagation();">
                                 Select All Chrome
                             </button>
                         {% endif %}
-                    </div>
+                    </summary>
                     <div class="plugin-checkboxes"{% if group.dom_id %} id="{{ group.dom_id }}"{% endif %}>
                         {% for plugin in group.plugins %}
                             <div
@@ -440,35 +510,29 @@
                                 data-plugin-name="{{ plugin.name }}"
                                 {% if plugin.enabled_config_key %}data-plugin-enabled-key="{{ plugin.enabled_config_key }}"{% endif %}
                             >
+                                <input type="checkbox" id="plugin-config-toggle-{{ group.field_name }}-{{ plugin.name }}" class="plugin-config-toggle-hack">
                                 <div class="plugin-card-main{% if not group.show_selectors %} plugin-card-main--static{% endif %}">
                                     {% if group.show_selectors %}
                                         <input type="checkbox" name="{{ group.field_name }}" value="{{ plugin.name }}" id="{{ plugin.checkbox_id }}" class="plugin-section-toggle" {% if plugin.checked %}checked{% endif %}>
                                         <label for="{{ plugin.checkbox_id }}" class="plugin-card-label">
                                             {{ plugin.label }}
                                         </label>
-	                                    {% else %}
-	                                        <div class="plugin-card-label plugin-card-label-static">
-	                                            {{ plugin.label }}
-	                                        </div>
-	                                    {% endif %}
-	                                    <a class="plugin-card-badge plugin-source-badge" href="{{ plugin.source_url }}" target="_blank" rel="noopener noreferrer">Source</a>
-	                                    <a class="plugin-card-badge plugin-docs-badge" href="{{ plugin.docs_url }}" target="_blank" rel="noopener noreferrer">Docs</a>
-	                                    <details class="plugin-config-details">
-                                        <summary>
-                                            <span>Config</span>
-                                            <span class="plugin-config-count">{{ plugin.config_count }}</span>
-                                        </summary>
-                                        {% if plugin.required_plugins or plugin.required_binaries_count %}
-                                            <div class="plugin-config-meta">
-                                                {% if plugin.required_plugins %}
-                                                    Requires {{ plugin.required_plugins|join:", " }}
-                                                {% endif %}
-                                                {% if plugin.required_binaries_count %}
-                                                    {% if plugin.required_plugins %} · {% endif %}
-                                                    {{ plugin.required_binaries_count }} binary requirement{{ plugin.required_binaries_count|pluralize }}
-                                                {% endif %}
-                                            </div>
-                                        {% endif %}
+                                    {% else %}
+                                        <div class="plugin-card-label plugin-card-label-static">
+                                            {{ plugin.label }}
+                                        </div>
+                                    {% endif %}
+                                    {% if plugin.description %}
+                                        <label for="plugin-config-toggle-{{ group.field_name }}-{{ plugin.name }}" class="plugin-choice-description">{{ plugin.description }}</label>
+                                    {% endif %}
+                                    <a class="plugin-card-badge plugin-source-badge" href="{{ plugin.source_url }}" target="_blank" rel="noopener noreferrer">Source</a>
+                                    <a class="plugin-card-badge plugin-docs-badge" href="{{ plugin.docs_url }}" target="_blank" rel="noopener noreferrer">Docs</a>
+                                    <label for="plugin-config-toggle-{{ group.field_name }}-{{ plugin.name }}" class="plugin-config-marker">
+                                        <span class="plugin-config-marker-label">Config</span>
+                                        <span class="plugin-config-count">{{ plugin.config_count }}</span>
+                                    </label>
+                                </div>
+                                <div class="plugin-config-details">
                                         {% if plugin.config_fields %}
                                             <div class="plugin-config-grid">
                                                 {% for field in plugin.config_fields %}
@@ -535,16 +599,29 @@
                                                         </div>
                                                     </div>
                                                 {% endfor %}
+                                                {% if plugin.required_binary_links %}
+                                                    <div class="plugin-config-uses">
+                                                        Uses:
+                                                        {% for binary in plugin.required_binary_links %}<a href="{{ binary.url }}" target="_blank" rel="noopener"><code>{{ binary.name }}</code></a>{% if not forloop.last %}, {% endif %}{% endfor %}
+                                                    </div>
+                                                {% endif %}
                                             </div>
                                         {% else %}
-                                            <div class="plugin-config-empty">This plugin has no crawl-configurable options.</div>
+                                            <div class="plugin-config-empty">
+                                                This plugin has no crawl-configurable options.
+                                                {% if plugin.required_binary_links %}
+                                                    <div class="plugin-config-uses">
+                                                        Uses:
+                                                        {% for binary in plugin.required_binary_links %}<a href="{{ binary.url }}" target="_blank" rel="noopener"><code>{{ binary.name }}</code></a>{% if not forloop.last %}, {% endif %}{% endfor %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
                                         {% endif %}
-                                    </details>
                                 </div>
                             </div>
                         {% endfor %}
                     </div>
-                </div>
+                </details>
             {% endif %}
         {% endfor %}
     </div>
@@ -678,5 +755,6 @@
             syncSectionToggleFromEnabledInput(event.target);
         }
     });
+
 })();
 </script>

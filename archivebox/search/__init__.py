@@ -241,9 +241,6 @@ def query_search_index(
     from archivebox.core.models import Snapshot
 
     config = config or get_config(**config_kwargs)
-    if not config.USE_SEARCHING_BACKEND:
-        return Snapshot.objects.none()
-
     search_mode = "contents" if search_mode is None else get_search_mode(search_mode, config=config)
     search_mode_base = get_search_mode_base(search_mode, config=config)
     if search_mode_base == "meta":
@@ -262,9 +259,6 @@ def iter_query_search_ids(
 ):
     """Yield snapshot IDs from configured search backends as soon as each backend produces them."""
     config = config or get_config(**config_kwargs)
-    if not config.USE_SEARCHING_BACKEND:
-        return
-
     search_mode = "contents" if search_mode is None else get_search_mode(search_mode, config=config)
     search_mode_base = get_search_mode_base(search_mode, config=config)
     forced_backend = get_search_mode_backend(search_mode, config=config)
@@ -342,7 +336,7 @@ def flush_search_index(snapshots: QuerySet, config: dict[str, Any] | None = None
     Remove snapshots from the search index.
     """
     config = config or get_config(**config_kwargs)
-    if not config.USE_INDEXING_BACKEND or not snapshots:
+    if not snapshots:
         return
 
     backend = get_backend(config=config)

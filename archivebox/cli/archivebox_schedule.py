@@ -6,7 +6,6 @@ import rich_click as click
 from rich import print
 
 from archivebox.misc.util import enforce_types, docstring
-from archivebox.config.common import get_config
 
 
 @enforce_types
@@ -20,9 +19,8 @@ def schedule(
     every: str | None = None,
     tag: str = "",
     depth: int | str = 0,
-    overwrite: bool = False,
-    update: bool | None = None,
     import_path: str | None = None,
+    config: dict[str, object] | None = None,
 ):
     """Manage database-backed scheduled crawls processed by the crawl runner."""
 
@@ -33,9 +31,7 @@ def schedule(
     from archivebox.crawls.schedule_utils import validate_schedule
     from archivebox.services.runner import run_pending_crawls
 
-    if update is None:
-        update = not get_config().ONLY_NEW
-
+    config_overrides = dict(config or {})
     depth = int(depth)
     result: dict[str, object] = {
         "created_schedule_ids": [],
@@ -79,10 +75,12 @@ def schedule(
             status=Crawl.StatusChoices.SEALED,
             retry_at=None,
             config={
-                "ONLY_NEW": not update,
-                "OVERWRITE": overwrite,
                 "DEPTH": 0 if is_update_schedule else depth,
                 "SCHEDULE_KIND": "update" if is_update_schedule else "crawl",
+                # Caller-supplied overrides (e.g. {"ONLY_NEW": False}) win over the
+                # template defaults. Anything left unset falls through to the
+                # standard config stack at crawl-resolution time.
+                **config_overrides,
             },
         )
         crawl_schedule = CrawlSchedule.objects.create(
@@ -163,8 +161,13 @@ def schedule(
     default="0",
     help="Recursively archive linked pages up to N hops away",
 )
-@click.option("--overwrite", is_flag=True, help="Overwrite existing data if URLs have been archived previously")
-@click.option("--update", is_flag=True, help="Retry previously failed/skipped URLs when scheduled crawls run")
+@click.option(
+    "--only-new/--no-only-new",
+    "only_new",
+    default=None,
+    help="Skip URLs that already have a snapshot (default: inherit from ONLY_NEW config). "
+    "Pass --no-only-new to force re-archive on each scheduled run.",
+)
 @click.option("--clear", is_flag=True, help="Disable all currently enabled schedules")
 @click.option("--show", is_flag=True, help="Print all currently enabled schedules")
 @click.option("--foreground", "-f", is_flag=True, help="Run the global crawl runner in the foreground (no crontab required)")
@@ -173,6 +176,9 @@ def schedule(
 @docstring(schedule.__doc__)
 def main(**kwargs):
     """Manage database-backed scheduled crawls processed by the crawl runner."""
+    only_new = kwargs.pop("only_new", None)
+    if only_new is not None:
+        kwargs["config"] = {"ONLY_NEW": bool(only_new)}
     schedule(**kwargs)
 
 

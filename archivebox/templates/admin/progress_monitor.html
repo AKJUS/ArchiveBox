@@ -187,6 +187,17 @@
     #progress-monitor.collapsed .progress-content {
         display: none;
     }
+    /* Hide admin-only controls when viewer is not staff, or when the monitor is
+       embedded on a non-admin host (snap-* subdomain) where cross-origin POSTs
+       to /api would violate the subdomain isolation model. */
+    #progress-monitor.is-guest .crawl-action-btn,
+    #progress-monitor.is-guest .cancel-item-btn,
+    #progress-monitor.is-guest .pause-item-btn,
+    #progress-monitor[data-progress-scope="snapshot"] .crawl-action-btn,
+    #progress-monitor[data-progress-scope="snapshot"] .cancel-item-btn,
+    #progress-monitor[data-progress-scope="snapshot"] .pause-item-btn {
+        display: none !important;
+    }
 
     /* Chrome Screencast */
     #progress-monitor .screencast-panel {
@@ -1037,7 +1048,9 @@
 
 </style>
 
-<div id="progress-monitor" class="collapsed">
+<div id="progress-monitor" class="collapsed"
+     data-progress-endpoint="{{ progress_endpoint|default:'/progress.json' }}"
+     data-progress-scope="{{ progress_scope|default:'global' }}">
     <div class="header-bar">
         <div class="header-left">
             <div class="orchestrator-status">
@@ -1824,8 +1837,10 @@
         updateDurationBadges();
     }
 
+    const progressEndpoint = monitor.dataset.progressEndpoint || '/progress.json';
+
     function fetchProgress() {
-        fetch('/admin/live-progress/')
+        fetch(progressEndpoint, { credentials: 'same-origin' })
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
@@ -1833,6 +1848,7 @@
                     idleMessage.textContent = 'API Error: ' + data.error;
                     idleMessage.style.color = '#f85149';
                 }
+                monitor.classList.toggle('is-guest', data.is_admin === false);
                 updateProgress(data);
             })
             .catch(error => {

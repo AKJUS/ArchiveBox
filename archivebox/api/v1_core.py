@@ -32,7 +32,7 @@ from archivebox.core.permissions import public_snapshots_queryset
 from archivebox.api.auth import auth_using_token
 from archivebox.config.common import get_config
 from archivebox.core.host_utils import build_web_url
-from archivebox.misc.util import validate_url_length
+from archivebox.misc.util import filter_queryset_by_uuid_substring, validate_url_length
 from archivebox.core.tag_utils import (
     add_snapshot_counts,
     build_tag_cards,
@@ -786,7 +786,8 @@ def _filter_snapshots_for_rss(
     )
     crawl_id = crawl_id.strip()
     if crawl_id:
-        queryset = queryset.filter(crawl__id__icontains=crawl_id)
+        matching_crawl_pks = list(filter_queryset_by_uuid_substring(Crawl.objects.all(), crawl_id).values_list("pk", flat=True)[:100])
+        queryset = queryset.filter(crawl_id__in=matching_crawl_pks)
 
     created_by = created_by.strip()
     if created_by:
@@ -845,7 +846,7 @@ def _snapshots_rss_response(
 
 
 class SnapshotFilterSchema(FilterSchema):
-    id: Annotated[str | None, FilterLookup(["id__icontains", "timestamp__startswith"])] = None
+    id: Annotated[str | None, FilterLookup(["id__istartswith", "id__iendswith", "timestamp__startswith"])] = None
     created_by_id: Annotated[str | None, FilterLookup("crawl__created_by_id")] = None
     created_by_username: Annotated[str | None, FilterLookup("crawl__created_by__username__icontains")] = None
     created_at__gte: Annotated[datetime | None, FilterLookup("created_at__gte")] = None
@@ -856,7 +857,9 @@ class SnapshotFilterSchema(FilterSchema):
     modified_at__lt: Annotated[datetime | None, FilterLookup("modified_at__lt")] = None
     search: Annotated[
         str | None,
-        FilterLookup(["url__icontains", "title__icontains", "tags__name__icontains", "id__icontains", "timestamp__startswith"]),
+        FilterLookup(
+            ["url__icontains", "title__icontains", "tags__name__icontains", "id__istartswith", "id__iendswith", "timestamp__startswith"],
+        ),
     ] = None
     url: Annotated[str | None, FilterLookup("url")] = None
     tag: Annotated[str | None, FilterLookup("tags__name")] = None
@@ -919,7 +922,7 @@ def create_snapshot(request: HttpRequest, data: SnapshotCreateSchema):
         raise HttpError(400, "depth must be between 0 and 4")
 
     if data.crawl_id:
-        crawl = Crawl.objects.get(id__icontains=data.crawl_id)
+        crawl = filter_queryset_by_uuid_substring(Crawl.objects.all(), data.crawl_id).get()
         crawl_tags = normalize_tag_list(crawl.tags_str.split(","))
         tags = tags or crawl_tags
     else:
@@ -976,7 +979,7 @@ def patch_snapshot(request: HttpRequest, snapshot_id: str, data: SnapshotUpdateS
     try:
         snapshot = Snapshot.objects.get(Q(id__startswith=snapshot_id) | Q(timestamp__startswith=snapshot_id))
     except Snapshot.DoesNotExist:
-        snapshot = Snapshot.objects.get(Q(id__icontains=snapshot_id))
+        snapshot = filter_queryset_by_uuid_substring(Snapshot.objects.all(), snapshot_id).get()
 
     payload = data.dict(exclude_unset=True)
     update_fields = ["modified_at"]
@@ -1252,6 +1255,7 @@ def search_tags(
         "tags": build_tag_cards(
             query=q,
             request=request,
+            preview_limit=0,
             sort=normalized_sort,
             created_by=normalized_created_by,
             year=normalized_year,

@@ -16,6 +16,14 @@ if "--debug" in sys.argv:
     os.environ["DEBUG"] = "True"
     sys.argv.remove("--debug")
 
+# Universal `--init` flag: when passed to ANY subcommand (e.g. `archivebox server --init`,
+# `archivebox add --init`, `archivebox shell --init`), run a `quick` archivebox init before
+# the subcommand executes. Strip it from argv here so each subcommand's own click parser
+# never sees it. Ignored for `help` and `init` themselves.
+if "--init" in sys.argv:
+    sys.argv = [arg for arg in sys.argv if arg != "--init"]
+    os.environ["ARCHIVEBOX_WANTS_INIT"] = "1"
+
 
 class ArchiveBoxGroup(click.Group):
     """lazy loading click group for archivebox commands"""
@@ -172,6 +180,16 @@ def cli(ctx, help=False):
             from archivebox.misc.checks import check_data_folder, check_migrations
 
             setup_django()
+            if os.environ.get("ARCHIVEBOX_WANTS_INIT") == "1" and subcommand not in ("init", "help"):
+                # Universal `--init` was passed: build/upgrade the data folder before
+                # the regular preflight runs, so it succeeds on a fresh dir and an
+                # out-of-date schema both. Drop the env var afterwards so spawned
+                # subprocesses (supervisord workers, daphne, runner, etc.) inherit
+                # a clean env and don't re-trigger init in every child.
+                from archivebox.cli.archivebox_init import init as archivebox_init
+
+                archivebox_init(quick=True)
+                os.environ.pop("ARCHIVEBOX_WANTS_INIT", None)
             check_data_folder()
             if subcommand != "update":
                 check_migrations(auto_apply=True)

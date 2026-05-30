@@ -350,7 +350,6 @@ class TestRunDaemonMode:
                 "DATA_DIR": str(initialized_archive),
                 "USE_COLOR": "False",
                 "SHOW_PROGRESS": "False",
-                "USE_INDEXING_BACKEND": "False",
             },
         )
         proc = subprocess.Popen(
@@ -417,7 +416,6 @@ class TestRunDaemonMode:
                 "DATA_DIR": str(initialized_archive),
                 "USE_COLOR": "False",
                 "SHOW_PROGRESS": "False",
-                "USE_INDEXING_BACKEND": "False",
             },
         )
         procs = [

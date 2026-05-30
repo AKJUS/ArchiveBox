@@ -875,13 +875,20 @@ def run_runner_worker(args: list[str], *, name: str = "worker_runner_once", inte
             except KeyboardInterrupt:
                 if not interactive_interrupts or forwarded_interrupt:
                     raise
-                forwarded_interrupt = True
+                # Route the signal through supervisord by worker name rather than
+                # raw os.kill on a cached PID. The cached proc["pid"] can be
+                # stale: if the worker exited between supervisord's last status
+                # poll and the user's Ctrl+C, the OS may have already reused
+                # that pid for an unrelated process (e.g. another shell the
+                # user has open) and raw os.kill would target it instead of the
+                # crawl hook. signalProcess goes through supervisord, which
+                # only signals workers it still owns.
                 proc = get_worker(supervisor, name)
-                pid = int(proc.get("pid") or 0) if proc else 0
-                if pid <= 0:
+                if proc is None or proc.get("statename") != "RUNNING":
                     raise
+                supervisor.signalProcess(name, "SIGINT")
+                forwarded_interrupt = True
                 print("[yellow][*] Forwarding Ctrl+C to the active crawl hook...[/yellow]")
-                os.kill(pid, signal.SIGINT)
     finally:
         log_handle.close()
 

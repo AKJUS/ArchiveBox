@@ -160,8 +160,6 @@ def test_update_index_only_runs_paused_search_rows_and_resume_later_runs_crawl(t
         port,
         PLUGINS="search_backend_sqlite",
         SEARCH_BACKEND_ENGINE="sqlite",
-        USE_INDEXING_BACKEND="True",
-        USE_SEARCHING_BACKEND="True",
     )
     update_process = subprocess.run(
         [

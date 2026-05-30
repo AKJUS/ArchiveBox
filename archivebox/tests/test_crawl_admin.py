@@ -71,7 +71,7 @@ def test_crawl_schedule_admin_add_redirects_to_add_page_schedule_field(client, a
     response = client.get(reverse("admin:crawls_crawlschedule_add"), HTTP_HOST=ADMIN_HOST)
 
     assert response.status_code == 302
-    assert response["Location"] == "/add/?focus=schedule"
+    assert response["Location"] == "/add/#schedule"
 
 
 def test_crawl_admin_form_saves_tags_editor_to_tags_str(crawl, admin_user):

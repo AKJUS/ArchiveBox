@@ -245,7 +245,7 @@
             }
             .header-tags .permission-pill {
                 border-style: dashed;
-                text-transform: lowercase;
+                text-transform: uppercase;
             }
             .header-badges {
                 display: flex;
@@ -311,7 +311,7 @@
             .header-toggle {
                 line-height: 12px;
                 font-size: 70px;
-                vertical-align: -12px;
+                margin-top: -13px;
                 margin-left: 4px;
             }
             @media(max-width: 900px) {
@@ -448,15 +448,85 @@
                 overflow: hidden;
                 order: 2;
                 flex: 0 0 auto;
+                display: flex;
+                flex-direction: column;
             }
             #main-frame-wrapper iframe {
                 width: 100%;
                 height: 100%;
                 border: none;
             }
+            #snapshot-progress-wrapper {
+                flex: 0 0 auto;
+                width: 100%;
+            }
+            #main-frame-wrapper > #main-frame,
+            #main-frame-wrapper > #snapshot-empty-state {
+                flex: 1 1 auto;
+                min-height: 0;
+            }
             .full-page-wrapper {
                 width: 100%;
                 height: calc(100vh - 210px);
+            }
+            .snapshot-empty-state {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 100%;
+                height: 100%;
+                background: #f6f8fa;
+                color: #475569;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            }
+            .snapshot-empty-state-inner {
+                max-width: 520px;
+                padding: 32px 36px;
+                text-align: center;
+            }
+            .snapshot-empty-icon {
+                font-size: 56px;
+                line-height: 1;
+                margin-bottom: 12px;
+            }
+            .snapshot-empty-state h2 {
+                margin: 0 0 12px;
+                color: #1f2937;
+                font-size: 22px;
+                font-weight: 600;
+            }
+            .snapshot-empty-state p {
+                margin: 4px 0;
+                color: #64748b;
+                font-size: 14px;
+                line-height: 1.5;
+            }
+            .snapshot-empty-actions {
+                display: flex;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-top: 22px;
+            }
+            .snapshot-empty-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 8px 16px;
+                background: #ffffff;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                color: #1f2937;
+                font-size: 13px;
+                font-weight: 500;
+                text-decoration: none;
+                transition: background-color 0.15s, border-color 0.15s;
+            }
+            .snapshot-empty-btn:hover {
+                background: #eef4fa;
+                border-color: #b7d3ea;
+                color: #004882;
+                text-decoration: none;
             }
             .thumbnail-wrapper {
                 height: 100px;
@@ -975,7 +1045,13 @@
         </style>
     </head>
     <body>
-        <div id="main-frame-wrapper" class="full-page-wrapper">
+        <div id="main-frame-wrapper" class="full-page-wrapper" data-has-outputs="{{ has_outputs|yesno:'1,0' }}" data-snapshot-state="{{ snapshot_state }}">
+            {% if snapshot_state == 'queued' or snapshot_state == 'started' or snapshot_state == 'paused' %}
+            <div id="snapshot-progress-wrapper">
+                {% include "admin/progress_monitor.html" with progress_endpoint=progress_endpoint progress_scope="snapshot" %}
+            </div>
+            {% endif %}
+            {% if has_outputs %}
             <iframe id="main-frame"
                     sandbox="allow-same-origin allow-top-navigation-by-user-activation allow-scripts allow-forms"
                     class="full-page-iframe"
@@ -984,7 +1060,47 @@
                     name="preview"
                     loading="eager"
                     fetchpriority="high"></iframe>
+            {% else %}
+            <div id="snapshot-empty-state" class="snapshot-empty-state" data-snapshot-state="{{ snapshot_state }}">
+                <div class="snapshot-empty-state-inner">
+                    {% if snapshot_state == 'paused' %}
+                        <div class="snapshot-empty-icon">⏸️</div>
+                        <h2>Crawl paused</h2>
+                        <p>This snapshot's crawl is paused — no extractors have run yet.</p>
+                        <p>Resume the crawl to start archiving content.</p>
+                    {% elif snapshot_state == 'started' %}
+                        <div class="snapshot-empty-icon">⏳</div>
+                        <h2>Archiving in progress…</h2>
+                        <p>Extractors are running. Results will appear automatically.</p>
+                    {% elif snapshot_state == 'queued' %}
+                        <div class="snapshot-empty-icon">🕓</div>
+                        <h2>Queued for archiving</h2>
+                        <p>This snapshot is waiting in the queue. Results will appear automatically once a worker picks it up.</p>
+                    {% else %}
+                        <div class="snapshot-empty-icon">📭</div>
+                        <h2>No archive outputs yet</h2>
+                        <p>This snapshot has no archived content to display.</p>
+                    {% endif %}
+                    <div class="snapshot-empty-actions">
+                        <button type="button" id="snapshot-empty-refresh" class="snapshot-empty-btn">🔄 Refresh page</button>
+                        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="snapshot-empty-btn">🌐 Open original URL</a>
+                        <a href="{% admin_base_url %}/admin/core/snapshot/{{ snapshot_id }}/change/" class="snapshot-empty-btn">✏️ Edit in admin</a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
+        <script>
+            (() => {
+                const refreshBtn = document.getElementById('snapshot-empty-refresh');
+                if (refreshBtn) refreshBtn.addEventListener('click', () => location.reload());
+                const monitor = document.getElementById('progress-monitor');
+                if (!monitor) return;
+                const wrapper = document.getElementById('main-frame-wrapper');
+                const hasOutputs = wrapper && wrapper.dataset.hasOutputs === '1';
+                if (!hasOutputs) monitor.classList.remove('collapsed');
+            })();
+        </script>
         <script>
             (() => {
                 const frame = document.getElementById('main-frame')
@@ -1038,14 +1154,14 @@
                             <span class="header-title-text">{{title|truncatechars:120|safe}}</span>
                             {% if title_tags %}
                                 <span class="header-tags">
-                                    <span class="tag-pill permission-pill">{{ snapshot_permissions_icon }} [{{ snapshot_permissions }}]</span>
+                                    <span class="tag-pill permission-pill">{{ snapshot_permissions_icon }} {{ snapshot_permissions }}</span>
                                     {% for tag in title_tags %}
                                         <span class="tag-pill" style="{{ tag.style }}">{{ tag.name }}</span>
                                     {% endfor %}
                                 </span>
                             {% else %}
                                 <span class="header-tags">
-                                    <span class="tag-pill permission-pill">{{ snapshot_permissions_icon }} [{{ snapshot_permissions }}]</span>
+                                    <span class="tag-pill permission-pill">{{ snapshot_permissions_icon }} {{ snapshot_permissions }}</span>
                                 </span>
                             {% endif %}
                             <a href="#" class="header-toggle header-toggle-trigger">▾</a>
@@ -1407,6 +1523,9 @@
             function ensureMainFrame(forceReplace=false) {
                 let frame = document.getElementById('main-frame')
                 const wrapper = document.getElementById('main-frame-wrapper')
+                if (wrapper && wrapper.querySelector('#snapshot-empty-state')) {
+                    return null
+                }
                 if (!frame || forceReplace) {
                     const previousFrame = frame
                     frame = createMainFrame(previousFrame)

@@ -20,6 +20,27 @@ from base32_crockford import encode as base32_encode
 from .logging import COLOR_DICT
 
 
+def filter_queryset_by_uuid_substring(queryset, slug: str, field: str = "id"):
+    """Filter a queryset to UUID-column matches by prefix or suffix (case-insensitive).
+
+    Avoids ``id__icontains`` (an unindexed full-table scan over the UUID column) by
+    stripping non-hex chars from ``slug`` and matching with ``istartswith`` /
+    ``iendswith``. Returns an empty queryset for inputs with fewer than 8 hex chars
+    to avoid overly broad matches. A full 32-char hex string falls back to an
+    exact-equality lookup.
+    """
+    from django.db.models import Q
+
+    normalized = re.sub(r"[^0-9a-fA-F]", "", slug or "").lower()
+    if len(normalized) < 8:
+        return queryset.none()
+    if len(normalized) == 32:
+        return queryset.filter(**{field: normalized})
+    prefix = f"{field}__istartswith"
+    suffix = f"{field}__iendswith"
+    return queryset.filter(Q(**{prefix: normalized}) | Q(**{suffix: normalized}))
+
+
 def detect_encoding(rawdata):
     try:
         import chardet  # type:ignore

@@ -13,6 +13,7 @@ from archivebox.hooks import (
     get_plugin_name,
 )
 from archivebox.core.host_utils import (
+    canonical_base_host_for_request,
     get_admin_base_url,
     get_public_base_url,
     get_web_base_url,
@@ -26,6 +27,7 @@ register = template.Library()
 _TEXT_PREVIEW_EXTS = (".json", ".jsonl", ".txt", ".csv", ".tsv", ".xml", ".yml", ".yaml", ".md", ".log")
 _IMAGE_PREVIEW_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".avif")
 _MHTML_PREVIEW_EXTS = (".mhtml", ".mht")
+_WACZ_PREVIEW_EXTS = (".wacz", ".warc", ".warc.gz")
 
 _MEDIA_FILE_EXTS = {
     ".mp4",
@@ -204,7 +206,12 @@ def _build_snapshot_preview_url(snapshot_id: str, path: str = "", request=None, 
     if _is_root_snapshot_output_path(path):
         return _build_snapshot_files_url(snapshot_id, request=request, config=config)
     url = build_snapshot_url(str(snapshot_id), path, request=request, config=config)
-    if not (_is_text_preview_path(path) or _is_image_preview_path(path) or (path or "").lower().endswith(_MHTML_PREVIEW_EXTS)):
+    if not (
+        _is_text_preview_path(path)
+        or _is_image_preview_path(path)
+        or (path or "").lower().endswith(_MHTML_PREVIEW_EXTS)
+        or (path or "").lower().endswith(_WACZ_PREVIEW_EXTS)
+    ):
         return url
     separator = "&" if "?" in url else "?"
     return f"{url}{separator}preview=1"
@@ -317,11 +324,92 @@ def result_list_tag(parser, token):
     )
 
 
+@register.inclusion_tag("security_mode_banner.html", takes_context=True)
+def security_mode_banner(context):
+    """Render the top-of-page warning banner for one of two conditions:
+
+    1. ``mode="unconfigured"`` — ``BASE_URL`` is empty. The server is running
+       on whatever host the operator happens to be hitting; CSRF auto-derive
+       and the request-host fallback in ``get_base_url`` keep things working,
+       but the operator should pin ``BASE_URL`` explicitly so links stay
+       stable across hosts (and the misconfig banner goes away).
+    2. ``mode="unsafe"`` — ``SERVER_SECURITY_MODE`` is a non-subdomain mode.
+       Archived pages share an origin with privileged routes.
+
+    Both conditions can hold; we show the ``unconfigured`` banner first
+    because pinning ``BASE_URL`` is the more immediately actionable fix.
+    """
+    config = context.get("CONFIG")
+    if config is None:
+        from archivebox.config.common import get_config
+
+        config = get_config(resolve_plugins=False)
+
+    if not config.BASE_URL:
+        return _unconfigured_banner_context(context.get("request"))
+    if not config.USES_SUBDOMAIN_ROUTING:
+        return {"mode": "unsafe"}
+    return {"mode": ""}
+
+
+def _unconfigured_banner_context(request) -> dict:
+    """Build the banner payload for the unset-BASE_URL case.
+
+    Always returns ``mode="unconfigured"`` — the user explicitly asked for
+    the banner to render whenever ``BASE_URL`` is empty, regardless of
+    whether the request host happens to match a CSRF-derived value. The
+    ``suggested_base_url`` is derived from the current request when one is
+    available so the user can copy/paste the right value straight into
+    their config.
+    """
+    if request is None:
+        return {
+            "mode": "unconfigured",
+            "actual_host": "",
+            "suggested_base_url": "",
+            "machine_admin_url": "",
+        }
+    scheme = request.scheme or "http"
+    actual_full_host = request.get_host() or ""
+    canonical_host = canonical_base_host_for_request(actual_full_host)
+    # Suggest the wildcard form ``http://*.<host>`` so the value lands in the
+    # operator's clipboard already aligned with subdomain routing. The config
+    # parser strips the leading ``*.`` so users can paste it verbatim.
+    suggested_base_url = f"{scheme}://*.{canonical_host}" if canonical_host else ""
+    user = getattr(request, "user", None)
+    is_superuser = bool(user and user.is_authenticated and user.is_superuser)
+    machine_admin_url = ""
+    if is_superuser:
+        try:
+            from archivebox.machine.models import Machine
+
+            machine = Machine.current()
+            machine_admin_url = f"/admin/machine/machine/{machine.id}/change/"
+        except Exception:
+            machine_admin_url = ""
+    return {
+        "mode": "unconfigured",
+        "actual_host": actual_full_host,
+        "suggested_base_url": suggested_base_url,
+        "machine_admin_url": machine_admin_url,
+    }
+
+
 @register.simple_tag(takes_context=True)
 def url_replace(context, **kwargs):
     dict_ = context["request"].GET.copy()
     dict_.update(**kwargs)
     return dict_.urlencode()
+
+
+@register.simple_tag
+def has_real_admin_users() -> bool:
+    """True if any non-``system`` superuser exists. Used by the login page to
+    only show the bootstrap hint (createsuperuser / ADMIN_USERNAME env vars)
+    when the collection still has no real admin."""
+    from django.contrib.auth.models import User
+
+    return User.objects.filter(is_superuser=True).exclude(username="system").exists()
 
 
 @register.simple_tag(takes_context=True)

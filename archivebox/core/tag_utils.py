@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from django.contrib.auth.models import User
-from django.db.models import Count, F, QuerySet
+from django.db.models import Count, Exists, F, OuterRef, QuerySet
 from django.db.models.functions import Lower
 from django.http import HttpRequest
 from django.urls import reverse
@@ -65,7 +65,7 @@ def get_matching_tags(
 ) -> QuerySet[Tag]:
     sort = normalize_tag_sort(sort)
     has_snapshots = normalize_has_snapshots_filter(has_snapshots)
-    needs_snapshot_counts = with_snapshot_counts or sort.startswith("snapshots_") or has_snapshots != "all"
+    needs_snapshot_counts = sort.startswith("snapshots_")
 
     queryset = Tag.objects.select_related("created_by")
     if needs_snapshot_counts:
@@ -83,10 +83,13 @@ def get_matching_tags(
     if year:
         queryset = queryset.filter(created_at__year=int(year))
 
+    if has_snapshots != "all" and not needs_snapshot_counts:
+        queryset = queryset.annotate(has_snapshot=Exists(SnapshotTag.objects.filter(tag_id=OuterRef("pk"))))
+
     if has_snapshots == "yes":
-        queryset = queryset.filter(num_snapshots__gt=0)
+        queryset = queryset.filter(num_snapshots__gt=0) if needs_snapshot_counts else queryset.filter(has_snapshot=True)
     elif has_snapshots == "no":
-        queryset = queryset.filter(num_snapshots=0)
+        queryset = queryset.filter(num_snapshots=0) if needs_snapshot_counts else queryset.filter(has_snapshot=False)
 
     if sort == "name_asc":
         queryset = queryset.order_by(Lower("name"), "id")
@@ -252,12 +255,12 @@ def build_tag_card(tag: Tag, snapshot_previews: list[dict[str, Any]] | None = No
         "name": tag.name,
         "slug": tag.slug,
         "num_snapshots": count,
-        "filter_url": f"{reverse('admin:core_snapshot_changelist')}?tags__id__exact={tag.pk}",
-        "edit_url": reverse("admin:core_tag_change", args=[tag.pk]),
-        "export_urls_url": reverse("api-1:tag_urls_export", args=[tag.pk]),
-        "export_jsonl_url": reverse("api-1:tag_snapshots_export", args=[tag.pk]),
-        "rename_url": reverse("api-1:rename_tag", args=[tag.pk]),
-        "delete_url": reverse("api-1:delete_tag", args=[tag.pk]),
+        "filter_url": f"/admin/core/snapshot/?tags__id__exact={tag.pk}",
+        "edit_url": f"/admin/core/tag/{tag.pk}/change/",
+        "export_urls_url": f"/api/v1/core/tag/{tag.pk}/urls.txt",
+        "export_jsonl_url": f"/api/v1/core/tag/{tag.pk}/snapshots.jsonl",
+        "rename_url": f"/api/v1/core/tag/{tag.pk}/rename",
+        "delete_url": f"/api/v1/core/tag/{tag.pk}/",
         "snapshots": snapshot_previews or [],
     }
 
@@ -274,7 +277,7 @@ def build_tag_cards(
 ) -> list[dict[str, Any]]:
     sort = normalize_tag_sort(sort)
     has_snapshots = normalize_has_snapshots_filter(has_snapshots)
-    needs_snapshot_count_annotation = sort.startswith("snapshots_") or has_snapshots != "all"
+    needs_snapshot_count_annotation = sort.startswith("snapshots_")
     queryset = get_matching_tags(
         query=query,
         sort=sort,

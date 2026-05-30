@@ -44,6 +44,7 @@ PLUGIN_GROUP_DEFINITIONS = (
             "wget",
             "archivedotorg",
             "chrome_mhtml",
+            "archivewebpage",
         ),
     ),
     (
@@ -166,11 +167,9 @@ def get_plugin_choice_label(plugin_name: str, plugin_configs: dict[str, dict]) -
     icon_html = get_plugin_icon(plugin_name)
 
     return format_html(
-        '<span class="plugin-choice-icon">{}</span><span class="plugin-choice-name">{}</span><a class="plugin-choice-description" href="https://archivebox.github.io/abx-plugins/#{}" target="_blank" rel="noopener noreferrer">{}</a>',
+        '<span class="plugin-choice-icon">{}</span><span class="plugin-choice-name">{}</span>',
         icon_html,
         plugin_name,
-        plugin_name,
-        description,
     )
 
 
@@ -288,6 +287,7 @@ class PluginConfigFormMixin:
             *PLUGIN_GROUP_DEFINITIONS,
             ("other_plugins", "Other", "", "", "", other_plugins),
         )
+        binary_url_lookup = _build_required_binary_url_lookup(plugin_configs, runtime_config)
         self.plugin_groups = [
             {
                 "field_name": field_name,
@@ -296,7 +296,7 @@ class PluginConfigFormMixin:
                 "dom_id": dom_id,
                 "select_all_group": select_all_group,
                 "show_selectors": field_name in self.fields,
-                "plugins": self._build_plugin_cards(field_name, plugin_names, plugin_configs, runtime_config),
+                "plugins": self._build_plugin_cards(field_name, plugin_names, plugin_configs, runtime_config, binary_url_lookup),
             }
             for field_name, title, note, dom_id, select_all_group, plugin_names in group_specs
             if any(plugin in all_plugins for plugin in plugin_names)
@@ -308,6 +308,7 @@ class PluginConfigFormMixin:
         plugin_names: Iterable[str],
         plugin_configs: dict[str, dict[str, Any]],
         runtime_config: Mapping[str, Any],
+        binary_url_lookup: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         if field_name in self.fields:
             choices = list(get_choice_field(self, field_name).choices)
@@ -341,7 +342,11 @@ class PluginConfigFormMixin:
                     "source_url": f"https://github.com/ArchiveBox/abx-plugins/tree/main/abx_plugins/plugins/{plugin_name}",
                     "docs_url": f"https://archivebox.github.io/abx-plugins/#{plugin_name}",
                     "required_plugins": [str(item) for item in schema.get("required_plugins") or []],
-                    "required_binaries_count": len(schema.get("required_binaries") or []),
+                    "required_binary_links": _build_required_binary_links(
+                        schema.get("required_binaries") or [],
+                        runtime_config,
+                        binary_url_lookup,
+                    ),
                     "config_fields": config_fields,
                     "config_count": len(config_fields),
                 },
@@ -474,6 +479,96 @@ class PluginConfigFormMixin:
             for config_key, prop_schema in (schema.get("properties") or {}).items()
             if isinstance(prop_schema, dict)
         }
+
+
+_BINARY_TEMPLATE_PATTERN = re.compile(r"\{([A-Z_][A-Z0-9_]*)\}")
+
+
+def _resolve_required_binary_name(template_name: str, runtime_config: Mapping[str, Any]) -> str:
+    if "{" not in template_name:
+        return template_name
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        try:
+            value = runtime_config.get(key)
+        except Exception:
+            value = None
+        if value is None or value == "":
+            return match.group(0)
+        return str(value)
+
+    resolved = _BINARY_TEMPLATE_PATTERN.sub(_replace, template_name).strip()
+    if not resolved:
+        return template_name
+    return Path(resolved).name if "/" in resolved else resolved
+
+
+def _iter_required_binary_names(
+    required_binaries: Iterable[Any],
+    runtime_config: Mapping[str, Any],
+) -> Iterable[str]:
+    for item in required_binaries or []:
+        if not isinstance(item, dict):
+            continue
+        raw_name = str(item.get("name") or "").strip()
+        if not raw_name:
+            continue
+        resolved = _resolve_required_binary_name(raw_name, runtime_config)
+        if resolved:
+            yield resolved
+
+
+def _build_required_binary_url_lookup(
+    plugin_configs: Mapping[str, dict[str, Any]],
+    runtime_config: Mapping[str, Any],
+) -> dict[str, str]:
+    """Resolve admin URLs for every required binary across all plugin schemas in a single DB query."""
+    from archivebox.config.views import get_environment_binary_url, get_installed_binary_change_url
+    from archivebox.machine.models import Binary, Machine
+
+    resolved_names: set[str] = set()
+    for schema in plugin_configs.values():
+        for name in _iter_required_binary_names(schema.get("required_binaries") or [], runtime_config):
+            resolved_names.add(name)
+
+    if not resolved_names:
+        return {}
+
+    machine = Machine.current()
+    name_to_binary: dict[str, Binary] = {}
+    for binary in (
+        Binary.objects.filter(machine=machine, name__in=resolved_names)
+        .exclude(abspath="")
+        .exclude(abspath__isnull=True)
+        .order_by("-modified_at")
+    ):
+        key = binary.name.lower()
+        if key not in name_to_binary:
+            name_to_binary[key] = binary
+
+    return {
+        name: (get_installed_binary_change_url(name, name_to_binary.get(name.lower())) or get_environment_binary_url(name))
+        for name in resolved_names
+    }
+
+
+def _build_required_binary_links(
+    required_binaries: list[dict[str, Any]],
+    runtime_config: Mapping[str, Any],
+    binary_url_lookup: Mapping[str, str] | None = None,
+) -> list[dict[str, str]]:
+    from archivebox.config.views import get_environment_binary_url
+
+    links: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for resolved in _iter_required_binary_names(required_binaries, runtime_config):
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        url = (binary_url_lookup or {}).get(resolved) or get_environment_binary_url(resolved)
+        links.append({"name": resolved, "url": url})
+    return links
 
 
 def get_plugin_config_binary_urls(runtime_config: Mapping[str, Any]) -> dict[str, str]:

@@ -19,6 +19,91 @@ from archivebox.config import DATA_DIR
 from archivebox.misc.util import enforce_types
 
 
+def run_db_analyze_batch(
+    remaining: list[str] | None,
+    *,
+    max_seconds_per_table: float = 120.0,
+) -> list[str]:
+    """Advance one step of a batched SQLite ``ANALYZE`` sweep.
+
+    Without periodic ANALYZE the optimizer's table stats go stale as
+    snapshot/archiveresult tables grow, causing it to start large joins from
+    ``auth_user`` instead of using the indexed url column and blowing snapshot
+    detail page render time from ~50ms to ~500ms+.
+
+    The whole sweep is spread across many calls instead of running as one
+    blocking ``ANALYZE``: pass ``None`` to start a fresh sweep (this call
+    enumerates user tables and runs ``ANALYZE`` on the first one); pass the
+    returned list to advance one more table on each subsequent call. An
+    empty return value means the sweep is complete (or has been aborted) and
+    the next caller should pass ``None`` again. Caller is responsible for
+    throttling new sweeps (orchestrator starts at most one per 24hr while
+    idle) and enforcing a hard upper bound on total sweep wall time.
+
+    Safety guarantees:
+
+    - **Never raises**: every database call is wrapped; on any failure the
+      function returns ``[]`` (abandoning the rest of the sweep) so the
+      orchestrator never crashes on maintenance errors.
+    - **Bounded per-call wall time**: a SQLite progress handler aborts the
+      current ``ANALYZE`` statement once ``max_seconds_per_table`` is
+      exceeded, so a single pathological table cannot wedge the call.
+    - **Never leaves the db locked**: each ``ANALYZE`` runs as a single
+      statement transaction that auto-commits (or rolls back on
+      abort/error). The cursor and progress handler are always cleaned up
+      in ``finally`` blocks even if Python raises mid-call.
+    - Silent no-op on non-SQLite backends.
+
+    WAL journal mode (set in Django settings) keeps readers fully unblocked
+    throughout; the writer lock is only held for the brief ``sqlite_stat*``
+    flush after each table completes.
+    """
+    from django.db import connection
+
+    if connection.vendor != "sqlite":
+        return []
+
+    if remaining is None:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                remaining = [row[0] for row in cursor.fetchall()]
+        except Exception:
+            return []
+
+    if not remaining:
+        return []
+
+    next_table, *rest = remaining
+    raw_conn = getattr(connection, "connection", None)
+    progress_handler_set = False
+    if raw_conn is not None and max_seconds_per_table > 0:
+        deadline = time.monotonic() + max_seconds_per_table
+        try:
+            raw_conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 10000)
+            progress_handler_set = True
+        except Exception:
+            progress_handler_set = False
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f'ANALYZE "{next_table}"')
+    except Exception:
+        # Aborted by progress handler, locked db, or any other failure — skip
+        # this table and continue the sweep. ANALYZE is idempotent so we can
+        # retry on the next 24hr sweep.
+        pass
+    finally:
+        if progress_handler_set and raw_conn is not None:
+            try:
+                raw_conn.set_progress_handler(None, 0)
+            except Exception:
+                pass
+    return rest
+
+
 def compact_command(cmdline: list[str] | None, fallback: str = "") -> str:
     parts = [str(part) for part in (cmdline or []) if str(part)]
     if not parts:

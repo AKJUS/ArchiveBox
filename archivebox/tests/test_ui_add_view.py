@@ -175,7 +175,6 @@ def test_add_view_creates_crawl_with_tag_and_url_filter_overrides(client, admin_
     assert crawl.config["CRAWL_MAX_CONCURRENT_SNAPSHOTS"] == 5
     assert crawl.config["URL_ALLOWLIST"] == "example.com\n*.example.com"
     assert crawl.config["URL_DENYLIST"] == "cdn.example.com"
-    assert "OVERWRITE" not in crawl.config
     assert "ONLY_NEW" not in crawl.config
 
 

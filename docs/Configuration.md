@@ -48,21 +48,11 @@ By default, ArchiveBox will only archive new links on each import. If you want i
 *Note: Regardless of how this is set, ArchiveBox will never re-download sites that have already succeeded previously. When this is `False` it only attempts to fix previous pages have *missing* archive extractor outputs, it does not re-archive pages that have already been successfully archived.*
 
 ---
-#### `OVERWRITE`
-**Possible Values:** [`False`]/`True`
-When set to `True`, ArchiveBox will re-archive URLs even if they have already been successfully archived before, overwriting any existing output.
-
----
 #### `TIMEOUT`
 **Possible Values:** [`60`]/`120`/...
 Maximum allowed download time per archive method for each link in seconds.  If you have a slow network connection or are seeing frequent timeout errors, you can raise this value.
 
 *Note: Do not set this to anything less than `5` seconds as it will cause Chrome to hang indefinitely and many sites to fail completely.*
-
----
-#### `MAX_URL_ATTEMPTS`
-**Possible Values:** [`50`]/`100`/...
-Maximum number of times ArchiveBox will attempt to archive a URL before giving up. Useful for handling transient failures.
 
 ---
 #### `RESOLUTION`
@@ -111,23 +101,13 @@ The persona profile to use by default when archiving. Personas allow you to have
 A regex expression used to exclude certain URLs from archiving.
 
 *Related options:*
-[`URL_ALLOWLIST`](#url_allowlist), [`SAVE_ALLOWLIST`](#save_allowlist), [`SAVE_DENYLIST`](#save_denylist)
+[`URL_ALLOWLIST`](#url_allowlist)
 
 ---
 #### `URL_ALLOWLIST`
 **Possible Values:** [`None`]/`^http(s)?:\/\/(.+)?example\.com\/?.*$`/...
 
 A regex expression used to exclude all URLs that don't match the given pattern from archiving. Useful for recursive crawling within a single domain.
-
----
-#### `SAVE_ALLOWLIST`
-**Possible Values:** [`{}`]/`{".*example\\.com.*": ["screenshot", "pdf"]}`/...
-A JSON dictionary mapping URL regex patterns to lists of archive methods. Only the specified methods will be used for URLs matching each pattern.
-
----
-#### `SAVE_DENYLIST`
-**Possible Values:** [`{}`]/`{".*\\.pdf$": ["screenshot", "dom"]}`/...
-A JSON dictionary mapping URL regex patterns to lists of archive methods to *skip*.
 
 ---
 #### `TAG_SEPARATOR_PATTERN`
@@ -184,11 +164,6 @@ Comma-separated list of allowed HTTP Host header values. Set this to your domain
 #### `SNAPSHOTS_PER_PAGE`
 **Possible Values:** [`40`]/`100`/...
 Maximum number of Snapshots to show per page on Snapshot list pages.
-
----
-#### `PREVIEW_ORIGINALS`
-**Possible Values:** [`True`]/`False`
-Whether to show inline previews of the original URL on snapshot detail pages.
 
 ---
 #### `FOOTER_INFO`
@@ -327,11 +302,6 @@ User and Group ID that the data directory should be owned by.
 - https://github.com/ArchiveBox/ArchiveBox/wiki/Troubleshooting#docker-permissions-issues
 
 ---
-#### `RESTRICT_FILE_NAMES`
-**Possible Values:** [`windows`]/`unix`/`ascii`/...
-Restrict output filenames to be compatible with the given filesystem type.
-
----
 #### `ENFORCE_ATOMIC_WRITES`
 **Possible Values:** [`True`]/`False`
 Whether to use atomic writes when saving files.
@@ -358,24 +328,9 @@ Path where installed binaries are symlinked for convenient manual access.
 *Options for full-text search backend configuration.*
 
 ---
-#### `USE_INDEXING_BACKEND`
-**Possible Values:** [`True`]/`False`
-Enable the search indexing backend.
-
----
-#### `USE_SEARCHING_BACKEND`
-**Possible Values:** [`True`]/`False`
-Enable the search querying backend.
-
----
 #### `SEARCH_BACKEND_ENGINE`
 **Possible Values:** [`ripgrep`]/`sqlite`/`sonic`
 Which search backend engine to use. `ripgrep` (default) requires no setup. `sqlite` uses FTS5. `sonic` requires a running Sonic instance.
-
----
-#### `SEARCH_PROCESS_HTML`
-**Possible Values:** [`True`]/`False`
-Whether to strip HTML tags before indexing content for search.
 
 ---
 
@@ -448,11 +403,6 @@ Enable favicon downloading
 #### `FAVICON_TIMEOUT`
 **Default:** [`30`] *(falls back to [`TIMEOUT`](#timeout))*
 Timeout for favicon fetch in seconds
-
----
-#### `FAVICON_USER_AGENT`
-**Default:** [`""`] *(falls back to [`USER_AGENT`](#user_agent))*
-User agent string
 
 
 ### Wget Settings
@@ -917,11 +867,6 @@ Submit URLs to archive.org Wayback Machine
 #### `ARCHIVEDOTORG_TIMEOUT`
 **Default:** [`60`] *(falls back to [`TIMEOUT`](#timeout))*
 Timeout for archive.org submission in seconds
-
----
-#### `ARCHIVEDOTORG_USER_AGENT`
-**Default:** [`""`] *(falls back to [`USER_AGENT`](#user_agent))*
-User agent string
 
 
 ### Chrome Settings

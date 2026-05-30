@@ -16,7 +16,7 @@
 
 {% block body %}
     <div style="max-width: 1440px; margin: auto; float: none">
-        <br/><br/>
+        <br/>
         {% if stdout %}
             <h1>Add new URLs to your archive: results</h1>
             <pre id="stdout">
@@ -40,11 +40,16 @@
             <form id="add-form" method="POST" class="p-form">{% csrf_token %}
                 <center>
                     <h1>Create a new Crawl</h1>
+                    <p class="crawl-subtitle">
+                        A <strong>Crawl</strong> is a job that processes URLs and creates <strong>Snapshots</strong> (archived copies) for each URL discovered.
+                        <br/>The settings below apply to the entire crawl and all snapshots it creates.
+                    </p>
                 </center>
                 <div class="crawl-explanation">
-                    <p>
-                        A <strong>Crawl</strong> is a job that processes URLs and creates <strong>Snapshots</strong> (archived copies) for each URL discovered.
-                        The settings below apply to the entire crawl and all snapshots it creates.
+                    <p class="crawl-tip" style="user-select: none;">
+                        <a href="https://github.com/ArchiveBox/archivebox-browser-extension" style="float: right"><img src="{% static 'chrome_extension_icon.png' %}" alt="Chrome Extension" style="height: 33px; margin-top: -5px;">&nbsp; Get the extension</a>
+                        💡 <strong>Tip:</strong> Instantly save a single URL by visiting:
+                        <code class="crawl-tip-url" style="user-select: text;"><span class="crawl-tip-url-prefix">{{ web_base_url }}/web/</span><span class="crawl-tip-url-target">https://example.com/url_to_save</span></code>
                     </p>
                 </div>
 
@@ -246,7 +251,7 @@
                     </p>
 
                     <div class="plugin-presets">
-                        <span class="preset-label">Quick Select:</span>
+                        <span class="preset-label">Presets:</span>
                         <a href="/admin/personas/persona/add/" class="preset-btn persona-create-btn" target="_blank" rel="noopener" title="Create new profile / import from Chrome" aria-label="Create new profile / import from Chrome">➕</a>
                         {% for persona in recent_personas %}
                         <span class="persona-preset-wrap">
@@ -268,7 +273,7 @@
                         <summary><h3>Advanced Crawl Options</h3></summary>
                         <p class="section-description">Additional settings that control how this crawl processes URLs and creates snapshots.</p>
 
-                        <div class="form-field">
+                        <div class="form-field" id="schedule">
                             {{ form.schedule.label_tag }}
                             {{ form.schedule }}
                             {% if form.schedule.errors %}
@@ -321,6 +326,20 @@
             </center> -->
             {% endif %}
             <script>
+                // Triple-click the example URL in the tip to select just the URL (not the surrounding text)
+                document.querySelectorAll('.crawl-tip-url').forEach((el) => {
+                    el.addEventListener('mousedown', (e) => {
+                        if (e.detail >= 3) {
+                            e.preventDefault();
+                            const range = document.createRange();
+                            range.selectNodeContents(el);
+                            const sel = window.getSelection();
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                        }
+                    });
+                });
+
                 // URL preview / counter
                 const urlTextarea = document.querySelector('textarea[name="url"]');
                 const urlCounter = document.getElementById('url-counter');
@@ -471,38 +490,65 @@
                     updater();
                 }
 
+                function isTruthyConfigValue(value) {
+                    return value === true || value === 'true' || value === '1' || value === 'on' || value === 1;
+                }
+
+                function syncSectionTogglesFromEffectiveConfig(effectiveConfig) {
+                    document.querySelectorAll('.plugin-card[data-plugin-enabled-key]').forEach(card => {
+                        const enabledKey = card.dataset.pluginEnabledKey;
+                        if (!enabledKey || !Object.prototype.hasOwnProperty.call(effectiveConfig, enabledKey)) return;
+                        const sectionToggle = card.querySelector('.plugin-section-toggle');
+                        if (!sectionToggle) return;
+                        sectionToggle.checked = isTruthyConfigValue(effectiveConfig[enabledKey]);
+                    });
+                }
+
+                function updatePersonaButtonHighlights(personaName) {
+                    document.querySelectorAll('.persona-preset-btn').forEach(btn => {
+                        const isActive = (btn.dataset.persona || '') === (personaName || '');
+                        btn.classList.toggle('persona-preset-btn-active', isActive);
+                        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                    });
+                }
+
                 function applyPersonaConfig(personaName) {
+                    updatePersonaButtonHighlights(personaName);
                     const personaData = personaConfigMap[personaName];
                     if (!personaData) return;
+                    const effectiveConfig = personaData.effective_config || {};
                     const concurrencyInput = document.querySelector('input[name="crawl_max_concurrent_snapshots"]');
-                    const concurrencyValue = personaData.effective_config?.CRAWL_MAX_CONCURRENT_SNAPSHOTS;
+                    const concurrencyValue = effectiveConfig.CRAWL_MAX_CONCURRENT_SNAPSHOTS;
                     if (concurrencyInput && concurrencyValue) {
                         concurrencyInput.value = concurrencyValue;
                     }
                     const deleteAfterInput = document.querySelector('input[name="delete_after"]');
-                    const deleteAfterValue = personaData.effective_config?.DELETE_AFTER;
+                    const deleteAfterValue = effectiveConfig.DELETE_AFTER;
                     if (deleteAfterInput && deleteAfterValue !== undefined && deleteAfterValue !== null) {
                         deleteAfterInput.value = deleteAfterValue || '0';
                     }
                     const timeoutInput = document.querySelector('input[name="timeout"]');
-                    const timeoutValue = personaData.effective_config?.TIMEOUT;
+                    const timeoutValue = effectiveConfig.TIMEOUT;
                     if (timeoutInput && timeoutValue !== undefined && timeoutValue !== null) {
                         timeoutInput.value = timeoutValue || '0';
                     }
                     const permissionsSelect = document.querySelector('select[name="permissions"]');
-                    const permissionsValue = personaData.effective_config?.PERMISSIONS;
+                    const permissionsValue = effectiveConfig.PERMISSIONS;
                     if (permissionsSelect && permissionsValue) {
                         permissionsSelect.value = permissionsValue;
                     }
                     const onlyNewInput = document.querySelector('input[name="url_filters_only_new"]');
-                    const onlyNewValue = personaData.effective_config?.ONLY_NEW;
+                    const onlyNewValue = effectiveConfig.ONLY_NEW;
                     if (onlyNewInput && onlyNewValue !== undefined && onlyNewValue !== null) {
                         onlyNewInput.checked = Boolean(onlyNewValue);
                     }
                     if (typeof window.archiveboxSetPluginConfigValues === 'function') {
-                        window.archiveboxSetPluginConfigValues(personaData.effective_config || {}, personaData.binary_urls || {});
+                        window.archiveboxSetPluginConfigValues(effectiveConfig, personaData.binary_urls || {});
                     }
+                    syncSectionTogglesFromEffectiveConfig(effectiveConfig);
                     replaceConfigRows(personaData.config || {});
+                    syncEnabledPluginsConfig();
+                    updateChromeToggleButton();
                     updateURLPreview();
                 }
 
@@ -1155,7 +1201,12 @@
 
                 // Plugin Presets
                 const presetConfigs = {
-                    'text-only': ['wget', 'readability', 'mercury', 'htmltotext', 'title', 'favicon']
+                    'text-only': [
+                        'readability', 'mercury', 'htmltotext', 'title', 'favicon',
+                        'dom', 'infiniscroll', 'forumdl', 'defuddle', 'trafilatura', 'liteparse',
+                        'opendataloader', 'staticfile', 'papersdl', 'parse_dom_outlinks',
+                        'parse_txt_urls', 'headers', 'redirects', 'seo', 'hashes',
+                    ],
                 };
 
                 document.querySelectorAll('.persona-preset-btn').forEach(btn => {
@@ -1315,17 +1366,6 @@
                 }
 
                 loadFormState();
-
-                const focusTarget = new URLSearchParams(window.location.search).get('focus');
-                if (focusTarget === 'schedule') {
-                    const scheduleInput = document.querySelector('[name="schedule"]');
-                    const advancedSection = scheduleInput?.closest('details');
-                    if (advancedSection) advancedSection.open = true;
-                    if (scheduleInput) {
-                        scheduleInput.scrollIntoView({ block: 'center' });
-                        scheduleInput.focus();
-                    }
-                }
 
                 // Form submission handler
                 document.getElementById('add-form').addEventListener('submit', function(event) {

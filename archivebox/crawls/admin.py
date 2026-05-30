@@ -63,8 +63,10 @@ def render_snapshots_list(snapshots_qs, request=None, crawl=None, page_size=50, 
 
     filtered_qs = snapshots_qs
     if query:
-        id_query = query.replace("-", "")
-        filtered_qs = filtered_qs.filter(Q(id__icontains=id_query) | Q(url__icontains=query) | Q(title__icontains=query))
+        from archivebox.misc.util import filter_queryset_by_uuid_substring
+
+        id_match_pks = list(filter_queryset_by_uuid_substring(Snapshot.objects.all(), query).values_list("pk", flat=True)[:100])
+        filtered_qs = filtered_qs.filter(Q(pk__in=id_match_pks) | Q(url__icontains=query) | Q(title__icontains=query))
     if status_filter in valid_statuses:
         filtered_qs = filtered_qs.filter(status=status_filter)
 
@@ -1182,7 +1184,7 @@ class CrawlScheduleAdmin(BaseModelAdmin):
         return super().change_view(request, object_id, form_url, extra_context)
 
     def add_view(self, request, form_url="", extra_context=None):
-        return redirect("/add/?focus=schedule")
+        return redirect("/add/#schedule")
 
     def get_fieldsets(self, request, obj=None):
         if obj is None:

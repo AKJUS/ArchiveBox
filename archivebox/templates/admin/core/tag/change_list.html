@@ -247,6 +247,13 @@
         color: #075985;
         font-size: 11px;
         font-weight: 700;
+        text-decoration: none;
+    }
+
+    .tag-card__count:hover {
+        background: #bae6fd;
+        color: #0c4a6e;
+        text-decoration: none;
     }
 
     .tag-card__actions {
@@ -306,58 +313,6 @@
         border: 1px solid #cbd5e1;
         background: #fff;
         font-size: 12px;
-    }
-
-    .tag-card__snapshots {
-        display: grid;
-        gap: 8px;
-        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    }
-
-    .tag-snapshot-badge {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-        padding: 6px 8px;
-        border-radius: 12px;
-        border: 1px solid #dbe4ee;
-        background: rgba(255, 255, 255, 0.86);
-        text-decoration: none;
-        color: #0f172a;
-    }
-
-    .tag-snapshot-badge img {
-        width: 16px;
-        height: 16px;
-        border-radius: 4px;
-        flex: 0 0 auto;
-        background: #f8fafc;
-    }
-
-    .tag-snapshot-badge span {
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-size: 11px;
-        font-weight: 600;
-    }
-
-    .tag-card__empty {
-        padding: 14px;
-        border-radius: 14px;
-        border: 1px dashed #cbd5e1;
-        background: #f8fafc;
-        color: #64748b;
-        font-size: 13px;
-    }
-
-    .tag-card__empty[href] {
-        display: block;
-        color: #075985;
-        font-weight: 600;
-        text-decoration: none;
     }
 
     .tag-toast {
@@ -626,17 +581,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         grid.innerHTML = cards.map(function (card) {
-            const snapshotCount = Number(card.num_snapshots || 0);
-            const snapshotHtml = (card.snapshots || []).length
-                ? card.snapshots.map(function (snapshot) {
-                    return '' +
-                        '<a class="tag-snapshot-badge" href="' + escapeHtml(snapshot.admin_url) + '" title="' + escapeHtml(snapshot.url) + '">' +
-                            '<img src="' + escapeHtml(snapshot.favicon_url) + '" alt="" onerror="this.hidden=true">' +
-                            '<span>' + escapeHtml(snapshot.title) + '</span>' +
-                        '</a>';
-                }).join('')
-                : '<a class="tag-card__empty tag-snapshot-badge" href="' + escapeHtml(card.filter_url) + '">' + escapeHtml(snapshotCount) + ' snapshot' + (snapshotCount === 1 ? '' : 's') + ' tagged</a>';
-
             return '' +
                 '<article class="tag-card" data-id="' + escapeHtml(card.id) + '" data-slug="' + escapeHtml(card.slug) + '" data-filter-url="' + escapeHtml(card.filter_url) + '" data-rename-url="' + escapeHtml(card.rename_url) + '" data-delete-url="' + escapeHtml(card.delete_url) + '" data-export-urls-url="' + escapeHtml(card.export_urls_url) + '" data-export-jsonl-url="' + escapeHtml(card.export_jsonl_url) + '">' +
                     '<div class="tag-card__header">' +
@@ -655,10 +599,9 @@ document.addEventListener('DOMContentLoaded', function () {
                             '<button type="button" class="tag-chip-button" data-action="copy-urls">Copy URLs</button>' +
                             '<button type="button" class="tag-chip-button" data-action="download-jsonl">JSONL</button>' +
                             '<button type="button" class="tag-chip-button is-danger" data-action="delete">Delete</button>' +
-                            '<span class="tag-card__count">' + escapeHtml(card.num_snapshots) + '</span>' +
+                            '<a class="tag-card__count" href="' + escapeHtml(card.filter_url) + '" title="View tagged snapshots">' + escapeHtml(card.num_snapshots) + '</a>' +
                         '</div>' +
                     '</div>' +
-                    '<div class="tag-card__snapshots">' + snapshotHtml + '</div>' +
                 '</article>';
         }).join('');
     }
@@ -849,8 +792,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     grid.addEventListener('click', async function (event) {
         const actionButton = event.target.closest('[data-action]');
-        const snapshotLink = event.target.closest('.tag-snapshot-badge');
-        if (snapshotLink) return;
+        const filterLink = event.target.closest('.tag-card__count');
+        if (filterLink) return;
 
         const cardEl = event.target.closest('.tag-card');
         if (!cardEl) return;

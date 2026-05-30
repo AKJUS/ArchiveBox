@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeGuard, TypedDict
 from abx_plugins import get_plugins_dir
 from django.utils.safestring import mark_safe
 from archivebox.config.constants import CONSTANTS
+from archivebox.config.version import VERSION
 from archivebox.misc.util import fix_url_from_markdown, sanitize_extracted_url
 
 if TYPE_CHECKING:
@@ -400,6 +401,7 @@ def run_hook(
     env["DATA_DIR"] = str(resolved_config.DATA_DIR)
     env["ARCHIVE_DIR"] = str(resolved_config.ARCHIVE_DIR)
     env["ABX_RUNTIME"] = "archivebox"
+    env["LIBRARY_VERSION"] = VERSION
     env.setdefault("MACHINE_ID", os.environ.get("MACHINE_ID", CONSTANTS.MACHINE_ID))
 
     resolved_output_dir = output_dir.resolve()
@@ -679,13 +681,10 @@ def get_enabled_plugins(config: ConfigLookup | None = None, **config_kwargs: Any
             return [str(plugin).strip() for plugin in value if str(plugin).strip()]
         return [str(value).strip()] if str(value).strip() else []
 
-    # Support explicit ENABLED_PLUGINS override (legacy)
+    # Support explicit ENABLED_PLUGINS override
     enabled_plugins = config.get("ENABLED_PLUGINS")
     if enabled_plugins:
         return normalize_enabled_plugins(enabled_plugins)
-    enabled_extractors = config.get("ENABLED_EXTRACTORS")
-    if enabled_extractors:
-        return normalize_enabled_plugins(enabled_extractors)
 
     # Filter all plugins by enabled status
     all_plugins = get_plugins()

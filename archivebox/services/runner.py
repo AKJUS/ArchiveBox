@@ -60,6 +60,7 @@ from abxbus.event_handler import EventHandlerAbortedError, EventHandlerCancelled
 
 from archivebox.config.configset import BaseConfigSet
 from archivebox.core.recovery_util import recover_orchestrator_state
+from archivebox.misc.db import run_db_analyze_batch
 from archivebox.core.shutdown_util import foreground_shutdown_signals
 from archivebox.search.sonic_daemon import register_sonic_daemon_event_handler
 from archivebox.workers.models import ACTIVE_STATE_LEASE_SECONDS
@@ -290,6 +291,14 @@ class CrawlRunner:
 
         if self._signal_abort_requested:
             return True
+        if self.allow_maintenance_on_inactive_crawl:
+            # SEALED is the normal terminal state of a finished crawl, not a
+            # cancellation signal for maintenance work on its already-sealed
+            # snapshots (search backend backfill, fs migration, etc.). When the
+            # runner is invoked with explicit snapshot_ids + selected_plugins,
+            # treat sealed as completed rather than cancelled so the requested
+            # maintenance hooks can actually run.
+            return False
         return await Crawl.objects.filter(id=self.crawl.id, status=Crawl.StatusChoices.SEALED).aexists()
 
     async def crawl_is_paused(self) -> bool:
@@ -311,7 +320,16 @@ class CrawlRunner:
         return filter_plugins(self.plugins, self.selected_plugins, include_providers=True) if self.selected_plugins else self.plugins
 
     @property
-    def allow_paused_snapshot_maintenance(self) -> bool:
+    def allow_maintenance_on_inactive_crawl(self) -> bool:
+        """Run the requested hooks on a snapshot whose parent crawl is paused or sealed.
+
+        Maintenance entry paths — direct ``snapshot_ids + selected_plugins`` invocations
+        for search backend backfill, fs migration, plugin-targeted updates — are
+        legitimately allowed to operate on finished/paused crawls. Without this gate,
+        ``crawl_is_cancelled`` would treat a SEALED parent as a cancellation signal
+        and short-circuit every guard before any hook ran, leaving the queued
+        ArchiveResult rows stuck and the orchestrator looping on them.
+        """
         return bool(self.initial_snapshot_ids and self.selected_plugins)
 
     async def run(self) -> None:
@@ -384,7 +402,7 @@ class CrawlRunner:
     async def enqueue_snapshot(self, snapshot_id: str, crawl_start_event: CrawlStartEvent | None = None) -> None:
         if await self.crawl_is_cancelled():
             return
-        if await self.crawl_is_paused() and not self.allow_paused_snapshot_maintenance:
+        if await self.crawl_is_paused() and not self.allow_maintenance_on_inactive_crawl:
             return
         task = self.snapshot_tasks.get(snapshot_id)
         if task is not None and not task.done():
@@ -462,7 +480,7 @@ class CrawlRunner:
                     task_errors.append(err)
                     stop_scheduling = True
             if self.snapshot_tasks and (
-                await self.crawl_is_cancelled() or (await self.crawl_is_paused() and not self.allow_paused_snapshot_maintenance)
+                await self.crawl_is_cancelled() or (await self.crawl_is_paused() and not self.allow_maintenance_on_inactive_crawl)
             ):
                 stop_scheduling = True
             if not stop_scheduling:
@@ -520,7 +538,7 @@ class CrawlRunner:
             return
         if await self.crawl_is_cancelled():
             return
-        if await self.crawl_is_paused() and not self.allow_paused_snapshot_maintenance:
+        if await self.crawl_is_paused() and not self.allow_maintenance_on_inactive_crawl:
             return
 
         await sync_to_async(self.crawl.refresh_from_db, thread_sensitive=True)()
@@ -725,7 +743,7 @@ class CrawlRunner:
         from archivebox.hooks import collect_urls_from_plugins
 
         await sync_to_async(self.crawl.refresh_from_db, thread_sensitive=True)()
-        if self.crawl.is_paused and not self.allow_paused_snapshot_maintenance:
+        if self.crawl.is_paused and not self.allow_maintenance_on_inactive_crawl:
             return
         if int(snapshot_payload["depth"]) >= self.crawl.max_depth:
             return
@@ -844,7 +862,7 @@ class CrawlRunner:
                     break
                 if await self.crawl_is_cancelled():
                     break
-                if await self.crawl_is_paused() and not self.allow_paused_snapshot_maintenance:
+                if await self.crawl_is_paused() and not self.allow_maintenance_on_inactive_crawl:
                     break
                 await self.enqueue_snapshot(snapshot_id)
             await self.wait_for_snapshot_tasks()
@@ -855,7 +873,9 @@ class CrawlRunner:
             cancel_watcher = asyncio.create_task(self.watch_for_cancelled_crawl(event))
             try:
                 try:
-                    if not await self.crawl_is_cancelled() and (not await self.crawl_is_paused() or self.allow_paused_snapshot_maintenance):
+                    if not await self.crawl_is_cancelled() and (
+                        not await self.crawl_is_paused() or self.allow_maintenance_on_inactive_crawl
+                    ):
                         await _run_event_now(
                             event.emit(
                                 CrawlSetupEvent(
@@ -868,7 +888,9 @@ class CrawlRunner:
                             ),
                             crawl_setup_phase_timeout,
                         )
-                    if not await self.crawl_is_cancelled() and (not await self.crawl_is_paused() or self.allow_paused_snapshot_maintenance):
+                    if not await self.crawl_is_cancelled() and (
+                        not await self.crawl_is_paused() or self.allow_maintenance_on_inactive_crawl
+                    ):
                         crawl_start_event = CrawlStartEvent(
                             url=snapshot["url"],
                             snapshot_id=snapshot["id"],
@@ -1720,6 +1742,10 @@ def run_pending_crawls(
     )
     last_recovery_at = 0.0
     last_retention_at = 0.0
+    last_analyze_at = 0.0
+    analyze_queue: list[str] | None = None
+    analyze_sweep_started_at = 0.0
+    orchestrator_started_at = time.monotonic()
     while True:
         now_monotonic = time.monotonic()
         if now_monotonic - last_retention_at >= (60.0 if daemon else 1.0):
@@ -1873,6 +1899,39 @@ def run_pending_crawls(
             if now_monotonic - last_recovery_at >= 30.0:
                 recover_orchestrator_state()
                 last_recovery_at = now_monotonic
+            # SQLite query plans degrade as the snapshot/archiveresult tables grow
+            # past their last ANALYZE — stale stats make the optimizer start large
+            # joins from auth_user/crawl instead of using the url index, blowing the
+            # snapshot detail page out to ~500ms. Refresh stats at most once per
+            # 24hr while the queue is idle, and only after the orchestrator has
+            # been alive for at least an hour so short server boots / one-off work
+            # never pay the cost. The sweep is batched one table per idle tick;
+            # individual table ANALYZE statements abort after 2min (progress
+            # handler) and the whole sweep is hard-capped at 5min so a
+            # pathological table cannot wedge maintenance forever. Any failure
+            # inside the maintenance hook is swallowed — orchestrator must never
+            # be taken down by stats refresh.
+            try:
+                if (
+                    analyze_queue is None
+                    and now_monotonic - orchestrator_started_at >= 3600.0
+                    and now_monotonic - last_analyze_at >= 86400.0
+                ):
+                    analyze_sweep_started_at = now_monotonic
+                    analyze_queue = run_db_analyze_batch(None)
+                elif analyze_queue and now_monotonic - analyze_sweep_started_at >= 300.0:
+                    # Sweep blew past the 5min hard cap — abandon what's left
+                    # and don't retry until the next 24hr window.
+                    analyze_queue = None
+                    last_analyze_at = now_monotonic
+                elif analyze_queue:
+                    analyze_queue = run_db_analyze_batch(analyze_queue)
+                if analyze_queue is not None and not analyze_queue:
+                    analyze_queue = None
+                    last_analyze_at = now_monotonic
+            except Exception:
+                analyze_queue = None
+                last_analyze_at = now_monotonic
             time.sleep(2.0)
             continue
         return 0

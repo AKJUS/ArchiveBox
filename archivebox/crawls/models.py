@@ -865,7 +865,7 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
         crawl_tag_names = self.current_tag_names()
         tags_by_name: dict[str, Tag] = {}
         config = get_config(crawl=self)
-        only_new_urls = bool(config.ONLY_NEW) and not bool(config.OVERWRITE)
+        only_new_urls = bool(config.ONLY_NEW)
 
         for line in self.urls.splitlines():
             if not line.strip():
@@ -1039,7 +1039,7 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
         if not deduped_records:
             return []
 
-        existing_scope = Snapshot.objects if bool(config.ONLY_NEW) and not bool(config.OVERWRITE) else self.snapshot_set
+        existing_scope = Snapshot.objects if bool(config.ONLY_NEW) else self.snapshot_set
         existing_urls = set(existing_scope.filter(url__in=deduped_records.keys()).values_list("url", flat=True))
         urls = [url for url in deduped_records.keys() if url not in existing_urls]
         remaining = self.remaining_snapshot_capacity()

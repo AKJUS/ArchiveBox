@@ -48,7 +48,7 @@ class KeyValueWidget(forms.Widget):
             from archivebox.hooks import discover_plugin_configs
 
             options: dict[str, ConfigOption] = {}
-            skipped_core_keys = {"ABX_RUNTIME", "DATA_DIR", "CRAWL_DIR", "CRAWL_OUTPUT_DIR", "SNAP_DIR"}
+            skipped_core_keys = {"ABX_RUNTIME", "DATA_DIR", "CRAWL_DIR", "SNAP_DIR"}
             for key, field in ArchiveBoxConfig.model_fields.items():
                 if key in skipped_core_keys or key in ArchiveBoxConfig.computed_config_keys:
                     continue
@@ -227,9 +227,6 @@ class KeyValueWidget(forms.Widget):
                             return 'Example: ["value"]';
                         }}
                         if (types.includes('object')) {{
-                            if (key === 'SAVE_ALLOWLIST' || key === 'SAVE_DENYLIST') {{
-                                return 'Example: {{"^https://example\\\\.com": ["wget"]}}';
-                            }}
                             return 'Example: {{"key": "value"}}';
                         }}
                         return '';
@@ -238,8 +235,6 @@ class KeyValueWidget(forms.Widget):
                     function isRegexConfigKey_{widget_id}(key) {{
                         return key === 'URL_ALLOWLIST' ||
                             key === 'URL_DENYLIST' ||
-                            key === 'SAVE_ALLOWLIST' ||
-                            key === 'SAVE_DENYLIST' ||
                             key.endsWith('_PATTERN') ||
                             key.includes('REGEX');
                     }}
@@ -633,16 +628,73 @@ class KeyValueWidget(forms.Widget):
 
                     window.updateHiddenField_{widget_id} = updateHiddenField_{widget_id};
 
+                    function focusConfigKeyFromHash_{widget_id}() {{
+                        // Deep-link affordance: ``…/change/#SOME_KEY`` jumps directly
+                        // to (or creates) the matching row in this editor. Used by
+                        // the in-banner "pin via admin" link and the
+                        // ``→ Edit <KEY> in Machine.config`` shortcut on the live
+                        // config detail page.
+                        var hash = (window.location.hash || '').replace(/^#/, '').trim();
+                        if (!hash || !/^[A-Z][A-Z0-9_]*$/.test(hash)) {{
+                            return;
+                        }}
+                        var container = document.getElementById('{widget_id}_rows');
+                        if (!container) {{
+                            return;
+                        }}
+                        var match = null;
+                        container.querySelectorAll('.key-value-row').forEach(function(row) {{
+                            if (match) {{ return; }}
+                            var keyInput = row.querySelector('.kv-key');
+                            if (keyInput && keyInput.value.trim() === hash) {{
+                                match = row;
+                            }}
+                        }});
+                        if (!match) {{
+                            // No existing row for this key — prepopulate one with the
+                            // key filled in but value left blank so the operator just
+                            // types/pastes the value and hits save.
+                            window.addKeyValueRow_{widget_id}();
+                            var rows = container.querySelectorAll('.key-value-row');
+                            match = rows[rows.length - 1];
+                            var keyInput = match.querySelector('.kv-key');
+                            if (keyInput) {{
+                                keyInput.value = hash;
+                                keyInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            }}
+                        }}
+                        if (!match) {{
+                            return;
+                        }}
+                        match.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                        var prevOutline = match.style.outline;
+                        match.style.outline = '2px solid #f59e0b';
+                        match.style.outlineOffset = '2px';
+                        match.style.transition = 'outline 1.2s ease-out';
+                        setTimeout(function() {{
+                            match.style.outline = prevOutline || 'none';
+                        }}, 1400);
+                        var valueInput = match.querySelector('.kv-value');
+                        if (valueInput) {{
+                            valueInput.focus();
+                            try {{ valueInput.setSelectionRange(valueInput.value.length, valueInput.value.length); }} catch (e) {{}}
+                        }}
+                    }}
+
                     // Initialize on load
                     document.addEventListener('DOMContentLoaded', function() {{
                         initializeRows_{widget_id}();
                         updateHiddenField_{widget_id}();
+                        focusConfigKeyFromHash_{widget_id}();
                     }});
                     // Also run immediately in case DOM is already ready
                     if (document.readyState !== 'loading') {{
                         initializeRows_{widget_id}();
                         updateHiddenField_{widget_id}();
+                        focusConfigKeyFromHash_{widget_id}();
                     }}
+
+                    window.addEventListener('hashchange', focusConfigKeyFromHash_{widget_id});
 
                     // Update on any input change
                     var rowsEl_{widget_id} = document.getElementById('{widget_id}_rows');
