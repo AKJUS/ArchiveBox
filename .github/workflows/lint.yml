@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   UV_NO_SOURCES: "1"
   PYTHONPATH: ${{ github.workspace }}/abxpkg:${{ github.workspace }}/abx-plugins:${{ github.workspace }}/abx-dl
