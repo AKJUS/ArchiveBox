@@ -30,6 +30,33 @@ class CaseConfigParser(ConfigParser):
         return optionstr
 
 
+# ``IniConfigSettingsSource.get_field_value`` is called once per pydantic field
+# (hundreds of fields across the GlobalConfig + plugin configs). Without
+# caching, every field re-opens and re-parses ``ArchiveBox.conf`` from disk —
+# that's the dominant cost of ``get_config()`` (each call was ~130ms; profile
+# showed 632 ``parser.read(config_path)`` invocations per call). The cache is
+# keyed on (path, mtime) so external edits to the file still get picked up.
+_INI_CACHE: dict[tuple[str, float], dict[str, Any]] = {}
+
+
+def _read_ini_config_cached(config_path_str: str) -> dict[str, Any]:
+    config_path = Path(config_path_str)
+    try:
+        mtime = config_path.stat().st_mtime
+    except FileNotFoundError:
+        return {}
+    cache_key = (str(config_path), mtime)
+    cached = _INI_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    parser = CaseConfigParser()
+    parser.read(config_path)
+    flat = {key.upper(): value for section in parser.sections() for key, value in parser.items(section)}
+    _INI_CACHE.clear()
+    _INI_CACHE[cache_key] = flat
+    return flat
+
+
 class IniConfigSettingsSource(PydanticBaseSettingsSource):
     """
     Custom settings source that reads from ArchiveBox.conf (INI format).
@@ -69,14 +96,7 @@ class IniConfigSettingsSource(PydanticBaseSettingsSource):
         except ImportError:
             return {}
 
-        if not config_path.exists():
-            return {}
-
-        parser = CaseConfigParser()
-        parser.read(config_path)
-
-        # Flatten all sections into single namespace (ignore section headers)
-        return {key.upper(): value for section in parser.sections() for key, value in parser.items(section)}
+        return _read_ini_config_cached(str(config_path))
 
 
 class BaseConfigSet(BaseSettings):

@@ -18,19 +18,13 @@ class BinaryService(BaseService):
         self.bus.on(BinaryEvent, self.on_BinaryEvent)
 
     async def on_BinaryRequestEvent(self, event: BinaryRequestEvent) -> str | None:
-        import time as _t
-
-        _ax_t0 = _t.perf_counter()
-        _ax = lambda label: print(f"[ABX_BRE] {event.name!r} {label} @ +{(_t.perf_counter() - _ax_t0) * 1000:.1f}ms", flush=True)
         from archivebox.machine.models import Binary, Machine, _canonical_binary_name
 
         machine = await sync_to_async(Machine.current, thread_sensitive=True)()
-        _ax("after Machine.current")
         binary_name = _canonical_binary_name(event.name)
         if not binary_name:
             return None
         existing = await Binary.objects.filter(machine=machine, name=binary_name).afirst()
-        _ax("after Binary.filter.afirst")
         cache_invalidated = False
         if existing and existing.status == Binary.StatusChoices.INSTALLED:
             changed = False
@@ -54,7 +48,6 @@ class BinaryService(BaseService):
                 status=Binary.StatusChoices.QUEUED,
             )
 
-        _ax(f"after existing-branch (existing={'yes' if existing else 'no'} invalidated={cache_invalidated})")
         installed = None
         if not cache_invalidated:
             installed = (
@@ -64,7 +57,6 @@ class BinaryService(BaseService):
                 .order_by("-modified_at")
                 .afirst()
             )
-            _ax(f"after Binary.installed afirst (installed={'yes' if installed else 'no'})")
             if installed is not None and not await sync_to_async(Path(installed.abspath).expanduser().exists, thread_sensitive=True)():
                 installed.status = Binary.StatusChoices.QUEUED
                 installed.retry_at = None
@@ -82,7 +74,6 @@ class BinaryService(BaseService):
 
             binary_env: dict[str, str] = {}
             installed_path = Path(installed.abspath).expanduser().resolve(strict=False)
-            _ax("after installed_path resolve")
             active_lib_dir = (
                 Path(str((await sync_to_async(get_config, thread_sensitive=True)()).get("LIB_DIR", "")))
                 .expanduser()
@@ -90,7 +81,6 @@ class BinaryService(BaseService):
                     strict=False,
                 )
             )
-            _ax("after get_config + active_lib_dir resolve")
             provider_name = (installed.binprovider or installed.binproviders.split(",", 1)[0]).strip()
             if active_lib_dir and provider_name in {"npm", "pip", "puppeteer", "uv", "deno", "gem", "cargo", "goget", "nix", "bash"}:
                 try:
@@ -115,7 +105,6 @@ class BinaryService(BaseService):
                     providers=[provider],
                     base_env={},
                 )
-            _ax("after BinProvider.build_exec_env")
             cached = {
                 "abspath": installed.abspath,
                 "version": installed.version or "",
@@ -141,22 +130,15 @@ class BinaryService(BaseService):
                 binary_id=event.binary_id,
                 machine_id=cached["machine_id"],
             )
-            _ax("before emit BinaryEvent.now()")
             await event.emit(binary_event).now()
-            _ax("after emit BinaryEvent.now()")
             return binary_event.abspath
         return None
 
     async def on_BinaryEvent(self, event: BinaryEvent) -> None:
-        import time as _t
-
-        _be_t0 = _t.perf_counter()
-        _be = lambda label: print(f"[ABX_BE] {event.name!r} {label} @ +{(_t.perf_counter() - _be_t0) * 1000:.1f}ms", flush=True)
         from archivebox.machine.models import Binary, Machine, _canonical_binary_name
         from archivebox.config.common import get_config
 
         machine = await sync_to_async(Machine.current, thread_sensitive=True)()
-        _be("after Machine.current")
         binary_name = _canonical_binary_name(event.name)
         if not binary_name:
             return
@@ -167,7 +149,6 @@ class BinaryService(BaseService):
                 "status": Binary.StatusChoices.QUEUED,
             },
         )
-        _be("after Binary.aget_or_create")
         binary.abspath = event.abspath
         if event.version:
             binary.version = event.version
@@ -184,8 +165,5 @@ class BinaryService(BaseService):
         await binary.asave(
             update_fields=["abspath", "version", "sha256", "binproviders", "binprovider", "overrides", "status", "retry_at", "modified_at"],
         )
-        _be("after binary.asave")
         lib_bin_dir = await sync_to_async(lambda: get_config().LIB_BIN_DIR, thread_sensitive=True)()
-        _be("after get_config LIB_BIN_DIR")
         await sync_to_async(binary.symlink_to_lib_bin_after_commit, thread_sensitive=True)(lib_bin_dir)
-        _be("after symlink_to_lib_bin_after_commit")

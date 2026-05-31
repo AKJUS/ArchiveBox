@@ -98,7 +98,12 @@ def _ensure_permissions_column(cursor):
     have the column (added by the current 0013), so this is a safe no-op
     in that case.
     """
-    cursor.execute("PRAGMA table_info(crawls_crawl)")
+    # ``table_info`` hides generated columns (SQLite docs: "this command
+    # does not include the generated columns"). Fresh installs add
+    # ``permissions`` as a STORED GeneratedField via 0013, which
+    # ``table_xinfo`` reports but ``table_info`` does not — so the latter
+    # would lie to us and we'd try to ALTER an already-present column.
+    cursor.execute("PRAGMA table_xinfo(crawls_crawl)")
     existing_cols = {row[1] for row in cursor.fetchall()}
     if "permissions" in existing_cols:
         return

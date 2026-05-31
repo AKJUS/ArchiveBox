@@ -96,7 +96,12 @@ def _ensure_permissions_column(cursor):
     with ``no such column: personas_persona.permissions``. Fresh installs
     already have the column, so this is a no-op on first-time setup.
     """
-    cursor.execute("PRAGMA table_info(personas_persona)")
+    # ``table_info`` hides generated columns (SQLite docs: "this command
+    # does not include the generated columns"). Fresh installs add
+    # ``permissions`` as a STORED GeneratedField via 0003, which
+    # ``table_xinfo`` reports but ``table_info`` does not — so the latter
+    # would lie to us and we'd try to ALTER an already-present column.
+    cursor.execute("PRAGMA table_xinfo(personas_persona)")
     existing_cols = {row[1] for row in cursor.fetchall()}
     if "permissions" in existing_cols:
         return
