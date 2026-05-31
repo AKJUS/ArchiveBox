@@ -304,7 +304,7 @@
                                 <div class="error">{{ form.config.errors }}</div>
                             {% endif %}
                             <div class="help-text">
-                                Override any config option for this crawl (e.g., TIMEOUT, USER_AGENT, CHROME_BINARY, etc.). <code>URL_ALLOWLIST</code>, <code>URL_DENYLIST</code>, and <code>ENABLED_PLUGINS</code> are updated automatically from the fields above.
+                                Override any config option for this crawl (e.g., TIMEOUT, USER_AGENT, CHROME_BINARY, etc.). <code>URL_ALLOWLIST</code>, <code>URL_DENYLIST</code>, and <code>PLUGINS</code> are updated automatically from the fields above.
                             </div>
                         </div>
                     </details>
@@ -477,7 +477,7 @@
                         .map(cb => cb.value)
                         .filter(Boolean)
                         .sort((left, right) => left.localeCompare(right));
-                    setConfigRow('ENABLED_PLUGINS', selectedPlugins.join(','));
+                    setConfigRow('PLUGINS', selectedPlugins.join(','));
                 }
 
                 function replaceConfigRows(config) {

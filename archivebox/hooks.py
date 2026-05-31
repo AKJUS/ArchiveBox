@@ -681,10 +681,10 @@ def get_enabled_plugins(config: ConfigLookup | None = None, **config_kwargs: Any
             return [str(plugin).strip() for plugin in value if str(plugin).strip()]
         return [str(value).strip()] if str(value).strip() else []
 
-    # Support explicit ENABLED_PLUGINS override
-    enabled_plugins = config.get("ENABLED_PLUGINS")
-    if enabled_plugins:
-        return normalize_enabled_plugins(enabled_plugins)
+    # Support explicit PLUGINS override
+    plugins_override = config.get("PLUGINS")
+    if plugins_override:
+        return normalize_enabled_plugins(plugins_override)
 
     # Filter all plugins by enabled status
     all_plugins = get_plugins()

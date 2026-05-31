@@ -283,10 +283,6 @@ class ArchivingConfig(BaseConfigSet):
         default="",
         description="Comma-separated plugin selection for this run. Empty means use enabled plugin defaults.",
     )
-    ENABLED_PLUGINS: str = Field(
-        default="",
-        description="Comma-separated plugin selection override used by the UI and API.",
-    )
 
     ONLY_NEW: bool = Field(default=True)
 
