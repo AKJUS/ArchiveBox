@@ -74,6 +74,15 @@ def test_add_view_admin_renders_plugin_config_grid(client, admin_user, monkeypat
     assert b">Docs</a>" in response.content
     assert b"https://github.com/ArchiveBox/abx-plugins/tree/main/abx_plugins/plugins/" in response.content
     assert b"https://archivebox.github.io/abx-plugins/#" in response.content
+    personas_dir_fields = [
+        field
+        for group in form.plugin_groups
+        for card in group["plugins"]
+        for field in card["config_fields"]
+        if field["key"] == "PERSONAS_DIR"
+    ]
+    assert personas_dir_fields
+    assert {field["value"] for field in personas_dir_fields} == {str(get_config().PERSONAS_DIR)}
 
 
 def test_add_view_embeds_selected_persona_config_for_ui_hydration(client, admin_user, monkeypatch):

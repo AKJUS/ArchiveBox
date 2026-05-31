@@ -88,6 +88,20 @@ def cleanup_paths():
 class TestMachineModel:
     """Test the Machine model."""
 
+    def test_machine_config_save_heals_json_encoded_string_values(self, machine):
+        machine.config = {
+            "PERSONAS_DIR": '"/data/personas"',
+            "EXTRA_CONTEXT": 'prefix "inner" suffix',
+            "USER_AGENT": '"ArchiveBox \\"Quoted\\" Agent"',
+        }
+        machine.save(update_fields=["config"])
+
+        machine.refresh_from_db()
+
+        assert machine.config["PERSONAS_DIR"] == "/data/personas"
+        assert machine.config["EXTRA_CONTEXT"] == 'prefix "inner" suffix'
+        assert machine.config["USER_AGENT"] == 'ArchiveBox "Quoted" Agent'
+
     def test_machine_current_creates_machine(self):
         """Machine.current() should create a machine if none exists."""
         machine = Machine.current()

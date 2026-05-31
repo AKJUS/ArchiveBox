@@ -408,6 +408,8 @@ class PluginConfigFormMixin:
             input_value = "" if is_sensitive else json.dumps(current_value, indent=2, sort_keys=True, default=str)
         elif is_sensitive:
             input_type = "password"
+        else:
+            input_value = "" if is_sensitive else str(current_value)
 
         return {
             "key": config_key,
@@ -419,7 +421,9 @@ class PluginConfigFormMixin:
             "options": options,
             "description": str(prop_schema.get("description") or "").strip(),
             "default": _jsonish(default_display),
-            "current": "configured" if is_sensitive and current_value else _jsonish(current_value),
+            "current": "configured"
+            if is_sensitive and current_value
+            else (str(current_value) if "string" in schema_types else _jsonish(current_value)),
             "current_url": self.plugin_config_binary_urls.get(config_key, "") if str(config_key).endswith("_BINARY") else "",
             "is_sensitive": is_sensitive,
             "minimum": prop_schema.get("minimum"),

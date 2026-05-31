@@ -425,12 +425,9 @@ def run_hook(
 
     # Export runtime library roots; abx-dl/abxpkg own executable lookup env.
     lib_dir = resolved_config.LIB_DIR
-    lib_bin_dir = resolved_config.LIB_BIN_DIR
     if lib_dir:
         env["LIB_DIR"] = str(lib_dir)
         env["ABXPKG_LIB_DIR"] = str(lib_dir)
-    if lib_bin_dir:
-        env["LIB_BIN_DIR"] = str(lib_bin_dir)
 
     # Set Node.js module resolution paths.
     # NODE_PATH may be a path list, but NODE_MODULES_DIR is a single canonical directory.
@@ -451,7 +448,7 @@ def run_hook(
         env["NODE_PATH"] = os.pathsep.join(node_path_parts)
 
     # Export all config values to environment (already merged by get_config())
-    # Skip keys we've already handled specially above (PATH, LIB_DIR, LIB_BIN_DIR, NODE_PATH, etc.)
+    # Skip keys we've already handled specially above (PATH, LIB_DIR, NODE_PATH, etc.)
     SKIP_KEYS = {
         "PATH",
         "LIB_DIR",

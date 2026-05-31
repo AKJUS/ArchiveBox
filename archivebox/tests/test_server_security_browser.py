@@ -19,6 +19,13 @@ import pytest
 import requests
 
 from .conftest import _ensure_puppeteer, _find_cached_chrome, _find_system_browser, run_python_cwd
+from .conftest import (
+    build_test_env,
+    run_archivebox_cmd_cwd,
+    start_server as start_daemon_server,
+    stop_server as stop_daemon_server,
+    wait_for_http as wait_for_daemon_http,
+)
 
 
 PUPPETEER_PROBE_SCRIPT = """\
@@ -130,6 +137,118 @@ async function main() {
   };
 
   console.log(JSON.stringify(output));
+  await browser.close();
+}
+
+main().catch((error) => {
+  console.error(String(error));
+  process.exit(1);
+});
+"""
+
+
+PUPPETEER_WACZ_PREVIEW_SCRIPT = """\
+const fs = require("node:fs");
+const puppeteer = require("puppeteer");
+
+function isDescendantOf(frame, ancestor) {
+  let parent = frame.parentFrame();
+  while (parent) {
+    if (parent === ancestor) return true;
+    parent = parent.parentFrame();
+  }
+  return false;
+}
+
+async function frameText(frame) {
+  try {
+    return await frame.evaluate(() => {
+      const body = document.body ? document.body.innerText : "";
+      const root = document.documentElement ? document.documentElement.innerText : "";
+      return body || root || "";
+    });
+  } catch (_error) {
+    return "";
+  }
+}
+
+async function findPreviewText(page, expectedText, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = [];
+  while (Date.now() < deadline) {
+    const frames = page.frames();
+    const previewFrame = frames.find((frame) => {
+      const url = frame.url();
+      return url.includes("/archivewebpage/archivewebpage.wacz") && url.includes("preview=1");
+    });
+
+    lastState = [];
+    for (const frame of frames) {
+      const text = await frameText(frame);
+      lastState.push({
+        name: frame.name(),
+        url: frame.url(),
+        isPreview: frame === previewFrame,
+        underPreview: previewFrame ? isDescendantOf(frame, previewFrame) : false,
+        textSample: text.slice(0, 240),
+      });
+      if (previewFrame && (frame === previewFrame || isDescendantOf(frame, previewFrame)) && text.includes(expectedText)) {
+        return {
+          matched: true,
+          previewUrl: previewFrame.url(),
+          matchedFrameUrl: frame.url(),
+          matchedFrameName: frame.name(),
+          textSample: text.slice(0, 400),
+        };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return {matched: false, frames: lastState};
+}
+
+async function main() {
+  const config = JSON.parse(fs.readFileSync(0, "utf8"));
+  const browser = await puppeteer.launch({
+    executablePath: config.chromePath,
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-background-networking",
+    ],
+  });
+
+  const page = await browser.newPage();
+  const consoleMessages = [];
+  const requestFailures = [];
+  page.on("console", (message) => {
+    consoleMessages.push({type: message.type(), text: message.text()});
+  });
+  page.on("pageerror", (error) => {
+    consoleMessages.push({type: "pageerror", text: String(error)});
+  });
+  page.on("requestfailed", (request) => {
+    requestFailures.push({
+      url: request.url(),
+      error: request.failure() ? request.failure().errorText : "unknown",
+    });
+  });
+
+  const response = await page.goto(config.detailUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+  });
+  const previewResult = await findPreviewText(page, config.expectedText, 60000);
+
+  console.log(JSON.stringify({
+    detailUrl: config.detailUrl,
+    status: response ? response.status() : null,
+    finalUrl: page.url(),
+    previewResult,
+    consoleMessages,
+    requestFailures,
+  }));
   await browser.close();
 }
 
@@ -476,6 +595,75 @@ def _run_browser_probe(
     return json.loads(result.stdout.strip())
 
 
+def _wait_for_archivewebpage_capture(data_dir: Path, url: str, timeout: float = 300.0) -> dict[str, str]:
+    from archivebox.core.models import ArchiveResult, Snapshot
+    from archivebox.tests.test_orm_helpers import use_archivebox_db
+
+    deadline = time.time() + timeout
+    last_state = {}
+    while time.time() < deadline:
+        with use_archivebox_db(data_dir):
+            snapshot = Snapshot.objects.filter(url=url).order_by("-created_at").first()
+            if snapshot is None:
+                last_state = {"snapshot": "missing"}
+            else:
+                result = (
+                    ArchiveResult.objects.filter(snapshot=snapshot, plugin="archivewebpage")
+                    .order_by("-created_at")
+                    .values("status", "output_files", "output_str")
+                    .first()
+                )
+                wacz_path = Path(snapshot.output_dir) / "archivewebpage" / "archivewebpage.wacz"
+                last_state = {
+                    "snapshot_id": str(snapshot.id),
+                    "snapshot_status": str(snapshot.status),
+                    "result": str(result),
+                    "wacz_path": str(wacz_path),
+                    "wacz_exists": str(wacz_path.is_file()),
+                }
+                if (
+                    snapshot.status == Snapshot.StatusChoices.SEALED
+                    and result is not None
+                    and result["status"] == ArchiveResult.StatusChoices.SUCCEEDED
+                    and wacz_path.is_file()
+                ):
+                    return {
+                        "snapshot_id": str(snapshot.id),
+                        "wacz_path": str(wacz_path),
+                    }
+        time.sleep(2)
+    raise AssertionError(f"timed out waiting for archivewebpage capture: {last_state}")
+
+
+def _run_wacz_preview_probe(data_dir: Path, runtime: dict[str, Path], detail_url: str, tmp_path: Path) -> dict[str, object]:
+    probe_path = tmp_path / "wacz_preview_probe.js"
+    probe_path.write_text(PUPPETEER_WACZ_PREVIEW_SCRIPT, encoding="utf-8")
+
+    env = os.environ.copy()
+    env["NODE_PATH"] = str(runtime["node_modules_dir"])
+    env["NODE_MODULES_DIR"] = str(runtime["node_modules_dir"])
+    env["CHROME_BINARY"] = str(runtime["chrome_binary"])
+    env["USE_COLOR"] = "False"
+
+    result = subprocess.run(
+        ["node", str(probe_path)],
+        cwd=data_dir,
+        env=env,
+        input=json.dumps(
+            {
+                "chromePath": str(runtime["chrome_binary"]),
+                "detailUrl": detail_url,
+                "expectedText": "This domain is for use in documentation examples",
+            },
+        ),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return json.loads(result.stdout.strip())
+
+
 @pytest.mark.parametrize(
     ("mode", "expected"),
     [
@@ -601,3 +789,51 @@ def test_server_security_modes_in_chrome(
     elif mode == "danger-onedomain-fullreplay":
         assert "ArchiveBox" in probe_results["admin"]["sample"]
         assert "swagger" in probe_results["api"]["sample"].lower()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.timeout(600)
+def test_archivewebpage_wacz_preview_serves_real_capture_frame(initialized_archive: Path, browser_runtime, tmp_path: Path) -> None:
+    from archivebox.core.host_util import get_snapshot_subdomain
+
+    url = "https://example.com"
+    port = _get_free_port()
+    env = build_test_env(
+        port,
+        PLUGINS="archivewebpage",
+        URL_ALLOWLIST="",
+        PUBLIC_INDEX="True",
+        PUBLIC_ADD_VIEW="True",
+        SERVER_SECURITY_MODE="safe-subdomains-fullreplay",
+        USE_CHROME="True",
+        CHROME_BINARY=str(browser_runtime["chrome_binary"]),
+        CHROME_HEADLESS="True",
+        CHROME_SANDBOX="False",
+        CHROME_ISOLATION="snapshot",
+        ARCHIVEWEBPAGE_ENABLED="True",
+        ARCHIVEWEBPAGE_TIMEOUT="90",
+        TIMEOUT="90",
+    )
+
+    try:
+        start_daemon_server(initialized_archive, env=env, port=port)
+        wait_for_daemon_http(port, host=f"archivebox.localhost:{port}", path="/")
+        stdout, stderr, returncode = run_archivebox_cmd_cwd(
+            ["add", "--bg", "--depth=0", "--max-urls=1", "--plugins=archivewebpage", url],
+            cwd=initialized_archive,
+            env=env,
+            timeout=120,
+        )
+        assert returncode == 0, f"archivebox add --bg failed:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+
+        capture = _wait_for_archivewebpage_capture(initialized_archive, url, timeout=360)
+        snapshot_host = f"{get_snapshot_subdomain(capture['snapshot_id'])}.archivebox.localhost:{port}"
+        detail_url = f"http://{snapshot_host}/#archivewebpage/archivewebpage.wacz"
+        result = _run_wacz_preview_probe(initialized_archive, browser_runtime, detail_url, tmp_path)
+    finally:
+        stop_daemon_server(initialized_archive)
+
+    assert result["status"] == 200
+    assert result["previewResult"]["matched"], json.dumps(result, indent=2)
+    assert "/archivewebpage/archivewebpage.wacz" in result["previewResult"]["previewUrl"]
+    assert result["previewResult"]["matchedFrameUrl"] != result["finalUrl"]

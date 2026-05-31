@@ -2,7 +2,9 @@
 
 __package__ = "archivebox.base_models"
 
+import json
 import shutil
+from typing import Any
 
 from archivebox.uuid_compat import uuid7
 from pathlib import Path
@@ -17,6 +19,25 @@ from django.urls import reverse_lazy
 from django.conf import settings
 
 from django_stubs_ext.db.models import TypedModelMeta
+
+
+def normalize_config_json_values(config: Any) -> Any:
+    if not isinstance(config, dict):
+        return config
+
+    normalized = dict(config)
+    for key, value in list(normalized.items()):
+        if not isinstance(value, str) or len(value) < 2:
+            continue
+        if value[:1] != '"' or value[-1:] != '"':
+            continue
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            continue
+        if isinstance(decoded, str):
+            normalized[key] = decoded
+    return normalized
 
 
 def get_or_create_system_user_pk(username="system"):
@@ -115,6 +136,15 @@ class ModelWithConfig(models.Model):
 
     class Meta(TypedModelMeta):
         abstract = True
+
+    def save(self, *args, **kwargs):
+        normalized_config = normalize_config_json_values(self.config)
+        if normalized_config != self.config:
+            self.config = normalized_config
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = tuple(dict.fromkeys([*update_fields, "config"]))
+        super().save(*args, **kwargs)
 
 
 class ModelWithDeleteAfter(models.Model):

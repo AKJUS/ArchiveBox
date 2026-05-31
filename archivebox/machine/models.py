@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 
 from archivebox.config.common import rprint
-from archivebox.base_models.models import ModelWithDeleteAfter, ModelWithHealthStats
+from archivebox.base_models.models import ModelWithDeleteAfter, ModelWithHealthStats, normalize_config_json_values
 from archivebox.workers.models import BaseStateMachine, ModelWithStateMachine
 from .detect import get_host_guid, get_os_info, get_vm_info, get_host_network, get_host_stats
 
@@ -334,6 +334,13 @@ class Machine(ModelWithHealthStats):
         return None
 
     def save(self, *args, **kwargs):
+        normalized_config = normalize_config_json_values(self.config)
+        if normalized_config != self.config:
+            self.config = normalized_config
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = tuple(dict.fromkeys([*update_fields, "config"]))
+
         # Drop the ``Machine.current()`` module-level cache on every save so
         # config edits (admin form, from_json, etc.) become live in the same
         # process without waiting out the 7-day ``MACHINE_RECHECK_INTERVAL``.
@@ -797,7 +804,7 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
                 self.status = self.StatusChoices.INSTALLED
                 self.save()
 
-                # Symlink binary into LIB_BIN_DIR if configured
+                # Maintain the optional human-facing LIB_BIN_DIR convenience symlink.
                 from archivebox.config.common import get_config
 
                 lib_bin_dir = get_config().LIB_BIN_DIR
@@ -825,13 +832,12 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
 
     def symlink_to_lib_bin(self, lib_bin_dir: str | Path) -> Path | None:
         """
-        Symlink this binary into LIB_BIN_DIR for shared runtime lookup.
+        Symlink this binary into LIB_BIN_DIR for human-facing convenience.
 
         After a binary is installed by any binprovider (pip, npm, brew, apt, etc),
-        we symlink it into LIB_BIN_DIR so that:
-        1. All binaries can be found in a single directory
-        2. abxpkg/abx-dl can include the shared bin dir when constructing exec envs
-        3. Binary priorities are clear (symlink points to the canonical install location)
+        we can optionally expose a flat convenience directory for shell users.
+        ArchiveBox/abx-dl runtime lookup must use the provider-specific LIB_DIR
+        paths, not this indirection.
 
         Args:
             lib_bin_dir: Path to LIB_BIN_DIR (e.g., /data/lib/arm64-darwin/bin)

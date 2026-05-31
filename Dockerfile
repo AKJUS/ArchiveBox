@@ -86,7 +86,6 @@ ENV ARCHIVEBOX_USER="archivebox" \
 ENV CODE_DIR=/app \
     DATA_DIR=/data \
     LIB_DIR=/opt/archivebox/lib \
-    LIB_BIN_DIR=/opt/archivebox/lib/bin \
     ABXPKG_LIB_DIR=/opt/archivebox/lib \
     PLAYWRIGHT_BROWSERS_PATH=/browsers
 
@@ -251,7 +250,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
 # installed into LIB_DIR below by archivebox init --install and resolved from
 # LIB_DIR by ArchiveBox/abxpkg, not by mutating the container PATH.
 ENV PERSONAS_DIR=/data/personas \
-    CHROME_EXTENSIONS_DIR=/opt/archivebox/lib/chrome_extensions \
     CHROME_USER_DATA_DIR=/data/personas/Default/chrome_profile \
     CHROME_HEADLESS=true \
     CHROME_SANDBOX=false \
@@ -312,9 +310,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     --mount=type=cache,target=/root/.cache/ms-playwright,sharing=locked,id=browsers-$TARGETARCH$TARGETVARIANT \
     echo "[+] Installing plugin runtime dependencies into $LIB_DIR..." \
     && export PERSONAS_DIR="$LIB_DIR/personas" \
-    && export CHROME_EXTENSIONS_DIR="$LIB_DIR/chrome_extensions" \
     && export CHROME_USER_DATA_DIR="$LIB_DIR/chrome_profile" \
-    && mkdir -p "$LIB_DIR" "$LIB_DIR/chrome_extensions" \
+    && mkdir -p "$LIB_DIR" \
     && apt-get update -qq \
     && if [ "$TARGETARCH" = "arm64" ]; then \
         abxpkg install --binproviders=npm --overrides='{"npm":{"install_args":["playwright@next"]}}' playwright; \
