@@ -14,7 +14,8 @@ from urllib.parse import urlparse
 from statemachine import State, registry
 
 from django.db import models, transaction
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import Case, Q, QuerySet, Sum, Value, When
+from django.db.models.functions import Concat
 from django.db.models.fields.json import KT
 from django.utils.functional import cached_property
 from django.utils.text import slugify
@@ -756,44 +757,31 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
             crawl = self.crawl
             if not crawl.url_passes_filters(self.url, snapshot=self):
                 return
-            # TEMP INSTRUMENTATION: count retries to verify root cause
-            import logging as _logging
-            import os
-
-            for attempt in range(16):
-                crawl.refresh_from_db()
-                existing_urls = {url for _raw_line, url in crawl._iter_url_lines() if url}
-                if self.url in existing_urls:
-                    if attempt > 0:
-                        _logging.getLogger("archivebox.crawls").warning(
-                            "CAS_RETRY[%d] another_writer_won pid=%d snap=%s crawl=%s url=%s",
-                            attempt,
-                            os.getpid(),
-                            self.id,
-                            crawl.id,
-                            self.url,
-                        )
-                    return
-                urls = f"{crawl.urls}\n{self.url}"
-                if crawl.safe_update({"urls": urls, "modified_at": timezone.now()}, refresh=False):
-                    if attempt > 0:
-                        _logging.getLogger("archivebox.crawls").warning(
-                            "CAS_RETRY[%d] succeeded pid=%d snap=%s crawl=%s url=%s",
-                            attempt,
-                            os.getpid(),
-                            self.id,
-                            crawl.id,
-                            self.url,
-                        )
-                    crawl.urls = urls
-                    return
-            _logging.getLogger("archivebox.crawls").error(
-                "CAS_RETRY exhausted pid=%d snap=%s crawl=%s url=%s",
-                os.getpid(),
-                self.id,
-                crawl.id,
-                self.url,
+            # Best-effort skip if our URL is already recorded on the crawl;
+            # the atomic UPDATE below is what actually prevents clobbering.
+            crawl.refresh_from_db(fields=["urls"])
+            if self.url in {url for _raw_line, url in crawl._iter_url_lines() if url}:
+                return
+            now = timezone.now()
+            # Atomic append: SQLite reads `urls` inside the UPDATE statement,
+            # so concurrent appends never clobber each other (no read-then-write
+            # window, no CAS retry needed). A rare duplicate URL on a race is
+            # harmless — downstream consumers dedupe via Snapshot uniqueness.
+            text = models.TextField()
+            type(crawl).objects.filter(pk=crawl.pk).update(
+                urls=Case(
+                    When(Q(urls="") | Q(urls__isnull=True), then=Value(self.url, output_field=text)),
+                    default=Concat(
+                        "urls",
+                        Value("\n", output_field=text),
+                        Value(self.url, output_field=text),
+                        output_field=text,
+                    ),
+                    output_field=text,
+                ),
+                modified_at=now,
             )
+            crawl.modified_at = now
 
         # get_or_create/update_or_create wrap save() in atomic(); defer filesystem
         # work and crawl maintenance so SQLite commits before touching the disk.
