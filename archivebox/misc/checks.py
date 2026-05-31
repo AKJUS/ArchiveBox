@@ -159,7 +159,10 @@ def check_not_root():
 
     if IS_ROOT and not (is_getting_help or is_getting_version):
         print("[yellow][!] Running ArchiveBox as root is not recommended.[/yellow]", file=sys.stderr)
-        print("    Root-owned DATA_DIR files may be inaccessible to non-root users later.", file=sys.stderr)
+        print(
+            "    Chrome and other plugins run as non-root for security, if DATA_DIR is owned by root it can prevent archiving from succeeding.",
+            file=sys.stderr,
+        )
         print("        https://github.com/ArchiveBox/ArchiveBox/wiki/Security-Overview#do-not-run-as-root", file=sys.stderr)
 
 
@@ -205,7 +208,6 @@ def check_data_dir_permissions(config=None, **config_kwargs):
             f"[violet]Hint:[/violet] Change the current ownership [red]{data_dir_uid}[/red]:{data_dir_gid} (PUID:PGID) to the user & group that will run ArchiveBox, e.g.:",
         )
         STDERR.print(f"    [grey53]sudo[/grey53] chown -R [blue]{DEFAULT_PUID}:{DEFAULT_PGID}[/blue] {DATA_DIR.resolve()}")
-        STDERR.print("    Avoid recursive chown on very large archives unless you know the full tree needs repair.")
         STDERR.print()
         STDERR.print("[blue]More info:[/blue]")
         STDERR.print(
