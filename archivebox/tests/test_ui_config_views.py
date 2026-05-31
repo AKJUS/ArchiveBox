@@ -201,7 +201,7 @@ def test_plugin_detail_view_renders_real_user_plugin_config_in_dedicated_section
 
     assert properties_section["name"] == "Config Properties"
     assert properties_section["fields"] == {}
-    assert f"/admin/machine/machine/{machine.id}/change/" in properties_section["description"]
+    assert f"/admin/machine/machine/{machine.id.hex}/change/" in properties_section["description"]
     assert "/admin/machine/binary/" in properties_section["description"]
     assert "/admin/environment/binaries/" in properties_section["description"]
     assert "EXAMPLE_ENABLED" in properties_section["description"]
