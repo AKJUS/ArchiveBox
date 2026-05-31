@@ -53,7 +53,7 @@ By default, ArchiveBox will only archive new links on each import. If you want i
 **Possible Values:** [`60`]/`120`/...
 Maximum allowed runtime **per-extractor, per-Snapshot** in seconds. If you have a slow network connection or are seeing frequent timeout errors, you can raise this value.
 
-This is a *plugin-shared* setting — each individual extractor can override it with its own `<EXTRACTOR>_TIMEOUT` (e.g. `WGET_TIMEOUT`, `CHROME_TIMEOUT`, `YTDLP_TIMEOUT`). See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for the full list.
+This is a *plugin-shared* setting — each individual extractor can override it with its own `<EXTRACTOR>_TIMEOUT` (e.g. [`WGET_TIMEOUT`](https://archivebox.github.io/abx-plugins/#wget), [`CHROME_TIMEOUT`](https://archivebox.github.io/abx-plugins/#chrome), [`YTDLP_TIMEOUT`](https://archivebox.github.io/abx-plugins/#ytdlp)). See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for the full list.
 
 > [!NOTE]
 > `TIMEOUT` only caps a single extractor invocation. To bound the *total* wall-clock runtime of an entire crawl, use [`CRAWL_TIMEOUT`](#crawl_timeout) instead.
@@ -69,14 +69,14 @@ This is a *plugin-shared* setting — each individual extractor can override it 
 **Possible Values:** [`1440,2000`]/`1024,768`/...
 Default screenshot/PDF viewport resolution in `width,height` pixels. Used as the fallback for `SCREENSHOT_RESOLUTION`, `PDF_RESOLUTION`, and `CHROME_RESOLUTION`.
 
-This is a *plugin-shared* setting — individual extractors override it via `<EXTRACTOR>_RESOLUTION`. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for plugin-specific overrides.
+This is a *plugin-shared* setting — individual extractors override it via `<EXTRACTOR>_RESOLUTION` (e.g. [`SCREENSHOT_RESOLUTION`](https://archivebox.github.io/abx-plugins/#screenshot), [`PDF_RESOLUTION`](https://archivebox.github.io/abx-plugins/#pdf), [`CHROME_RESOLUTION`](https://archivebox.github.io/abx-plugins/#chrome)). See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for plugin-specific overrides.
 
 ---
 #### `CHECK_SSL_VALIDITY`
 **Possible Values:** [`True`]/`False`
 Whether to enforce HTTPS certificate validity and HSTS chain of trust when archiving sites. Set this to `False` if you want to archive pages even if they have expired or invalid certificates.
 
-This is a *plugin-shared* setting — every HTTP-fetching extractor (`wget`, `curl`, `yt-dlp`, `chrome`, etc.) honors it, and individual extractors can override with `<EXTRACTOR>_CHECK_SSL_VALIDITY`. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/).
+This is a *plugin-shared* setting — every HTTP-fetching extractor ([`wget`](https://archivebox.github.io/abx-plugins/#wget), [`yt-dlp`](https://archivebox.github.io/abx-plugins/#ytdlp), [`gallery-dl`](https://archivebox.github.io/abx-plugins/#gallerydl), [`chrome`](https://archivebox.github.io/abx-plugins/#chrome), etc.) honors it, and individual extractors can override with `<EXTRACTOR>_CHECK_SSL_VALIDITY`. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/).
 
 > [!WARNING]
 > When `False`, ArchiveBox cannot guarantee that the captured content matches the real site — a man-in-the-middle could substitute responses. Only disable for trusted networks or for archiving legacy/internal sites with expired certs.
@@ -86,7 +86,7 @@ This is a *plugin-shared* setting — every HTTP-fetching extractor (`wget`, `cu
 **Possible Values:** [`Mozilla/5.0 ... ArchiveBox/{VERSION} ...`]/`"Mozilla/5.0 ..."`/...
 The default `User-Agent` string sent during archiving. The built-in default identifies ArchiveBox and links back to the GitHub repo so site operators can identify and contact archivers if needed.
 
-This is a *plugin-shared* setting — each extractor (`wget`, `curl`, `chrome`, `yt-dlp`, …) can override it with its own `<EXTRACTOR>_USER_AGENT`, otherwise it falls back to this value. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for per-extractor specifics.
+This is a *plugin-shared* setting — each extractor ([`wget`](https://archivebox.github.io/abx-plugins/#wget), [`chrome`](https://archivebox.github.io/abx-plugins/#chrome), [`yt-dlp`](https://archivebox.github.io/abx-plugins/#ytdlp), [`singlefile`](https://archivebox.github.io/abx-plugins/#singlefile), …) can override it with its own `<EXTRACTOR>_USER_AGENT`, otherwise it falls back to this value. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for per-extractor specifics.
 
 > [!NOTE]
 > Some sites block requests that look like bots or that don't match a real browser. If you're getting 403s or empty responses, try setting this to a current Chrome/Firefox UA string.
@@ -95,23 +95,27 @@ This is a *plugin-shared* setting — each extractor (`wget`, `curl`, `chrome`, 
 #### `COOKIES_FILE`
 **Possible Values:** [`None`]/`/path/to/cookies.txt`/...
 
-Path to a [Netscape-format `cookies.txt`](http://www.cookiecentral.com/faq/#3.5) file passed to `wget`, `curl`, `yt-dlp`, and other non-Chrome extractors for authentication. Required when archiving sites behind a login (paywalls, social media feeds, members-only forums, etc.).
+> [!TIP]
+> **Prefer [personas](#default_persona) over `COOKIES_FILE` for authentication.** A persona bundles a `cookies.txt`, a Chrome user-data-dir, a user-agent, and any other per-identity state into one named profile that's swappable per-crawl and automatically scoped across every extractor. `COOKIES_FILE` (and the per-extractor `<EXTRACTOR>_COOKIES_FILE` overrides) is a low-level escape hatch for when you specifically need to point at a hand-rolled cookies file outside the persona system — most users should ignore it and configure auth through `archivebox persona create` instead.
 
-This is a *plugin-shared* setting — each extractor can override it with `<EXTRACTOR>_COOKIES_FILE`. Chrome-based extractors instead read auth state from the persona's `CHROME_USER_DATA_DIR`. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/).
+Path to a [Netscape-format `cookies.txt`](http://www.cookiecentral.com/faq/#3.5) file passed to `wget`, `curl`, `yt-dlp`, and other non-Chrome extractors for authentication. Required when archiving sites behind a login (paywalls, social media feeds, members-only forums, etc.) **if you're not using a persona**.
+
+This is a *plugin-shared* setting — each extractor can override it with `<EXTRACTOR>_COOKIES_FILE` (e.g. [`WGET_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#wget), [`YTDLP_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#ytdlp), [`GALLERYDL_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#gallerydl)). [Chrome](https://archivebox.github.io/abx-plugins/#chrome)-based extractors instead read auth state from the persona's `CHROME_USER_DATA_DIR`. See the [per-plugin docs](https://archivebox.github.io/abx-plugins/) for per-extractor variants.
 
 You can generate a `cookies.txt` using a [browser extension](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc), or with `wget --save-cookies` + `--user=... --password=...`.
 
-Alternatively, create a persona and import cookies directly from your browser profile:
+The recommended path is to create a persona and let it manage cookies + Chrome profile state for you:
 
 ```bash
 archivebox persona create --import=chrome personal
+archivebox add --persona=personal https://members.example.com/feed
 ```
 
 > [!WARNING]
 > **Use separate burner credentials dedicated to archiving** — don't re-use your normal daily Facebook/Instagram/Youtube/etc. account cookies as server responses often contain your name/email/PII and session tokens, which then get preserved in your snapshots forever!
 
 *Related options:*
-[`CHROME_USER_DATA_DIR`](https://archivebox.github.io/abx-plugins/), [`DEFAULT_PERSONA`](#default_persona), [`ACTIVE_PERSONA`](#active_persona)
+[`DEFAULT_PERSONA`](#default_persona), [`ACTIVE_PERSONA`](#active_persona), [`CHROME_USER_DATA_DIR`](https://archivebox.github.io/abx-plugins/#chrome)
 
 ---
 #### `DEFAULT_PERSONA`
@@ -263,7 +267,7 @@ Default visibility for newly created Snapshots. Inherited by every Snapshot in a
 - **`unlisted`** — Snapshot content is accessible via direct link, but it is **not** listed in the public index. Equivalent to a "secret URL."
 - **`private`** — Snapshot is hidden from the public index *and* its content requires admin login.
 
-This option supersedes the legacy `PUBLIC_INDEX` / `PUBLIC_SNAPSHOTS` boolean flags — those are now interpreted as a coarse mapping onto `PERMISSIONS` for backwards compatibility (e.g. `PUBLIC_SNAPSHOTS=False` ⇒ `private`, `PUBLIC_INDEX=False` ⇒ `unlisted`).
+This option supersedes the removed `PUBLIC_SNAPSHOTS` boolean and is also driven by the still-current [`PUBLIC_INDEX`](#public_index) flag — both are interpreted as a coarse mapping onto `PERMISSIONS` for backwards compatibility (`PUBLIC_SNAPSHOTS=False` ⇒ `private`, `PUBLIC_INDEX=False` ⇒ `unlisted`, either set to `True` ⇒ `public`). Setting `PERMISSIONS` directly wins over either legacy flag.
 
 > [!NOTE]
 > `PERMISSIONS` controls **per-Snapshot** visibility. Server-wide auth (whether the whole UI requires login, whether the add-view is open) is still controlled by [`PUBLIC_INDEX`](#public_index) and [`PUBLIC_ADD_VIEW`](#public_add_view) under Server Settings.
@@ -372,49 +376,32 @@ IPv6 literal addresses must be bracketed: `[::1]:8000`, not `::1:8000`.
 > Inside Docker, binding to `127.0.0.1` means the server is unreachable from outside the container — use `0.0.0.0:8000` and let Docker handle the port-forwarding, or publish the port with `-p 127.0.0.1:8000:8000` on the host side instead.
 
 *Related options:*
-[`BASE_URL`](#base_url), [`ALLOWED_HOSTS`](#allowed_hosts)
+[`BASE_URL`](#base_url), [`SERVER_SECURITY_MODE`](#server_security_mode)
 
 ---
+<a id="allowed_hosts"></a>
+<a id="csrf_trusted_origins"></a>
 #### `BASE_URL`
 **Possible Values:** [`""`]/`https://archive.example.com`/`http://archivebox.localhost:8000`/...
 
 The canonical public URL of your ArchiveBox instance. Used to build absolute links in templates, redirects (`/admin/login/?next=...`), admin notification emails, OG/meta tags, and — in subdomain security mode — to derive the `admin.`, `web.`, `api.`, `public.`, and per-snapshot `snap-<id>.` subdomains.
 
-**When `BASE_URL` is set explicitly**, ArchiveBox treats it as the source of truth and ignores the incoming `Host` header for URL building. In `safe-subdomains-fullreplay` mode this is **required for redirects to work** — without an explicit base, the middleware can't safely emit `admin.host` redirects (they'd compound onto whatever subdomain the request already arrived on).
+**When `BASE_URL` is set explicitly**, ArchiveBox treats it as the source of truth and ignores the incoming `Host` header for URL building. In `safe-subdomains-fullreplay` mode this is **required for redirects to work** — without an explicit base, the middleware can't safely emit `admin.<host>` redirects (they'd compound onto whatever subdomain the request already arrived on).
 
-**When `BASE_URL` is empty**, the value is resolved at request time via this fallback chain (see `archivebox/core/host_util.py:get_base_url`):
-
-1. **CSRF inference** — if [`CSRF_TRUSTED_ORIGINS`](#csrf_trusted_origins) contains exactly one entry, that entry is used as the implicit base. This is the upgrade path for users coming from 0.7.3 → 0.9 who already had `CSRF_TRUSTED_ORIGINS=https://archive.example.com` set for their reverse-proxy login but never set `BASE_URL`.
-2. **Request `Host` header** — the host the client connected on, with any leading `admin.` / `web.` / `api.` / `public.` / `snap-*.` label stripped to recover the canonical base.
-3. **Loopback remapping** — `localhost` / `127.0.0.1` / `0.0.0.0` / `::` are rewritten to `archivebox.localhost` so subdomain routing works without `/etc/hosts` edits.
-4. **`BIND_ADDR` derivation** — last resort if there's no live request.
+**When `BASE_URL` is empty**, the value is resolved at request time from the incoming request's `Host` header (with any leading `admin.` / `web.` / `api.` / `public.` / `snap-*.` label stripped to recover the canonical base). Loopback hostnames (`localhost`, `127.0.0.1`, `0.0.0.0`, `::`) are rewritten to `archivebox.localhost` so subdomain routing works without `/etc/hosts` edits. If there's no live request, [`BIND_ADDR`](#bind_addr) is used as a last resort.
 
 The scheme is taken from the explicit `BASE_URL` if set, otherwise from the request (so put a reverse proxy in front for HTTPS and trust `X-Forwarded-Proto`).
+
+ArchiveBox automatically derives the underlying Django `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` settings from `BASE_URL` + [`SERVER_SECURITY_MODE`](#server_security_mode), so you do **not** set those directly — the system widens them as needed to admit the admin/web/api/public subdomains.
 
 > [!NOTE]
 > **In `safe-subdomains-fullreplay` mode, pin `BASE_URL` explicitly.** Without it, the misconfig banner will surface in the rendered page and host-based redirects (`/admin` → `admin.<host>`) are suppressed to avoid the `admin.admin.admin.<host>` compounding bug.
 
-*Related options:*
-[`SERVER_SECURITY_MODE`](#server_security_mode), [`CSRF_TRUSTED_ORIGINS`](#csrf_trusted_origins), [`ALLOWED_HOSTS`](#allowed_hosts), [`BIND_ADDR`](#bind_addr)
-
----
-#### `ALLOWED_HOSTS`
-**Possible Values:** [`*`]/`archive.example.com`/`archive.example.com,.archive.example.com`/`archive.example.com,localhost`/...
-
-Comma-separated list of HTTP `Host` header values Django will accept. This is a Django-level security control against HTTP Host header injection attacks — requests arriving with a `Host` header that doesn't match any entry are rejected with a 400 before they reach any view.
-
-- `*` (default) — accept any `Host` header. Convenient for first-run / Docker but **not safe for production**: a stray `Host: evil.com` from a misconfigured proxy can leak into password-reset emails and admin links.
-- `archive.example.com` — exact match only.
-- `.archive.example.com` — matches `archive.example.com` and all subdomains (`admin.archive.example.com`, `snap-abc123.archive.example.com`, etc.). **Required in `safe-subdomains-fullreplay` mode** so the role/snapshot subdomains are admitted.
-- `archive.example.com,.archive.example.com,localhost` — multiple entries, comma-separated.
-
-ArchiveBox automatically appends `https://<hostname>` for every non-wildcard `ALLOWED_HOSTS` entry to [`CSRF_TRUSTED_ORIGINS`](#csrf_trusted_origins), so you don't have to keep the two lists in lockstep.
-
-> [!WARNING]
-> **Tighten `ALLOWED_HOSTS` away from `*` on any internet-exposed instance.** The wildcard default exists so the first-run / Docker / local dev experience isn't gated on DNS — once you have a real hostname, set it.
+> [!NOTE]
+> **Legacy upgrade path (0.7.3 → 0.9):** older deployments that set `CSRF_TRUSTED_ORIGINS=https://archive.example.com` for their reverse-proxy login but never set `BASE_URL` still work — when exactly one CSRF origin is present and `BASE_URL` is empty, ArchiveBox uses that origin as the implicit base URL. New installs should set `BASE_URL` directly; `CSRF_TRUSTED_ORIGINS` is no longer a user-settable knob.
 
 *Related options:*
-[`BASE_URL`](#base_url), [`CSRF_TRUSTED_ORIGINS`](#csrf_trusted_origins), [`SERVER_SECURITY_MODE`](#server_security_mode)
+[`SERVER_SECURITY_MODE`](#server_security_mode), [`BIND_ADDR`](#bind_addr)
 
 ---
 #### `SERVER_SECURITY_MODE`
@@ -438,29 +425,10 @@ ArchiveBox splits its surfaces across four logical hosts: `admin.*` (Django admi
 > Subdomain mode requires both wildcard DNS (`*.archive.example.com`) and (if using TLS) a wildcard certificate. Without those, fall back to `safe-onedomain-nojsreplay`.
 
 *Related options:*
-[`BASE_URL`](#base_url), [`ALLOWED_HOSTS`](#allowed_hosts), [`CSRF_TRUSTED_ORIGINS`](#csrf_trusted_origins), [`PERMISSIONS`](#permissions)
+[`BASE_URL`](#base_url), [`PERMISSIONS`](#permissions)
 
 More info:
 - [Security Overview](Security-Overview)
-
----
-#### `CSRF_TRUSTED_ORIGINS`
-**Possible Values:** [`""`]/`https://archive.example.com`/`https://archive.example.com,https://admin.archive.example.com:8443`/...
-
-Comma-separated list of `scheme://host[:port]` origins Django will accept as the `Origin` / `Referer` on state-changing requests (POST/PUT/PATCH/DELETE). Entries **must include the scheme** (`https://` or `http://`) — bare hostnames are silently dropped.
-
-ArchiveBox uses this value in two ways:
-
-1. **Django CSRF allowlist** — passed directly to Django's `CSRF_TRUSTED_ORIGINS` setting. Required for any host that hosts a form behind a reverse proxy rewriting the scheme.
-2. **Implicit `BASE_URL` source** (0.7.3 → 0.9 upgrade path) — if [`BASE_URL`](#base_url) is empty and `CSRF_TRUSTED_ORIGINS` contains **exactly one** entry, that entry is used as the canonical public URL. See `archivebox/core/host_util.py:derive_base_url_from_csrf` for the inference logic. With zero or two-plus entries the inference is skipped and the request-`Host` fallback runs instead.
-
-ArchiveBox auto-extends this list at startup with `https://<host>` for each non-wildcard [`ALLOWED_HOSTS`](#allowed_hosts) entry, plus the resolved admin and API base URLs. The effective list is logged once at server startup.
-
-> [!NOTE]
-> For subdomain mode, list the bare base host (`https://archive.example.com`) — the admin/web/api/public subdomains are appended automatically. You only need extra entries if you've fronted the instance behind a non-default port (`:8443`) or a non-derivable hostname.
-
-*Related options:*
-[`BASE_URL`](#base_url), [`ALLOWED_HOSTS`](#allowed_hosts), [`SERVER_SECURITY_MODE`](#server_security_mode)
 
 ---
 #### `SNAPSHOTS_PER_PAGE`
@@ -644,7 +612,7 @@ Permissions to set on output files written into the [`ARCHIVE_DIR`](#archive_dir
 <a id="pgid"></a>
 #### `PUID` / `PGID`
 **Possible Values:** [`911`]/`1000`/...
-*Note: Docker-only environment variables, not Pydantic config. Outside Docker these are auto-detected from the ownership of the data directory (or the running user's UID/GID) and cannot be overridden.*
+*Note: These are Docker-only environment variables — they only take effect when set on the Docker entrypoint at container startup. Setting them in `ArchiveBox.conf` or via `archivebox config --set` has no effect. Outside Docker the UID/GID is auto-detected from the ownership of the data directory (or the running user) and cannot be overridden.*
 
 The UID/GID that the ArchiveBox process should run as (and that all files in the data dir should be owned by). Honored by the Docker entrypoint, which `chown`s the data dir and drops privileges before running ArchiveBox. Outside Docker, ArchiveBox refuses to run as root and instead drops to the user that owns the data dir.
 
@@ -857,7 +825,7 @@ Lower values retry more aggressively (useful if you expect locks to clear quickl
 ArchiveBox can index Snapshot text/HTML output into a searchable index that powers the search bar in the Web UI and the `archivebox search <query>` CLI command. Multiple backend engines are supported — pick the one that best matches your collection size, available system resources, and tolerance for extra moving parts.
 
 > [!NOTE]
-> Each backend has its own tuning knobs (e.g. Sonic host/port, ripgrep flags, SQLite FTS database path). Those backend-specific options now live with the plugin that implements them — see the [abx-plugins docs](https://archivebox.github.io/abx-plugins/) for the full per-backend schema.
+> Each backend has its own tuning knobs (e.g. [Sonic](https://archivebox.github.io/abx-plugins/#search_backend_sonic) host/port, [ripgrep](https://archivebox.github.io/abx-plugins/#search_backend_ripgrep) flags, [SQLite FTS](https://archivebox.github.io/abx-plugins/#search_backend_sqlite) database path). Those backend-specific options now live with the plugin that implements them — see the [abx-plugins docs](https://archivebox.github.io/abx-plugins/) for the full per-backend schema.
 
 ---
 #### `SEARCH_BACKEND_ENGINE`
@@ -865,13 +833,13 @@ ArchiveBox can index Snapshot text/HTML output into a searchable index that powe
 
 Which search backend engine to use when running `archivebox search` and rendering the Web UI search bar.
 
-- **`ripgrep`** *(default)* — Pure filesystem grep across each Snapshot's archived output (HTML, text, metadata). No extra daemon, no extra database to maintain — just install `rg` and it works. Slow on very large collections (each query re-scans the disk) but always 100% correct: results reflect what's actually on disk *right now*, no stale index. Best choice for small-to-medium collections (≲50k snapshots) and for users who don't want to run extra services.
+- **`ripgrep`** *(default)* — Pure filesystem grep across each Snapshot's archived output (HTML, text, metadata) via the [`search_backend_ripgrep`](https://archivebox.github.io/abx-plugins/#search_backend_ripgrep) plugin. No extra daemon, no extra database to maintain — just install `rg` and it works. Slow on very large collections (each query re-scans the disk) but always 100% correct: results reflect what's actually on disk *right now*, no stale index. Best choice for small-to-medium collections (≲50k snapshots) and for users who don't want to run extra services.
 
-- **`sonic`** — Fast, suggest-style fuzzy search via a running [Sonic](https://github.com/valeriansaliou/sonic) daemon. ArchiveBox pushes text into Sonic at index time and queries it at search time. Sub-millisecond queries even at very large scale, but you have to run and maintain the Sonic process (Docker compose has it built in). Best choice for large collections (≳100k snapshots) when query latency matters.
+- **`sonic`** — Fast, suggest-style fuzzy search via a running [Sonic](https://github.com/valeriansaliou/sonic) daemon (configured via the [`search_backend_sonic`](https://archivebox.github.io/abx-plugins/#search_backend_sonic) plugin). ArchiveBox pushes text into Sonic at index time and queries it at search time. Sub-millisecond queries even at very large scale, but you have to run and maintain the Sonic process (Docker compose has it built in). Best choice for large collections (≳100k snapshots) when query latency matters.
 
-- **`sqlite`** — FTS5 full-text index stored alongside ArchiveBox's main `index.sqlite3`. No extra processes, no extra binary — uses the SQLite already shipped with Python. Faster than `ripgrep` on large collections, slightly slower than `sonic`, but no daemon to babysit. Good middle ground for users who want a real index without operational overhead.
+- **`sqlite`** — FTS5 full-text index stored alongside ArchiveBox's main `index.sqlite3`, configured via the [`search_backend_sqlite`](https://archivebox.github.io/abx-plugins/#search_backend_sqlite) plugin. No extra processes, no extra binary — uses the SQLite already shipped with Python. Faster than `ripgrep` on large collections, slightly slower than `sonic`, but no daemon to babysit. Good middle ground for users who want a real index without operational overhead.
 
-*Note: Backend-specific tuning (Sonic host/port/password, ripgrep flag overrides, FTS database path, indexer batch size, etc.) lives in each search-backend plugin's own config schema — see <https://archivebox.github.io/abx-plugins/> for the full per-backend option list.*
+*Note: Backend-specific tuning ([Sonic](https://archivebox.github.io/abx-plugins/#search_backend_sonic) host/port/password, [ripgrep](https://archivebox.github.io/abx-plugins/#search_backend_ripgrep) flag overrides, [SQLite FTS](https://archivebox.github.io/abx-plugins/#search_backend_sqlite) database path, indexer batch size, etc.) lives in each search-backend plugin's own config schema — see the [abx-plugins docs](https://archivebox.github.io/abx-plugins/) for the full per-backend option list.*
 
 ---
 
@@ -1168,7 +1136,7 @@ SHOW_PROGRESS=False archivebox add < urls.txt
 >
 > ## ➡️ **<https://archivebox.github.io/abx-plugins/>**
 
-That site is regenerated from each plugin's `config.json` schema on every release, so it stays in sync with the code. Looking for `WGET_ARGS`, `CHROME_USER_DATA_DIR`, `SCREENSHOT_RESOLUTION`, `YTDLP_EXTRA_ARGS`, `SINGLEFILE_*`, `SONIC_HOST`, etc.? They all live there now.
+That site is regenerated from each plugin's `config.json` schema on every release, so it stays in sync with the code. Looking for [`WGET_ARGS`](https://archivebox.github.io/abx-plugins/#wget), [`CHROME_USER_DATA_DIR`](https://archivebox.github.io/abx-plugins/#chrome), [`SCREENSHOT_RESOLUTION`](https://archivebox.github.io/abx-plugins/#screenshot), [`YTDLP_EXTRA_ARGS`](https://archivebox.github.io/abx-plugins/#ytdlp), [`SINGLEFILE_*`](https://archivebox.github.io/abx-plugins/#singlefile), [`SONIC_HOST`](https://archivebox.github.io/abx-plugins/#search_backend_sonic), etc.? They all live there now.
 
 ### Shared core options that plugins fall back to
 
@@ -1176,11 +1144,11 @@ A handful of *core* options (documented above on this page) act as the **fallbac
 
 | Core option (this doc) | Plugin-level overrides (see [abx-plugins](https://archivebox.github.io/abx-plugins/)) |
 |---|---|
-| [`TIMEOUT`](#timeout) | `WGET_TIMEOUT`, `CHROME_TIMEOUT`, `YTDLP_TIMEOUT`, `SINGLEFILE_TIMEOUT`, `TITLE_TIMEOUT`, `FAVICON_TIMEOUT`, ... |
-| [`CHECK_SSL_VALIDITY`](#check_ssl_validity) | `WGET_CHECK_SSL_VALIDITY`, `CURL_CHECK_SSL_VALIDITY`, `CHROME_CHECK_SSL_VALIDITY`, ... |
-| [`USER_AGENT`](#user_agent) | `WGET_USER_AGENT`, `CURL_USER_AGENT`, `CHROME_USER_AGENT`, `YTDLP_USER_AGENT`, ... |
-| [`COOKIES_FILE`](#cookies_file) | `WGET_COOKIES_FILE`, `CURL_COOKIES_FILE`, `YTDLP_COOKIES_FILE`, ... |
-| [`RESOLUTION`](#resolution) | `SCREENSHOT_RESOLUTION`, `PDF_RESOLUTION`, `CHROME_RESOLUTION` |
+| [`TIMEOUT`](#timeout) | [`WGET_TIMEOUT`](https://archivebox.github.io/abx-plugins/#wget), [`CHROME_TIMEOUT`](https://archivebox.github.io/abx-plugins/#chrome), [`YTDLP_TIMEOUT`](https://archivebox.github.io/abx-plugins/#ytdlp), [`SINGLEFILE_TIMEOUT`](https://archivebox.github.io/abx-plugins/#singlefile), [`TITLE_TIMEOUT`](https://archivebox.github.io/abx-plugins/#title), [`FAVICON_TIMEOUT`](https://archivebox.github.io/abx-plugins/#favicon), ... |
+| [`CHECK_SSL_VALIDITY`](#check_ssl_validity) | [`WGET_CHECK_SSL_VALIDITY`](https://archivebox.github.io/abx-plugins/#wget), [`YTDLP_CHECK_SSL_VALIDITY`](https://archivebox.github.io/abx-plugins/#ytdlp), [`GALLERYDL_CHECK_SSL_VALIDITY`](https://archivebox.github.io/abx-plugins/#gallerydl), [`CHROME_CHECK_SSL_VALIDITY`](https://archivebox.github.io/abx-plugins/#chrome), ... |
+| [`USER_AGENT`](#user_agent) | [`WGET_USER_AGENT`](https://archivebox.github.io/abx-plugins/#wget), [`CHROME_USER_AGENT`](https://archivebox.github.io/abx-plugins/#chrome), [`SINGLEFILE_USER_AGENT`](https://archivebox.github.io/abx-plugins/#singlefile), ... |
+| [`COOKIES_FILE`](#cookies_file) | [`WGET_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#wget), [`YTDLP_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#ytdlp), [`GALLERYDL_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#gallerydl), [`SINGLEFILE_COOKIES_FILE`](https://archivebox.github.io/abx-plugins/#singlefile), ... |
+| [`RESOLUTION`](#resolution) | [`SCREENSHOT_RESOLUTION`](https://archivebox.github.io/abx-plugins/#screenshot), [`PDF_RESOLUTION`](https://archivebox.github.io/abx-plugins/#pdf), [`CHROME_RESOLUTION`](https://archivebox.github.io/abx-plugins/#chrome) |
 | [`DEFAULT_PERSONA`](#default_persona) | per-plugin persona scoping (browser profile / cookie jar selection) |
 
 > [!TIP]
