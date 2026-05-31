@@ -407,7 +407,7 @@ class TestRunDaemonMode:
 
     def test_run_daemon_takeover_has_single_active_runner_gate(self, initialized_archive, db):
         from archivebox.machine.models import Process
-        from archivebox.services.supervision_service import RUNNER_ACTIVE_WORKER_TYPE
+        from archivebox.core.takeover_util import RUNNER_ACTIVE_WORKER_TYPE
         from archivebox.tests.test_orm_helpers import use_archivebox_db
 
         env = os.environ.copy()

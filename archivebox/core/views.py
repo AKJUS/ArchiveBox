@@ -335,7 +335,7 @@ class SnapshotView(View):
         # One canonical progress endpoint, same-origin to whichever host the page is on.
         # The id is always carried explicitly in the query string (derived from the page
         # context, never the host) so this works in every routing/security mode.
-        progress_endpoint = f"/progress.json?snapshot_id={snapshot.id}"
+        progress_endpoint = f"/progress.json?snapshot_id={snapshot.id.hex}"
 
         context = {
             "id": str(snapshot.id),
@@ -495,7 +495,7 @@ class SnapshotView(View):
                             f'- list all the <a href="/{snapshot.archive_path}/" target="_top">Snapshot files <code>.*</code></a><br/>'
                             f'- view the <a href="/{snapshot.archive_path}/index.html" target="_top">Snapshot <code>./index.html</code></a><br/>'
                             f'- go to the <a href="/admin/core/snapshot/{snapshot.pk}/change/" target="_top">Snapshot admin</a> to edit<br/>'
-                            f'- go to the <a href="/admin/core/snapshot/?id__exact={snapshot.id}" target="_top">Snapshot actions</a> to re-archive<br/>'
+                            f'- go to the <a href="/admin/core/snapshot/?id__exact={snapshot.id.hex}" target="_top">Snapshot actions</a> to re-archive<br/>'
                             '- or return to <a href="/" target="_top">the main index...</a></div>'
                             "</center>"
                             "</body></html>"
@@ -2089,7 +2089,7 @@ def live_progress_view(request):
             crawl_setup_failed = sum(1 for item in crawl_setup_plugins if item.get("status") == "failed")
             crawl_setup_pending = sum(1 for item in crawl_setup_plugins if item.get("status") == "queued")
             crawl_screencast_url = screencast_frame_url(crawl_id, active_crawl_objects[crawl_id].output_dir)
-            crawl_screencast_link = f"/admin/crawls/crawl/{crawl_id}/change/" if crawl_screencast_url else ""
+            crawl_screencast_link = f"/admin/crawls/crawl/{crawl_id.replace('-', '')}/change/" if crawl_screencast_url else ""
 
             # Get active snapshots for this crawl (already prefetched)
             active_snapshots_for_crawl = []
@@ -2186,7 +2186,7 @@ def live_progress_view(request):
                         "phase": phase,
                         "status": status,
                         "process_id": str(process.id) if process else None,
-                        "admin_url": f"/admin/core/archiveresult/{ar.id}/change/",
+                        "admin_url": f"/admin/core/archiveresult/{ar.id.hex}/change/",
                     }
                     output_path = archiveresult_output_path(ar)
                     if output_path:
@@ -2658,7 +2658,7 @@ def live_config_value_view(request: HttpRequest, key: str, **kwargs) -> ItemCont
     machine_admin_url = None
     try:
         machine = Machine.current()
-        machine_admin_url = f"/admin/machine/machine/{machine.id}/change/"
+        machine_admin_url = f"/admin/machine/machine/{machine.id.hex}/change/"
         if machine.config and key in machine.config:
             sources_info.append(("Machine", machine.config[key] if key_is_safe(key) else "********", "purple"))
     except Exception:

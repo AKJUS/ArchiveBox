@@ -1,7 +1,9 @@
 __package__ = "archivebox"
 
-# High-level logging functions for CLI output and progress tracking
-# Low-level primitives (Rich console, ANSI colors) are in logging.py
+# Post-bootstrap CLI logging helpers (event loggers, progress bars, formatters).
+# Requires archivebox.config to be loaded — imports DATA_DIR, get_config, and
+# references Django ORM types. For pre-bootstrap logging primitives use
+# misc/logging.py, which has no archivebox or Django dependencies.
 
 import re
 import os

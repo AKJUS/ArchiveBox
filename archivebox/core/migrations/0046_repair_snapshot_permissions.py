@@ -14,7 +14,10 @@ def _repair_snapshot_permissions(apps, schema_editor):
     this is a no-op.
     """
     cursor = schema_editor.connection.cursor()
-    cursor.execute("PRAGMA table_info(core_snapshot)")
+    # ``table_xinfo`` lists STORED/VIRTUAL generated columns; ``table_info``
+    # silently drops them, so a prior 0041 that landed the STORED column
+    # would otherwise look absent here and we'd ALTER TABLE -> duplicate.
+    cursor.execute("PRAGMA table_xinfo(core_snapshot)")
     existing_cols = {row[1] for row in cursor.fetchall()}
     if "permissions" in existing_cols:
         return

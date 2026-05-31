@@ -122,7 +122,16 @@ build_and_prek() {
         cd "$repo"
         rm -rf dist
         uv --no-cache build --out-dir dist
-        uv --no-cache run prek run --all-files
+        # prek auto-fixes (ruff-format, add-trailing-comma, end-of-file-fixer,
+        # …) exit with status 1 on first run when they modify a file, which
+        # otherwise tears down the entire release under ``set -e``. Re-run
+        # once: the second pass sees the already-fixed files and exits 0.
+        # A *real* lint failure (anything that can't be auto-fixed) still
+        # fails the second pass and kills the script as before.
+        if ! uv --no-cache run prek run --all-files; then
+            echo "[*] prek auto-fixed files in $(basename "$repo"); re-running to verify clean…"
+            uv --no-cache run prek run --all-files
+        fi
         rm -rf dist
         uv --no-cache build --out-dir dist
     )

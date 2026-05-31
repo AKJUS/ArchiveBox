@@ -288,7 +288,7 @@ def iter_query_search_ids(
         return
 
     if "sonic" in backend_names:
-        from archivebox.services.supervision_service import ensure_daemon_stack
+        from archivebox.core.takeover_util import ensure_daemon_stack
 
         ensure_daemon_stack(reason="search query")
 

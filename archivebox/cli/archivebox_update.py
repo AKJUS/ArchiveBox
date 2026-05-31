@@ -218,7 +218,7 @@ def update(
 
     from archivebox.machine.models import Process
     from archivebox.core.shutdown_util import foreground_parent_watchdog, foreground_shutdown_signals, raise_if_shutdown_requested
-    from archivebox.services.supervision_service import (
+    from archivebox.core.takeover_util import (
         command_owns_runtime_stack,
         current_command,
         ensure_daemon_stack,

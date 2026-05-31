@@ -338,7 +338,7 @@ def get_public_base_url(request=None, config: dict[str, Any] | None = None, **co
 def get_snapshot_base_url(snapshot_id: str, request=None, config: dict[str, Any] | None = None, **config_kwargs: Any) -> str:
     config = config or get_config(**config_kwargs)
     if not config.USES_SUBDOMAIN_ROUTING:
-        return _build_url(get_web_base_url(request=request, config=config), f"/snapshot/{snapshot_id}")
+        return _build_url(get_web_base_url(request=request, config=config), f"/snapshot/{str(snapshot_id).replace('-', '')}")
     return _build_base_url_for_host(
         _build_base_host(get_snapshot_subdomain(snapshot_id), request=request, config=config),
         request=request,

@@ -250,7 +250,7 @@ def run_runner(daemon: bool = False, crawl_id: str | None = None, maintenance_on
     from archivebox.config import CONSTANTS
     from archivebox.core.shutdown_util import foreground_parent_watchdog, foreground_shutdown_signals
     from archivebox.machine.models import Machine, Process
-    from archivebox.services.supervision_service import enter_single_runner_gate
+    from archivebox.core.takeover_util import enter_single_runner_gate
     from archivebox.services.runner import recover_orchestrator_state, run_pending_crawls
 
     Machine.current()

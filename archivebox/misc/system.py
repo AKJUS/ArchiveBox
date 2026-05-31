@@ -1,5 +1,8 @@
 __package__ = "archivebox.misc"
 
+# Post-bootstrap filesystem utilities (atomic_write, get_dir_size).
+# Requires archivebox.config (uses get_config for permissions/output settings).
+# Not safe to import pre-bootstrap.
 
 import os
 

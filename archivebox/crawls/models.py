@@ -338,7 +338,7 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
 
     @property
     def api_url(self) -> str:
-        return str(reverse_lazy("api-1:get_crawl", args=[self.id]))
+        return str(reverse_lazy("api-1:get_crawl", args=[self.id.hex]))
 
     @staticmethod
     def parse_tag_names(tags: Iterable[str] | str, *, pattern: str = r",") -> list[str]:

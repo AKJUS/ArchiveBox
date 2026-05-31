@@ -1,3 +1,6 @@
+# Bootable hashing helpers (file content + mtime/size cache, mime detection).
+# MUST NOT import archivebox.config, archivebox.core, or Django — stdlib only.
+
 import hashlib
 import mimetypes
 from functools import lru_cache

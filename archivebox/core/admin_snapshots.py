@@ -1620,7 +1620,7 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
         # work-in-progress crawl, not the old snapshot they re-archived from.
         # A snapshot-view redirect would race the runner — the new snapshot
         # may sit queued for a while before the runner creates the DB row.
-        return redirect(f"/admin/crawls/crawl/{crawl.id}/change/#snapshots")
+        return redirect(f"/admin/crawls/crawl/{crawl.id.hex}/change/#snapshots")
 
     @admin.action(
         description="🔄 Redo",

@@ -260,7 +260,7 @@ def render_snapshots_list(snapshots_qs, request=None, crawl=None, page_size=50, 
                                         background: {progress_color};
                                         transition: width 0.3s;"></div>
                         </div>
-                        <a href="/admin/core/archiveresult/?snapshot__id__exact={snapshot.id}"
+                        <a href="/admin/core/archiveresult/?snapshot__id__exact={snapshot.id.hex}"
                            style="font-size: 11px; color: #417690; min-width: 35px; text-decoration: none;"
                            title="View archive results">{progress_text}</a>
                     </div>

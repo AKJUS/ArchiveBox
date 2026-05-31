@@ -1,7 +1,9 @@
 __package__ = "archivebox.misc"
 
-# Low-level logging primitives (Rich console, ANSI colors, stdout/stderr helpers)
-# Higher-level logging functions are in logging_util.py
+# Bootable logging primitives (Rich console, ANSI colors, stdout/stderr helpers).
+# MUST NOT import archivebox.config, archivebox.core, or Django — this module is
+# loaded via config/constants.py during pre-bootstrap, before settings or apps
+# are ready. Post-bootstrap CLI logging helpers live in logging_util.py.
 
 import sys
 from collections import defaultdict

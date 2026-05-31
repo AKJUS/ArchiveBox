@@ -384,7 +384,7 @@ def _unconfigured_banner_context(request) -> dict:
             from archivebox.machine.models import Machine
 
             machine = Machine.current()
-            machine_admin_url = f"/admin/machine/machine/{machine.id}/change/"
+            machine_admin_url = f"/admin/machine/machine/{machine.id.hex}/change/"
         except Exception:
             machine_admin_url = ""
     return {

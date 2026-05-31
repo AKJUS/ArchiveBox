@@ -224,7 +224,7 @@ def add(
         # Foreground mode: run full crawl runner until all work is done
         print("[green]\\[*] Starting crawl runner to process crawl...[/green]")
         from archivebox.machine.models import Process
-        from archivebox.services.supervision_service import command_owns_runtime_stack, current_command, standby_until_runtime_stack_needed
+        from archivebox.core.takeover_util import command_owns_runtime_stack, current_command, standby_until_runtime_stack_needed
         from archivebox.workers.supervisord_util import run_runner_worker, stop_own_supervisord_process
 
         command = current_command(Process.TypeChoices.ADD, data_dir=CONSTANTS.DATA_DIR, url=first_url)
@@ -286,7 +286,7 @@ def add(
 
             from archivebox.core.host_util import build_admin_url
 
-            admin_url = build_admin_url(f"/admin/crawls/crawl/{crawl.id}/change/", config=config)
+            admin_url = build_admin_url(f"/admin/crawls/crawl/{crawl.id.hex}/change/", config=config)
 
             print("\n[bold]crawl output saved to:[/bold]")
             print(f"  {rel_output_str}")

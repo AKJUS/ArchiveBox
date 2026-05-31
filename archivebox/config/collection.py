@@ -161,17 +161,18 @@ def _coerce_from_str_dict(file_config: dict[str, str]) -> dict[str, Any]:
     those strings have to be decoded — otherwise downstream consumers like
     ``_emit_machine_config`` → ``MachineEvent`` → abx-dl see a JSON string
     where they expect a dict and raise ``TypeError``.
-    Delegates to pydantic-settings' own ``field_is_complex`` /
-    ``prepare_field_value`` (the same machinery ``IniConfigSettingsSource``
-    uses for the file-read path), so every dict/list/tuple field is
-    decoded according to its declared annotation — no hardcoded type
-    checks, no manual ``json.loads`` per call site.
+    Declared fields go through pydantic-settings' own ``field_is_complex`` /
+    ``prepare_field_value`` so they're decoded per annotation. Undeclared
+    keys (e.g. ``ABX_INSTALL_CACHE``, written dynamically by abx-dl) are
+    JSON-decoded when their string starts with ``{`` or ``[`` — the same
+    shape ``_coerce_to_str_dict`` writes them as.
     """
     from archivebox.config.common import ArchiveBoxConfig
     from archivebox.config.configset import IniConfigSettingsSource
 
     decoder = IniConfigSettingsSource(ArchiveBoxConfig)
     decoded: dict[str, Any] = dict(file_config)
+    declared_fields = set(ArchiveBoxConfig.model_fields)
     for field_name, field in ArchiveBoxConfig.model_fields.items():
         if field_name not in decoded:
             continue
@@ -180,6 +181,18 @@ def _coerce_from_str_dict(file_config: dict[str, str]) -> dict[str, Any]:
             continue
         if decoder.field_is_complex(field):
             decoded[field_name] = decoder.prepare_field_value(field_name, field, raw, True)
+    for key, raw in list(decoded.items()):
+        if key in declared_fields:
+            continue
+        if not isinstance(raw, str) or not raw:
+            continue
+        first = raw[:1]
+        if first not in ("{", "["):
+            continue
+        try:
+            decoded[key] = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
     return decoded
 
 

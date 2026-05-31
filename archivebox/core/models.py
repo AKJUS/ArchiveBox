@@ -1991,7 +1991,7 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
 
     @property
     def api_url(self) -> str:
-        return str(reverse_lazy("api-1:get_snapshot", args=[self.id]))
+        return str(reverse_lazy("api-1:get_snapshot", args=[self.id.hex]))
 
     def get_absolute_url(self):
         return f"/{self.archive_path}"

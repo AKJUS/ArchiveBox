@@ -22,6 +22,9 @@ Plain URLs (also supported):
 
 __package__ = "archivebox.misc"
 
+# Bootable: stdlib only. MUST NOT import archivebox.config, archivebox.core, or Django.
+# Used by CLI commands at entry, before Django setup.
+
 import sys
 import json
 import select

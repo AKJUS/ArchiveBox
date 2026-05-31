@@ -1,5 +1,8 @@
 """
 Database utility functions for ArchiveBox.
+
+Post-bootstrap: requires archivebox.config (DATA_DIR) and uses Django lazily
+(``from django.db import ...`` inside functions). Not safe to import pre-bootstrap.
 """
 
 __package__ = "archivebox.misc"
