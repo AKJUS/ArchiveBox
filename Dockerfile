@@ -140,7 +140,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
         # 1. packaging dependencies
         apt-transport-https ca-certificates apt-utils gnupg2 curl wget \
         # 2. docker and init system dependencies
-        zlib1g-dev dumb-init gosu cron unzip grep dnsutils git python3.12-venv default-jre-headless \
+        zlib1g-dev dumb-init gosu cron unzip grep dnsutils git ripgrep python3.12-venv default-jre-headless \
         # 3. frivolous CLI helpers to make debugging failed archiving easier
         tree nano iputils-ping \
         # nano iputils-ping dnsutils htop procps jq yq
@@ -326,6 +326,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     && ln -sf "$(command -v node)" "$LIB_DIR/env/bin/node" \
     && ln -sf "$(command -v npm)" "$LIB_DIR/env/bin/npm" \
     && ln -sf "$(command -v java)" "$LIB_DIR/env/bin/java" \
+    && ln -sf "$(command -v rg)" "$LIB_DIR/env/bin/rg" \
     && ln -sf "$(command -v sonic)" "$LIB_DIR/env/bin/sonic" \
     && find "$LIB_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find "$LIB_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
@@ -383,7 +384,7 @@ RUN chmod +x "$CODE_DIR"/bin/*.sh \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR" \
     && chmod g+w "$TMP_DIR" "$LIB_DIR" "$LIB_DIR"/bin "$PLAYWRIGHT_BROWSERS_PATH" \
     && TIMEOUT=600 gosu "$ARCHIVEBOX_USER" archivebox install 2>&1 | tee -a /VERSION.txt \
-    && TIMEOUT=600 gosu "$ARCHIVEBOX_USER" archivebox install archivewebpage search_backend_sonic 2>&1 | tee -a /VERSION.txt \
+    && TIMEOUT=600 gosu "$ARCHIVEBOX_USER" archivebox install archivewebpage search_backend_sonic opendataloader search_backend_ripgrep 2>&1 | tee -a /VERSION.txt \
     && gosu "$ARCHIVEBOX_USER" archivebox version 2>&1 | tee -a /VERSION.txt \
     && find /venv "$CODE_DIR" "$LIB_DIR" "$DATA_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /venv "$CODE_DIR" "$LIB_DIR" "$DATA_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
