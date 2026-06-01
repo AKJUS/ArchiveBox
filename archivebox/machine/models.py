@@ -548,6 +548,7 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
 
     state_machine_name: str | None = "archivebox.machine.models.BinaryMachine"
     active_state: str = StatusChoices.QUEUED
+    warn_on_save_outside_runner = False
 
     objects = BinaryManager()  # pyright: ignore[reportIncompatibleVariableOverride]
 

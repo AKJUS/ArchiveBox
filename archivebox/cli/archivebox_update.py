@@ -105,9 +105,17 @@ def reindex_snapshots(
     wait_for_turn=None,
 ) -> dict[str, Any]:
     from archivebox.cli.archivebox_extract import run_plugins
+    from archivebox.core.models import ArchiveResult
+    from abx_dl.models import discover_plugins
 
-    stats: dict[str, Any] = {"processed": 0, "queued": 0, "reindexed": 0, "snapshot_ids": []}
+    stats: dict[str, Any] = {"processed": 0, "requested": 0, "queued": 0, "skipped_queued": 0, "reindexed": 0, "snapshot_ids": []}
     records: list[dict[str, str]] = []
+    plugins_by_name = discover_plugins()
+    required_hooks_by_plugin = {
+        plugin_name: frozenset(hook.name for hook in plugins_by_name[plugin_name].filter_hooks("Snapshot"))
+        for plugin_name in search_plugins
+        if plugin_name in plugins_by_name
+    }
 
     total = snapshots.count()
     print(f"[*] Reindexing {total} snapshots with search plugins: {', '.join(search_plugins)}")
@@ -118,6 +126,31 @@ def reindex_snapshots(
         if wait_for_turn:
             wait_for_turn()
         batch_records = list(records)
+        snapshot_ids = {record["snapshot_id"] for record in batch_records}
+        plugin_names = {record["plugin"] for record in batch_records}
+        queued_rows = {
+            (str(snapshot_id), plugin_name, hook_name)
+            for snapshot_id, plugin_name, hook_name in ArchiveResult.objects.filter(
+                snapshot_id__in=snapshot_ids,
+                plugin__in=plugin_names,
+                status=ArchiveResult.StatusChoices.QUEUED,
+            ).values_list("snapshot_id", "plugin", "hook_name")
+        }
+        records_to_queue = []
+        for record in batch_records:
+            snapshot_id = record["snapshot_id"]
+            plugin_name = record["plugin"]
+            required_hooks = required_hooks_by_plugin.get(plugin_name, frozenset())
+            if required_hooks and all((snapshot_id, plugin_name, hook_name) in queued_rows for hook_name in required_hooks):
+                stats["skipped_queued"] += 1
+                continue
+            records_to_queue.append(record)
+        if not records_to_queue:
+            print(
+                f"    [{stats['processed']}/{total}] Already queued {len(batch_records)} index jobs",
+            )
+            records.clear()
+            return
         # `archivebox update --index-only` intentionally breaks the usual
         # "runner discovers work" rule by inserting synthetic queued
         # ArchiveResult rows for search backends. run_plugins() keeps this as
@@ -127,15 +160,17 @@ def reindex_snapshots(
         # finish.
         exit_code = run_plugins(
             args=(),
-            records=batch_records,
+            records=records_to_queue,
             wait=False,
             emit_results=False,
             show_progress=False,
+            preserve_queued=True,
         )
         if exit_code != 0:
             raise SystemExit(exit_code)
+        stats["queued"] += len(records_to_queue)
         print(
-            f"    [{stats['processed']}/{total}] Queued {len(batch_records)} index jobs for orchestrator",
+            f"    [{stats['processed']}/{total}] Queued {len(records_to_queue)} index jobs for orchestrator",
         )
         records.clear()
 
@@ -156,7 +191,7 @@ def reindex_snapshots(
                         "plugin": plugin_name,
                     },
                 )
-                stats["queued"] += 1
+                stats["requested"] += 1
             if len(records) >= batch_size:
                 run_batch()
         except KeyboardInterrupt as err:
@@ -366,15 +401,55 @@ def update(
                             after=after,
                             resume=resume,
                         )
-                        stats = reindex_snapshots(
-                            snapshots,
-                            search_plugins=search_plugins,
-                            batch_size=batch_size,
-                            collect_ids=is_filtered_update,
-                            wait_for_turn=wait_for_turn,
+                        from django.db.models import Exists, OuterRef, Q
+                        from django.utils import timezone
+                        from archivebox.core.models import ArchiveResult, Snapshot
+
+                        scoped_snapshot_ids = snapshots.order_by().values("id") if is_filtered_update else None
+                        queued_index_results = ArchiveResult.objects.filter(
+                            status=ArchiveResult.StatusChoices.QUEUED,
+                            plugin__in=search_plugins,
                         )
-                        print_index_stats(stats)
-                        touched_snapshot_ids.update(stats.get("snapshot_ids", []))
+                        if scoped_snapshot_ids is not None:
+                            queued_index_results = queued_index_results.filter(snapshot_id__in=scoped_snapshot_ids)
+
+                        if queued_index_results.exists():
+                            now = timezone.now()
+                            queued_result_for_snapshot = queued_index_results.filter(snapshot_id=OuterRef("pk"))
+                            snapshots_to_wake = (
+                                Snapshot.objects.filter(
+                                    status__in=(Snapshot.StatusChoices.SEALED, Snapshot.StatusChoices.PAUSED),
+                                )
+                                .annotate(
+                                    has_queued_index_result=Exists(queued_result_for_snapshot),
+                                )
+                                .filter(
+                                    has_queued_index_result=True,
+                                )
+                                .filter(
+                                    Q(retry_at__isnull=True) | Q(retry_at__gt=now),
+                                )
+                            )
+                            if scoped_snapshot_ids is not None:
+                                snapshots_to_wake = snapshots_to_wake.filter(id__in=scoped_snapshot_ids)
+                            woken_count = snapshots_to_wake.update(
+                                retry_at=now,
+                                modified_at=now,
+                            )
+                            print(
+                                "[*] Existing queued search index jobs found; "
+                                f"skipping backfill scan and waking {woken_count} snapshot(s) for the runner.",
+                            )
+                        else:
+                            stats = reindex_snapshots(
+                                snapshots,
+                                search_plugins=search_plugins,
+                                batch_size=batch_size,
+                                collect_ids=is_filtered_update,
+                                wait_for_turn=wait_for_turn,
+                            )
+                            print_index_stats(stats)
+                            touched_snapshot_ids.update(stats.get("snapshot_ids", []))
 
                 if do_run_until_idle and (do_index or not ran_post_migrate_runner):
                     # Search/index backfill intentionally queues targeted
@@ -904,7 +979,9 @@ def print_index_stats(stats: dict[str, Any]) -> None:
     print(f"""
 [green]Search Reindex Complete[/green]
   Scanned rows:      {stats["processed"]}
+  Requested jobs:    {stats.get("requested", stats["queued"])}
   Queued index jobs: {stats["queued"]}
+  Already queued:    {stats.get("skipped_queued", 0)}
 """)
 
 

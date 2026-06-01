@@ -116,6 +116,7 @@ def run_plugins(
     wait: bool = True,
     emit_results: bool = True,
     show_progress: bool = True,
+    preserve_queued: bool = False,
 ) -> int:
     """
     Run plugins on Snapshots from input.
@@ -219,6 +220,18 @@ def run_plugins(
         else:
             requested_rows.add((snapshot_id, plugin_name, ""))
 
+    queued_rows: set[tuple[str, str, str]] = set()
+    if preserve_queued and requested_rows:
+        queued_rows = {
+            (str(snapshot_id), plugin_name, hook_name)
+            for snapshot_id, plugin_name, hook_name in ArchiveResult.objects.filter(
+                snapshot_id__in=existing_snapshot_ids,
+                plugin__in={plugin_name for _snapshot_id, plugin_name, _hook_name in requested_rows},
+                status=ArchiveResult.StatusChoices.QUEUED,
+            ).values_list("snapshot_id", "plugin", "hook_name")
+        }
+    rows_to_queue = requested_rows - queued_rows
+
     reset_fields = {
         "status": ArchiveResult.StatusChoices.QUEUED,
         "output_str": "",
@@ -230,23 +243,34 @@ def run_plugins(
         "end_ts": None,
         "modified_at": timezone.now(),
     }
-    if plugins_list:
-        ArchiveResult.objects.filter(snapshot_id__in=existing_snapshot_ids, plugin__in=plugins_list).update(**reset_fields)
-    elif requested_plugins_by_snapshot:
-        snapshot_ids_by_plugin: dict[str, set[str]] = defaultdict(set)
-        for snapshot_id, plugin_names in requested_plugins_by_snapshot.items():
-            if snapshot_id in existing_snapshot_ids:
-                for plugin_name in plugin_names:
-                    snapshot_ids_by_plugin[plugin_name].add(snapshot_id)
-        for plugin_name, plugin_snapshot_ids in snapshot_ids_by_plugin.items():
-            ArchiveResult.objects.filter(snapshot_id__in=plugin_snapshot_ids, plugin=plugin_name).update(**reset_fields)
-    existing_rows = set(
-        ArchiveResult.objects.filter(
-            snapshot_id__in=existing_snapshot_ids,
-            plugin__in={plugin_name for _snapshot_id, plugin_name, _hook_name in requested_rows},
-        ).values_list("snapshot_id", "plugin", "hook_name"),
+    if rows_to_queue and plugins_list:
+        rows_to_reset_by_hook: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for snapshot_id, plugin_name, hook_name in rows_to_queue:
+            rows_to_reset_by_hook[(plugin_name, hook_name)].add(snapshot_id)
+        for (plugin_name, hook_name), plugin_snapshot_ids in rows_to_reset_by_hook.items():
+            ArchiveResult.objects.filter(snapshot_id__in=plugin_snapshot_ids, plugin=plugin_name, hook_name=hook_name).update(
+                **reset_fields,
+            )
+    elif rows_to_queue and requested_plugins_by_snapshot:
+        snapshot_ids_by_hook: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for snapshot_id, plugin_name, hook_name in rows_to_queue:
+            snapshot_ids_by_hook[(plugin_name, hook_name)].add(snapshot_id)
+        for (plugin_name, hook_name), plugin_snapshot_ids in snapshot_ids_by_hook.items():
+            ArchiveResult.objects.filter(snapshot_id__in=plugin_snapshot_ids, plugin=plugin_name, hook_name=hook_name).update(
+                **reset_fields,
+            )
+    existing_rows = (
+        {
+            (str(snapshot_id), plugin_name, hook_name)
+            for snapshot_id, plugin_name, hook_name in ArchiveResult.objects.filter(
+                snapshot_id__in=existing_snapshot_ids,
+                plugin__in={plugin_name for _snapshot_id, plugin_name, _hook_name in rows_to_queue},
+            ).values_list("snapshot_id", "plugin", "hook_name")
+        }
+        if rows_to_queue
+        else set()
     )
-    missing_rows = requested_rows - {(str(snapshot_id), plugin_name, hook_name) for snapshot_id, plugin_name, hook_name in existing_rows}
+    missing_rows = rows_to_queue - existing_rows
     if missing_rows:
         ArchiveResult.objects.bulk_create(
             [
@@ -271,7 +295,23 @@ def run_plugins(
             # also keep status=paused here: `retry_at` only asks the orchestrator
             # to process the queued plugin rows, and run_due_snapshot restores
             # retry_at=MAX afterward instead of resuming the snapshot lifecycle.
-            for snapshot in Snapshot.objects.filter(id__in=existing_snapshot_ids).only("id", "status", "modified_at"):
+            affected_snapshot_ids = {snapshot_id for snapshot_id, _plugin_name, _hook_name in rows_to_queue}
+            if preserve_queued and queued_rows:
+                queued_snapshot_ids = {snapshot_id for snapshot_id, _plugin_name, _hook_name in queued_rows}
+                affected_snapshot_ids.update(
+                    str(snapshot_id)
+                    for snapshot_id in Snapshot.objects.filter(id__in=queued_snapshot_ids)
+                    .filter(retry_at__gt=queue_at)
+                    .values_list("id", flat=True)
+                )
+                affected_snapshot_ids.update(
+                    str(snapshot_id)
+                    for snapshot_id in Snapshot.objects.filter(id__in=queued_snapshot_ids, retry_at__isnull=True).values_list(
+                        "id",
+                        flat=True,
+                    )
+                )
+            for snapshot in Snapshot.objects.filter(id__in=affected_snapshot_ids).only("id", "status", "modified_at"):
                 # Guard the read-time status so we never bump retry_at on a
                 # row that's been re-queued / started by a concurrent runner.
                 snapshot.safe_update(

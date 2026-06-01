@@ -65,6 +65,7 @@ class BaseModelWithStateMachine(models.Model):
     state_field_name: str
     state_machine_attr: str = "sm"
     bind_events_as_methods: bool = False
+    warn_on_save_outside_runner: ClassVar[bool] = True
 
     active_state: ObjectState
     retry_at_field_name: str
@@ -297,7 +298,7 @@ class BaseModelWithStateMachine(models.Model):
         from archivebox.machine.models import Process
 
         process = Process.current()
-        if process.process_type != Process.TypeChoices.ORCHESTRATOR:
+        if self.warn_on_save_outside_runner and process.process_type != Process.TypeChoices.ORCHESTRATOR:
             root_type = getattr(process.root, "process_type", None)
             if root_type != Process.TypeChoices.ORCHESTRATOR:
                 caller = "<unknown>"
