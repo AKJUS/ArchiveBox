@@ -97,3 +97,11 @@ def test_dockerfiles_clean_build_data_dir_before_init() -> None:
     for dockerfile_name in ("Dockerfile", "Dockerfile.multistage"):
         text = (REPO_ROOT / dockerfile_name).read_text()
         assert 'find "$DATA_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +' in text
+
+
+def test_dockerfiles_pin_project_binary_paths_for_validation() -> None:
+    for dockerfile_name in ("Dockerfile", "Dockerfile.multistage"):
+        text = (REPO_ROOT / dockerfile_name).read_text()
+        assert 'GIT_BINARY="$LIB_DIR/env/bin/git"' in text
+        assert 'GALLERYDL_BINARY="$LIB_DIR/env/bin/gallery-dl"' in text
+        assert 'FORUMDL_BINARY="$LIB_DIR/env/bin/forum-dl"' in text
