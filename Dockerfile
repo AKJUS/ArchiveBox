@@ -319,6 +319,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
         abxpkg install --no-cache --install-timeout=600 --binproviders=playwright --bin-dir="$LIB_DIR/env/bin" chromium; \
     fi \
     && TIMEOUT=600 PUID=0 PGID=0 abx-dl plugins --install \
+    && abxpkg install --no-cache --binproviders=chromewebstore --overrides='{"chromewebstore":{"install_args":["fpeoodllldobpkbkabpblcfaogecpndd","--name=archivewebpage"]}}' archivewebpage \
+    && test -f "$LIB_DIR/chromewebstore/extensions/fpeoodllldobpkbkabpblcfaogecpndd__archivewebpage/manifest.json" \
     && mkdir -p "$LIB_DIR/env/bin" \
     && ln -sf "$(command -v node)" "$LIB_DIR/env/bin/node" \
     && ln -sf "$(command -v npm)" "$LIB_DIR/env/bin/npm" \
