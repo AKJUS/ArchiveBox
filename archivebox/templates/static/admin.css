@@ -1893,7 +1893,8 @@ tbody .output-link:hover {opacity: 1;}
 
 .model-snapshot.change-list .cards .card .card-info.card-meta > a {
     grid-column: auto;
-    justify-self: start;
+    justify-self: center;
+    text-align: center;
 }
 
 .model-snapshot.change-list .cards .card .card-info .timestamp {

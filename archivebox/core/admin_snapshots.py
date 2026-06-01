@@ -11,21 +11,23 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from django.contrib import admin, messages
+from django.contrib.admin.views.main import IncorrectLookupParameters
 from django.urls import path, reverse
 from django.shortcuts import get_object_or_404, redirect
 from django.core.cache import cache
+from django.core.paginator import InvalidPage
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed, QueryDict, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
-from django.db.models import Q, Count, Exists, F, OuterRef, Prefetch
+from django.db.models import Q, Count, Exists, F, IntegerField, OuterRef, Prefetch, Subquery
 from django import forms
 from django.template import Template, RequestContext
 from django.contrib.admin.helpers import ActionForm
 
 from archivebox.config.common import get_config
 from archivebox.misc.util import htmldecode, urldecode
-from archivebox.misc.paginators import AcceleratedPaginator
+from archivebox.misc.paginators import AcceleratedPaginator, CountlessPaginator
 from archivebox.misc.logging_util import printable_filesize
 from archivebox.search.admin import SEARCH_RESULT_CACHE_TTL, SearchResultsAdminMixin, SearchResultsChangeList, get_admin_search_cache_key
 from archivebox.core.host_util import build_snapshot_url, build_web_url
@@ -266,6 +268,7 @@ class SnapshotRetryListFilter(admin.SimpleListFilter):
 class SnapshotResultHealthListFilter(admin.SimpleListFilter):
     title = "ArchiveResult status"
     parameter_name = "archiveresult_status"
+    SNAPSHOT_FIRST_VALUES = {"succeeded"}
 
     def lookups(self, request, model_admin):
         return (
@@ -278,6 +281,47 @@ class SnapshotResultHealthListFilter(admin.SimpleListFilter):
             ("backoff", ">50% waiting to retry"),
             ("noresults", ">50% noresults"),
         )
+
+    @staticmethod
+    def _snapshot_total_count_subquery(outer_ref: str = "pk"):
+        return (
+            ArchiveResult.objects.filter(snapshot_id=OuterRef(outer_ref))
+            .order_by()
+            .values("snapshot_id")
+            .annotate(count=Count("pk"))
+            .values("count")
+        )
+
+    @staticmethod
+    def _snapshot_status_count_subquery(status: str, outer_ref: str = "pk"):
+        return (
+            ArchiveResult.objects.filter(snapshot_id=OuterRef(outer_ref), status=status)
+            .order_by()
+            .values("snapshot_id")
+            .annotate(count=Count("pk"))
+            .values("count")
+        )
+
+    def _filter_snapshot_first(self, queryset, status: str):
+        return queryset.annotate(
+            total_results=Subquery(self._snapshot_total_count_subquery(), output_field=IntegerField()),
+            matching_results=Subquery(self._snapshot_status_count_subquery(status), output_field=IntegerField()),
+        ).filter(matching_results__gt=F("total_results") / 2)
+
+    def _filter_status_first(self, queryset, status: str):
+        total_results = self._snapshot_total_count_subquery("snapshot_id")
+        matching_snapshot_ids = (
+            ArchiveResult.objects.filter(status=status)
+            .order_by()
+            .values("snapshot_id")
+            .annotate(
+                matching_results=Count("pk"),
+                total_results=Subquery(total_results, output_field=IntegerField()),
+            )
+            .filter(matching_results__gt=F("total_results") / 2)
+            .values("snapshot_id")
+        )
+        return queryset.filter(pk__in=matching_snapshot_ids)
 
     def queryset(self, request, queryset):
         value = self.value()
@@ -296,14 +340,10 @@ class SnapshotResultHealthListFilter(admin.SimpleListFilter):
                 "noresults": ArchiveResult.StatusChoices.NORESULTS,
             }
             if value in status_by_value:
-                queryset = queryset.annotate(
-                    total_results=Count("archiveresult"),
-                    matching_results=Count(
-                        "archiveresult",
-                        filter=Q(archiveresult__status=status_by_value[value]),
-                    ),
-                )
-                return queryset.filter(matching_results__gt=F("total_results") / 2)
+                status = status_by_value[value]
+                if value in self.SNAPSHOT_FIRST_VALUES:
+                    return self._filter_snapshot_first(queryset, status)
+                return self._filter_status_first(queryset, status)
         return queryset
 
 
@@ -316,7 +356,28 @@ class SnapshotChangeList(SearchResultsChangeList):
             resolver_name == "grid" or request.path.rstrip("/").endswith("/grid")
         )
 
+    def _uses_expensive_archiveresult_filter(self, request) -> bool:
+        return bool(request.GET.get(SnapshotResultHealthListFilter.parameter_name))
+
     def get_results(self, request):
+        if self._uses_expensive_archiveresult_filter(request):
+            paginator = CountlessPaginator(self.queryset, self.list_per_page)
+            try:
+                page = paginator.page(self.page_num)
+            except InvalidPage:
+                raise IncorrectLookupParameters
+
+            self.result_count = paginator.count
+            self.show_full_result_count = False
+            self.show_admin_actions = True
+            self.full_result_count = None
+            self.result_list = page.object_list
+            self.can_show_all = False
+            self.multi_page = page.has_next() or self.page_num > 1
+            self.paginator = paginator
+            self.show_search_index_hint = False
+            return
+
         super().get_results(request)
         if request.GET.get("_embedded") == "crawl":
             self.full_result_count = self.result_count
@@ -1261,6 +1322,33 @@ class SnapshotAdmin(SearchResultsAdminMixin, ConfigEditorMixin, BaseModelAdmin):
         ordering="ar_succeeded_count",
     )
     def files(self, obj):
+        stats = self._get_progress_stats(obj)
+        if obj.status == Snapshot.StatusChoices.STARTED and stats["total"] > 0:
+            succeeded = stats["succeeded"]
+            failed = stats["failed"]
+            skipped = stats["skipped"]
+            completed = succeeded + failed + skipped + stats["noresults"]
+            return format_html(
+                """<div style="min-width: 96px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                        <span class="snapshot-progress-spinner"></span>
+                        <span style="font-size: 11px; color: #64748b;">{}/{} hooks</span>
+                    </div>
+                    <div class="snapshot-progress-bar">
+                        <div class="snapshot-progress-bar-fill" style="background: #3b82f6; width: {}%;"></div>
+                    </div>
+                    <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                        ✓{} ✗{} ⏳{}
+                    </div>
+                </div>""",
+                completed,
+                stats["total"],
+                stats["percent"],
+                succeeded,
+                failed,
+                stats["running"],
+            )
+
         results = self._get_prefetched_results(obj)
         if results is None:
             results = obj.archiveresult_set.only("plugin", "status", "output_size")

@@ -1071,9 +1071,49 @@ class PublicIndexView(ListView):
             and search_mode_backend
             and getattr(context.get("paginator"), "count", 0) == 0,
         )
-        for snapshot in context.get("object_list") or ():
+        snapshots = list(context.get("object_list") or ())
+        icons_by_snapshot: dict[str, set[str]] = {str(snapshot.id): set() for snapshot in snapshots}
+        progress_by_snapshot: dict[str, dict[str, int]] = {
+            str(snapshot.id): {
+                "total": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "running": 0,
+                "skipped": 0,
+                "noresults": 0,
+            }
+            for snapshot in snapshots
+        }
+        if icons_by_snapshot:
+            for snapshot_id, plugin, status in (
+                ArchiveResult.objects.filter(
+                    snapshot_id__in=icons_by_snapshot.keys(),
+                )
+                .exclude(plugin="")
+                .values_list("snapshot_id", "plugin", "status")
+                .iterator(chunk_size=1000)
+            ):
+                snapshot_key = str(snapshot_id)
+                progress = progress_by_snapshot[snapshot_key]
+                progress["total"] += 1
+                if status == ArchiveResult.StatusChoices.SUCCEEDED:
+                    icons_by_snapshot[snapshot_key].add(plugin)
+                    progress["succeeded"] += 1
+                elif status == ArchiveResult.StatusChoices.FAILED:
+                    progress["failed"] += 1
+                elif status == ArchiveResult.StatusChoices.STARTED:
+                    progress["running"] += 1
+                elif status == ArchiveResult.StatusChoices.SKIPPED:
+                    progress["skipped"] += 1
+                elif status == ArchiveResult.StatusChoices.NORESULTS:
+                    progress["noresults"] += 1
+
+        for snapshot in snapshots:
             snapshot._icons_compact = True
+            snapshot._icons_archive_results = icons_by_snapshot.get(str(snapshot.id), set())
+            snapshot._icons_progress_stats = progress_by_snapshot.get(str(snapshot.id), {})
             snapshot._is_archived_cached = bool(snapshot.downloaded_at or snapshot.status == Snapshot.StatusChoices.SEALED)
+        context["object_list"] = snapshots
         return context
 
     def get_queryset(self, **kwargs):

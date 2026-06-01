@@ -1948,8 +1948,44 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
         cache_key = f"result_icons:{self.pk}:{'compact' if compact_icons else 'full'}:{(self.downloaded_at or self.modified_at or self.created_at or self.bookmarked_at).timestamp()}"
 
         def calc_icons():
+            if compact_icons and self.status == self.StatusChoices.STARTED:
+                progress_stats = getattr(self, "_icons_progress_stats", None) or self.get_progress_stats()
+                total = int(progress_stats.get("total") or 0)
+                succeeded = int(progress_stats.get("succeeded") or 0)
+                failed = int(progress_stats.get("failed") or 0)
+                skipped = int(progress_stats.get("skipped") or 0)
+                noresults = int(progress_stats.get("noresults") or 0)
+                running = int(progress_stats.get("running") or 0)
+                completed = succeeded + failed + skipped + noresults
+                percent = int((completed / total * 100) if total > 0 else 0)
+                return format_html(
+                    '<div class="snapshot-files-progress" title="{} of {} hooks complete" style="min-width: 96px;">'
+                    '<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">'
+                    '<span class="snapshot-progress-spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: snapshot-spin 0.8s linear infinite;"></span>'
+                    '<span style="font-size: 11px; color: #64748b;">{}/{} hooks</span>'
+                    "</div>"
+                    '<div style="background: #e2e8f0; border-radius: 4px; height: 6px; overflow: hidden;">'
+                    '<div style="background: #3b82f6; width: {}%; height: 100%; transition: width 0.3s;"></div>'
+                    "</div>"
+                    '<div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">'
+                    "✓{} ✗{} ⏳{}"
+                    "</div>"
+                    "</div>",
+                    completed,
+                    total,
+                    completed,
+                    total,
+                    percent,
+                    succeeded,
+                    failed,
+                    running,
+                )
+
+            precomputed_archive_results = getattr(self, "_icons_archive_results", None)
             prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
-            if "archiveresult_set" in prefetched_cache:
+            if precomputed_archive_results is not None and compact_icons:
+                archive_results = {plugin: True for plugin in precomputed_archive_results}
+            elif "archiveresult_set" in prefetched_cache:
                 archive_results = {
                     r.plugin: r
                     for r in self.archiveresult_set.all()
@@ -1979,7 +2015,9 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
 
             for plugin in ordered_plugins:
                 result = archive_results.get(plugin)
-                existing = bool(result and result.status == "succeeded" and (compact_icons or result.output_files or result.output_str))
+                existing = result is True or bool(
+                    result and result.status == "succeeded" and (compact_icons or result.output_files or result.output_str),
+                )
                 if not existing:
                     continue
                 icon = mark_safe(get_plugin_icon(plugin))
@@ -2003,6 +2041,9 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
                 '<span class="files-icons" style="font-size: 1em; opacity: 0.8; display: inline-grid; grid-auto-flow: column; grid-auto-columns: auto; grid-template-rows: repeat(4, auto); gap: 0 0; justify-content: start; align-content: start;">{}</span>',
                 mark_safe(output),
             )
+
+        if compact_icons and self.status == self.StatusChoices.STARTED:
+            return calc_icons()
 
         cache_result = cache.get(cache_key)
         if cache_result:
@@ -3468,6 +3509,7 @@ class ArchiveResult(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, M
         verbose_name_plural = "Archive Results Log"
         indexes = [
             models.Index(fields=["snapshot", "status"], name="archiveresult_snap_status_idx"),
+            models.Index(fields=["status", "snapshot"], name="archiveresult_status_snap_idx"),
             models.Index(fields=["-start_ts", "-id"], name="archiveresult_start_idx"),
         ]
         constraints = [
