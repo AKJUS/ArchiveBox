@@ -87,6 +87,7 @@ ENV CODE_DIR=/app \
     DATA_DIR=/data \
     LIB_DIR=/opt/archivebox/lib \
     ABXPKG_LIB_DIR=/opt/archivebox/lib \
+    SONIC_BINARY=/opt/archivebox/lib/env/bin/sonic \
     PLAYWRIGHT_BROWSERS_PATH=/browsers
 
 # Bash SHELL config
@@ -325,6 +326,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     && ln -sf "$(command -v node)" "$LIB_DIR/env/bin/node" \
     && ln -sf "$(command -v npm)" "$LIB_DIR/env/bin/npm" \
     && ln -sf "$(command -v java)" "$LIB_DIR/env/bin/java" \
+    && ln -sf "$(command -v sonic)" "$LIB_DIR/env/bin/sonic" \
     && find "$LIB_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find "$LIB_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
     && rm -rf "$LIB_DIR/personas" "$LIB_DIR/chrome_profile" /opt/archivebox/lib-layer \
@@ -381,6 +383,7 @@ RUN chmod +x "$CODE_DIR"/bin/*.sh \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR" \
     && chmod g+w "$TMP_DIR" "$LIB_DIR" "$LIB_DIR"/bin "$PLAYWRIGHT_BROWSERS_PATH" \
     && TIMEOUT=600 gosu "$ARCHIVEBOX_USER" archivebox install 2>&1 | tee -a /VERSION.txt \
+    && TIMEOUT=600 gosu "$ARCHIVEBOX_USER" archivebox install archivewebpage search_backend_sonic 2>&1 | tee -a /VERSION.txt \
     && gosu "$ARCHIVEBOX_USER" archivebox version 2>&1 | tee -a /VERSION.txt \
     && find /venv "$CODE_DIR" "$LIB_DIR" "$DATA_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /venv "$CODE_DIR" "$LIB_DIR" "$DATA_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
