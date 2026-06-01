@@ -170,9 +170,13 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
     INACTIVE_STATES = (StatusChoices.PAUSED, StatusChoices.SEALED)
 
     schedule_id: uuid.UUID | None
-    sm: "CrawlMachine"
 
     snapshot_set: models.Manager["Snapshot"]
+
+    if TYPE_CHECKING:
+
+        @property
+        def sm(self) -> "CrawlMachine": ...
 
     class Meta(
         ModelWithDeleteAfter.Meta,

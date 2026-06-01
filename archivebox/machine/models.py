@@ -551,6 +551,11 @@ class Binary(ModelWithHealthStats, ModelWithStateMachine):
 
     objects = BinaryManager()  # pyright: ignore[reportIncompatibleVariableOverride]
 
+    if TYPE_CHECKING:
+
+        @property
+        def sm(self) -> BinaryMachine: ...
+
     class Meta(ModelWithHealthStats.Meta, ModelWithStateMachine.Meta):
         app_label = "machine"
         verbose_name = "Binary"

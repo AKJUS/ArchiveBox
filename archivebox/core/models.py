@@ -464,6 +464,11 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
     objects = SnapshotManager()
     archiveresult_set: models.Manager["ArchiveResult"]
 
+    if TYPE_CHECKING:
+
+        @property
+        def sm(self) -> "SnapshotMachine": ...
+
     class Meta(
         ModelWithDeleteAfter.Meta,
         ModelWithOutputDir.Meta,

@@ -3,7 +3,7 @@ __package__ = "archivebox.workers"
 import inspect
 import logging
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol, cast
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -47,6 +47,14 @@ ObjectState = State | str
 ObjectStateList = Iterable[ObjectState]
 
 
+class ModelStateMachine(Protocol):
+    def tick(self) -> Any: ...
+
+    def pause_requested(self) -> Any: ...
+
+    def resume_requested(self) -> Any: ...
+
+
 class BaseModelWithStateMachine(models.Model):
     StatusChoices: ClassVar[type[DefaultStatusChoices]]
 
@@ -84,11 +92,11 @@ class BaseModelWithStateMachine(models.Model):
         needs database fields never constructs one.
         """
         try:
-            machine = self.__dict__["_archivebox_state_machine"]
+            machine = vars(self)["_archivebox_state_machine"]
         except KeyError:
             machine = self.StateMachineClass(self, state_field=self.state_field_name)
-            self.__dict__["_archivebox_state_machine"] = machine
-        return machine
+            vars(self)["_archivebox_state_machine"] = machine
+        return cast(StateMachine, machine)
 
     @classmethod
     def status_counts(cls, queryset: models.QuerySet | None = None, statuses: Iterable[str] | None = None) -> dict[str, int]:
@@ -336,7 +344,7 @@ class BaseModelWithStateMachine(models.Model):
         if self.STATE in self.FINAL_STATES or self.is_paused:
             return False
         if save:
-            self.sm.pause_requested()
+            cast(ModelStateMachine, self.sm).pause_requested()
             self.refresh_from_db()
             return self.is_paused
         self.STATE = paused_state
@@ -352,7 +360,7 @@ class BaseModelWithStateMachine(models.Model):
             return False
         if save:
             if when is None:
-                self.sm.resume_requested()
+                cast(ModelStateMachine, self.sm).resume_requested()
                 self.refresh_from_db()
                 return self.STATE == self.StatusChoices.QUEUED
             self.STATE = self.StatusChoices.QUEUED
@@ -431,7 +439,7 @@ class BaseModelWithStateMachine(models.Model):
         )
         if updated == 1:
             obj.RETRY_AT = lock_until
-            obj.modified_at = now
+            cast(Any, obj).modified_at = now
         return updated == 1
 
     def claim_processing_lock(self, lock_seconds: int = 60) -> bool:
@@ -467,7 +475,7 @@ class BaseModelWithStateMachine(models.Model):
         if not self.claim_processing_lock(lock_seconds=lock_seconds):
             return False
 
-        self.sm.tick()
+        cast(ModelStateMachine, self.sm).tick()
         self.refresh_from_db()
         return True
 
