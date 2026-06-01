@@ -11,7 +11,7 @@ from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAll
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
-from django.db.models import Q, Count, Exists, OuterRef, Prefetch
+from django.db.models import Q, Count, Exists, F, OuterRef, Prefetch
 from django import forms
 from django.template import Template, RequestContext
 from django.contrib.admin.helpers import ActionForm
@@ -190,6 +190,7 @@ class SnapshotSizeListFilter(admin.SimpleListFilter):
 class SnapshotResultHealthListFilter(admin.SimpleListFilter):
     title = "ArchiveResult status"
     parameter_name = "archiveresult_status"
+    SNAPSHOT_FIRST_VALUES = {"succeeded"}
 
     def lookups(self, request, model_admin):
         return (
@@ -220,10 +221,19 @@ class SnapshotResultHealthListFilter(admin.SimpleListFilter):
                 "noresults": ArchiveResult.StatusChoices.NORESULTS,
             }
             if value in status_by_value:
-                # Start from ArchiveResult.status for every majority-status filter.
-                # The (status, snapshot_id) index keeps this plan stable regardless
-                # of which status is most common in a user's collection.
-                return queryset.filter(pk__in=ArchiveResult.snapshot_ids_with_majority_status(status_by_value[value]))
+                status = status_by_value[value]
+                if value in self.SNAPSHOT_FIRST_VALUES:
+                    # "succeeded" is overwhelmingly common in large collections.
+                    # Scan Snapshots in admin order and do indexed per-snapshot
+                    # probes so page 1 can stop after list_per_page matches.
+                    return queryset.alias(
+                        total_results=ArchiveResult.snapshot_count_expr(),
+                        matching_results=ArchiveResult.snapshot_count_expr(status=status),
+                    ).filter(matching_results__gt=F("total_results") / 2)
+
+                # Rare statuses are faster status-first: use the
+                # (status, snapshot_id) index to find candidate snapshots.
+                return queryset.filter(pk__in=ArchiveResult.snapshot_ids_with_majority_status(status))
         return queryset
 
 
@@ -236,6 +246,27 @@ class SnapshotChangeList(SearchResultsChangeList):
             resolver_name == "grid" or request.path.rstrip("/").endswith("/grid")
         )
 
+    def _attach_archiveresult_summaries(self):
+        snapshot_ids = [obj.pk for obj in self.result_list]
+        if not snapshot_ids:
+            return
+
+        results_by_snapshot = {snapshot_id: [] for snapshot_id in snapshot_ids}
+        seen_plugins = {snapshot_id: set() for snapshot_id in snapshot_ids}
+        rows = (
+            ArchiveResult.objects.filter(snapshot_id__in=snapshot_ids, status=ArchiveResult.StatusChoices.SUCCEEDED, output_size__gt=0)
+            .order_by("snapshot_id", "plugin")
+            .values_list("snapshot_id", "plugin", "status", "output_size")
+        )
+        for snapshot_id, plugin, status, output_size in rows.iterator(chunk_size=1000):
+            if plugin in seen_plugins[snapshot_id]:
+                continue
+            seen_plugins[snapshot_id].add(plugin)
+            results_by_snapshot[snapshot_id].append(SimpleNamespace(plugin=plugin, status=status, output_size=output_size))
+
+        for obj in self.result_list:
+            obj.__dict__["_admin_archiveresults"] = results_by_snapshot[obj.pk]
+
     def get_results(self, request):
         super().get_results(request)
         if request.GET.get("_embedded") == "crawl":
@@ -247,24 +278,7 @@ class SnapshotChangeList(SearchResultsChangeList):
                 self.list_per_page,
             ).count
         self.show_full_result_count = True
-
-        snapshot_ids = [obj.pk for obj in self.result_list]
-        if snapshot_ids:
-            results_by_snapshot = {snapshot_id: [] for snapshot_id in snapshot_ids}
-            seen_plugins = {snapshot_id: set() for snapshot_id in snapshot_ids}
-            rows = (
-                ArchiveResult.objects.filter(snapshot_id__in=snapshot_ids, status=ArchiveResult.StatusChoices.SUCCEEDED, output_size__gt=0)
-                .order_by("snapshot_id", "plugin")
-                .values_list("snapshot_id", "plugin", "status", "output_size")
-            )
-            for snapshot_id, plugin, status, output_size in rows.iterator(chunk_size=1000):
-                if plugin in seen_plugins[snapshot_id]:
-                    continue
-                seen_plugins[snapshot_id].add(plugin)
-                results_by_snapshot[snapshot_id].append(SimpleNamespace(plugin=plugin, status=status, output_size=output_size))
-
-            for obj in self.result_list:
-                obj.__dict__["_admin_archiveresults"] = results_by_snapshot[obj.pk]
+        self._attach_archiveresult_summaries()
 
 
 class SnapshotAdminForm(forms.ModelForm):
