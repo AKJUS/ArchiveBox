@@ -313,6 +313,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     && export CHROME_USER_DATA_DIR="$LIB_DIR/chrome_profile" \
     && mkdir -p "$LIB_DIR" \
     && apt-get update -qq \
+    && apt-get install -qq -y --no-install-recommends build-essential \
     && if [ "$TARGETARCH" = "arm64" ]; then \
         abxpkg install --binproviders=npm --overrides='{"npm":{"install_args":["playwright@next"]}}' playwright; \
         abxpkg install --no-cache --install-timeout=600 --binproviders=playwright --bin-dir="$LIB_DIR/env/bin" chromium; \
@@ -323,6 +324,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     && rm -rf "$LIB_DIR/personas" "$LIB_DIR/chrome_profile" /opt/archivebox/lib-layer \
     && mkdir -p /opt/archivebox/lib-layer \
     && cp -a "$LIB_DIR"/. /opt/archivebox/lib-layer/ \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* \
     && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" /opt/archivebox/lib-layer
 

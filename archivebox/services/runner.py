@@ -708,10 +708,14 @@ class CrawlRunner:
         from archivebox.config.common import get_config
 
         snapshot = Snapshot.objects.select_related("crawl").get(id=snapshot_id)
+        runtime_chrome_overrides = {
+            key: self.base_config[key] for key in ("CHROME_USER_DATA_DIR", "CHROME_DOWNLOADS_DIR") if self.base_config.get(key)
+        }
         config = get_config(
             crawl=snapshot.crawl,
             snapshot=snapshot,
             base_config=self.base_config or None,
+            overrides=runtime_chrome_overrides,
             include_machine=False,
         )
         config["CRAWL_DIR"] = self.crawl_output_dir
