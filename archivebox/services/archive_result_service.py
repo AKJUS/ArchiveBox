@@ -74,7 +74,6 @@ class ModelDumpable(Protocol):
     def model_dump(self) -> dict[str, Any]: ...
 
 
-@_perf_trace("archivebox.ArchiveResultService._collect_output_metadata")
 def _collect_output_metadata(plugin_dir: Path) -> tuple[dict[str, dict], int, str]:
     exclude_names = {"stdout.log", "stderr.log", "process.pid", "hook.pid", "listener.pid"}
     output_files: dict[str, dict] = {}
@@ -187,7 +186,6 @@ def _summarize_output_files(output_files: dict[str, dict]) -> tuple[int, str]:
     return total_size, output_mimetypes
 
 
-@_perf_trace("archivebox.ArchiveResultService._resolve_output_metadata")
 def _resolve_output_metadata(raw_output_files: Any, plugin_dir: Path) -> tuple[dict[str, dict], int, str]:
     normalized_output_files = _normalize_output_files(raw_output_files)
     if normalized_output_files and _has_structured_output_metadata(normalized_output_files):
@@ -257,6 +255,112 @@ def _iter_archiveresult_records(stdout: str) -> list[dict]:
     return records
 
 
+@_perf_trace("archivebox.ArchiveResultService._save_archiveresult_event_sync")
+def _save_archiveresult_event_to_db(
+    event: ArchiveResultEvent,
+    process_started: ProcessStartedEvent | None,
+) -> None:
+    """Project one ArchiveResultEvent with a single thread-sensitive ORM hop.
+
+    Django's async ORM still delegates each query to sync Django work. The hot
+    search/index maintenance path was paying that handoff separately for
+    Snapshot lookup, Process lookup, ArchiveResult lookup, update, and title
+    checks. Keep the public ArchiveResultEvent path intact, but run the DB
+    projection as one short synchronous block so SQLite sees the same indexed
+    reads/writes without per-query asyncio/threadpool churn.
+    """
+    from archivebox.core.models import ArchiveResult, Snapshot
+    from archivebox.machine.models import Process
+
+    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.snapshot_lookup"):
+        snapshot = Snapshot.objects.filter(id=event.snapshot_id).select_related("crawl", "crawl__created_by").first()
+    if snapshot is None:
+        return
+
+    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.plugin_dir"):
+        plugin_dir = (
+            Path(process_started.output_dir)
+            if process_started is not None and process_started.output_dir
+            else Path(snapshot.output_dir) / event.plugin
+        )
+    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.resolve_output_metadata"):
+        output_files, output_size, output_mimetypes = _resolve_output_metadata(event.output_files, plugin_dir)
+
+    process = None
+    if process_started is not None:
+        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.process_lookup"):
+            started_at = parse_event_datetime(process_started.start_ts)
+            if started_at is None:
+                raise ValueError("ProcessStartedEvent.start_ts is required")
+            process_query = Process.objects.filter(
+                pwd=process_started.output_dir,
+                cmd=[process_started.hook_path, *process_started.hook_args],
+                started_at=started_at,
+            )
+            if process_started.pid:
+                process_query = process_query.filter(pid=process_started.pid)
+            process = process_query.order_by("-modified_at").first()
+
+    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.prepare_defaults"):
+        start_ts = parse_event_datetime(event.start_ts)
+        end_ts = parse_event_datetime(event.end_ts) or timezone.now()
+        defaults = {
+            "status": _normalize_status(event.status),
+            "output_str": event.output_str,
+            "output_json": event.output_json,
+            "output_files": output_files,
+            "output_size": output_size,
+            "output_mimetypes": output_mimetypes,
+            "start_ts": start_ts or timezone.now(),
+            "end_ts": end_ts,
+        }
+        if process is not None:
+            defaults["process_id"] = process.id
+        if event.error:
+            defaults["notes"] = event.error
+
+    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_lookup"):
+        result = ArchiveResult.objects.filter(
+            snapshot=snapshot,
+            plugin=event.plugin,
+            hook_name=event.hook_name,
+        ).first()
+    if result is None:
+        try:
+            with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_create"):
+                result = ArchiveResult.objects.create(
+                    snapshot=snapshot,
+                    plugin=event.plugin,
+                    hook_name=event.hook_name,
+                    **defaults,
+                )
+        except IntegrityError:
+            with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_get_after_integrity"):
+                result = ArchiveResult.objects.get(
+                    snapshot=snapshot,
+                    plugin=event.plugin,
+                    hook_name=event.hook_name,
+                )
+
+    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.diff_fields"):
+        update_fields = []
+        for field, value in defaults.items():
+            if result.__dict__[field] != value:
+                setattr(result, field, value)
+                update_fields.append(field)
+    if update_fields:
+        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_update"):
+            result.save(update_fields=[*update_fields, "modified_at"])
+
+    if result.status in (ArchiveResult.StatusChoices.SUCCEEDED, ArchiveResult.StatusChoices.NORESULTS):
+        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.title_update"):
+            title_output_str = result.output_str if result.status == ArchiveResult.StatusChoices.SUCCEEDED else ""
+            next_title = _extract_snapshot_title(str(plugin_dir.parent), event.plugin, title_output_str, snapshot_url=snapshot.url)
+            if next_title and _should_update_snapshot_title(snapshot.title or "", next_title, snapshot_url=snapshot.url):
+                snapshot.title = next_title
+                snapshot.save(update_fields=["title", "modified_at"])
+
+
 class ArchiveResultService(BaseService):
     LISTENS_TO = [ArchiveResultEvent, ProcessCompletedEvent]
     EMITS = []
@@ -270,13 +374,6 @@ class ArchiveResultService(BaseService):
 
     @_perf_trace("archivebox.ArchiveResultService.on_ArchiveResultEvent__save_to_db")
     async def on_ArchiveResultEvent__save_to_db(self, event: ArchiveResultEvent) -> None:
-        from archivebox.core.models import ArchiveResult, Snapshot
-        from archivebox.machine.models import Process
-
-        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.snapshot_lookup"):
-            snapshot = await Snapshot.objects.filter(id=event.snapshot_id).select_related("crawl", "crawl__created_by").afirst()
-        if snapshot is None:
-            return
         with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.find_process_started"):
             process_started = await self.bus.find(
                 ProcessStartedEvent,
@@ -284,94 +381,11 @@ class ArchiveResultService(BaseService):
                 future=False,
                 where=lambda candidate: self.bus.event_is_child_of(event, candidate),
             )
-        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.plugin_dir"):
-            plugin_dir = (
-                Path(process_started.output_dir)
-                if process_started is not None and process_started.output_dir
-                else Path(snapshot.output_dir) / event.plugin
-            )
-        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.resolve_output_metadata"):
-            output_files, output_size, output_mimetypes = await sync_to_async(_resolve_output_metadata)(event.output_files, plugin_dir)
-        process = None
-        if process_started is not None:
-            with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.process_lookup"):
-                started_at = parse_event_datetime(process_started.start_ts)
-                if started_at is None:
-                    raise ValueError("ProcessStartedEvent.start_ts is required")
-                process_query = Process.objects.filter(
-                    pwd=process_started.output_dir,
-                    cmd=[process_started.hook_path, *process_started.hook_args],
-                    started_at=started_at,
-                )
-                if process_started.pid:
-                    process_query = process_query.filter(pid=process_started.pid)
-                process = await process_query.order_by("-modified_at").afirst()
 
-        with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.prepare_defaults"):
-            start_ts = parse_event_datetime(event.start_ts)
-            end_ts = parse_event_datetime(event.end_ts) or timezone.now()
-            defaults = {
-                "status": _normalize_status(event.status),
-                "output_str": event.output_str,
-                "output_json": event.output_json,
-                "output_files": output_files,
-                "output_size": output_size,
-                "output_mimetypes": output_mimetypes,
-                "start_ts": start_ts or timezone.now(),
-                "end_ts": end_ts,
-            }
-            if process is not None:
-                defaults["process_id"] = process.id
-            if event.error:
-                defaults["notes"] = event.error
-
-        key = (str(snapshot.id), event.plugin, event.hook_name)
+        key = (str(event.snapshot_id), event.plugin, event.hook_name)
         lock = self._save_locks.setdefault(key, asyncio.Lock())
         async with lock:
-            with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_lookup"):
-                # Avoid update_or_create(): Django wraps it in transaction.atomic().
-                # On SQLite a lock retry inside that read-then-write transaction can
-                # keep the read transaction open and block the writer that would have
-                # released the lock. Use autocommit-sized writes instead.
-                result = await ArchiveResult.objects.filter(
-                    snapshot=snapshot,
-                    plugin=event.plugin,
-                    hook_name=event.hook_name,
-                ).afirst()
-            if result is None:
-                try:
-                    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_create"):
-                        result = await ArchiveResult.objects.acreate(
-                            snapshot=snapshot,
-                            plugin=event.plugin,
-                            hook_name=event.hook_name,
-                            **defaults,
-                        )
-                except IntegrityError:
-                    with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_get_after_integrity"):
-                        result = await ArchiveResult.objects.aget(
-                            snapshot=snapshot,
-                            plugin=event.plugin,
-                            hook_name=event.hook_name,
-                        )
-
-            with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.diff_fields"):
-                update_fields = []
-                for field, value in defaults.items():
-                    if result.__dict__[field] != value:
-                        setattr(result, field, value)
-                        update_fields.append(field)
-            if update_fields:
-                with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.result_update"):
-                    await result.asave(update_fields=[*update_fields, "modified_at"])
-
-        if result.status in (ArchiveResult.StatusChoices.SUCCEEDED, ArchiveResult.StatusChoices.NORESULTS):
-            with _perf_span("archivebox.ArchiveResultService.on_ArchiveResultEvent.title_update"):
-                title_output_str = result.output_str if result.status == ArchiveResult.StatusChoices.SUCCEEDED else ""
-                next_title = _extract_snapshot_title(str(plugin_dir.parent), event.plugin, title_output_str, snapshot_url=snapshot.url)
-                if next_title and _should_update_snapshot_title(snapshot.title or "", next_title, snapshot_url=snapshot.url):
-                    snapshot.title = next_title
-                    await snapshot.asave(update_fields=["title", "modified_at"])
+            await sync_to_async(_save_archiveresult_event_to_db, thread_sensitive=True)(event, process_started)
 
     @_perf_trace("archivebox.ArchiveResultService.on_ProcessCompletedEvent__save_to_db")
     async def on_ProcessCompletedEvent__save_to_db(self, event: ProcessCompletedEvent) -> None:

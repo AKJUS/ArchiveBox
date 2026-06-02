@@ -8,9 +8,9 @@ import shutil
 import sys
 import threading
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from datetime import timedelta
-from functools import lru_cache, wraps
+from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -74,52 +74,6 @@ from .tag_service import TagService
 QUEUED_PLUGIN_RESULT_BATCH_SIZE = 100
 
 
-def _perf_trace(label):
-    def decorator(func):
-        if asyncio.iscoroutinefunction(func):
-
-            @wraps(func)
-            async def async_wrapper(*args, **kwargs):
-                if os.environ.get("ARCHIVEBOX_PERF_TRACE") != "1":
-                    return await func(*args, **kwargs)
-                started_at = time.perf_counter()
-                try:
-                    return await func(*args, **kwargs)
-                finally:
-                    elapsed_ms = (time.perf_counter() - started_at) * 1000
-                    print(f"PERF_TRACE label={label} ms={elapsed_ms:.3f}", file=sys.stderr, flush=True)
-
-            return async_wrapper
-
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            if os.environ.get("ARCHIVEBOX_PERF_TRACE") != "1":
-                return func(*args, **kwargs)
-            started_at = time.perf_counter()
-            try:
-                return func(*args, **kwargs)
-            finally:
-                elapsed_ms = (time.perf_counter() - started_at) * 1000
-                print(f"PERF_TRACE label={label} ms={elapsed_ms:.3f}", file=sys.stderr, flush=True)
-
-        return sync_wrapper
-
-    return decorator
-
-
-@contextmanager
-def _perf_span(label: str):
-    if os.environ.get("ARCHIVEBOX_PERF_TRACE") != "1":
-        yield
-        return
-    started_at = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
-        print(f"PERF_TRACE label={label} ms={elapsed_ms:.3f}", file=sys.stderr, flush=True)
-
-
 def _bus_name(prefix: str, identifier: str) -> str:
     normalized = "".join(ch if ch.isalnum() else "_" for ch in identifier)
     return f"{prefix}_{normalized}"
@@ -180,7 +134,6 @@ def _is_external_task_cancelled(error: asyncio.CancelledError) -> bool:
     return not isinstance(error, (EventHandlerAbortedError, EventHandlerCancelledError))
 
 
-@_perf_trace("runner._emit_machine_config")
 async def _emit_machine_config(
     bus,
     *,
@@ -188,38 +141,30 @@ async def _emit_machine_config(
     derived_config: dict[str, Any],
     parent_event=None,
 ) -> None:
-    with _perf_span("runner._emit_machine_config.normalize_user"):
-        user_config = normalize_runtime_config(config)
-        user_config["ABX_RUNTIME"] = "archivebox"
-    with _perf_span("runner._emit_machine_config.normalize_derived"):
-        derived_machine_config = normalize_runtime_config(derived_config)
-    with _perf_span("runner._emit_machine_config.user_event"):
-        user_event = MachineEvent(
-            config=user_config,
-            config_type="user",
+    user_config = normalize_runtime_config(config)
+    user_config["ABX_RUNTIME"] = "archivebox"
+    derived_machine_config = normalize_runtime_config(derived_config)
+    user_event = MachineEvent(
+        config=user_config,
+        config_type="user",
+    )
+    if parent_event is not None:
+        user_event.event_parent_id = parent_event.event_id
+    await bus.emit(user_event).now()
+    if derived_machine_config:
+        derived_event = MachineEvent(
+            config=derived_machine_config,
+            config_type="derived",
         )
         if parent_event is not None:
-            user_event.event_parent_id = parent_event.event_id
-        await bus.emit(user_event).now()
-    if derived_machine_config:
-        with _perf_span("runner._emit_machine_config.derived_event"):
-            derived_event = MachineEvent(
-                config=derived_machine_config,
-                config_type="derived",
-            )
-            if parent_event is not None:
-                derived_event.event_parent_id = parent_event.event_id
-            await bus.emit(derived_event).now()
+            derived_event.event_parent_id = parent_event.event_id
+        await bus.emit(derived_event).now()
 
 
-@_perf_trace("runner._run_event_now")
 async def _run_event_now(event, timeout: float | None = None):
-    with _perf_span("runner._run_event_now.now"):
-        await event.now(timeout=timeout)
-    with _perf_span("runner._run_event_now.wait"):
-        await event.wait(timeout=timeout)
-    with _perf_span("runner._run_event_now.results"):
-        await event.event_results_list()
+    await event.now(timeout=timeout)
+    await event.wait(timeout=timeout)
+    await event.event_results_list()
     return event
 
 
@@ -374,7 +319,6 @@ class CrawlRunner:
         """
         return bool(self.initial_snapshot_ids and self.selected_plugins)
 
-    @_perf_trace("runner.CrawlRunner.run")
     async def run(self) -> None:
         heartbeat = CrawlHeartbeat(
             Path(self.crawl_output_dir),
@@ -749,51 +693,44 @@ class CrawlRunner:
         )
         return live_ui
 
-    @_perf_trace("runner.CrawlRunner.load_snapshot_payload")
     def load_snapshot_payload(self, snapshot_id: str) -> dict[str, Any]:
         from archivebox.config.common import get_config
         from archivebox.core.models import Snapshot
 
-        with _perf_span("runner.CrawlRunner.load_snapshot_payload.snapshot_get"):
-            snapshot = Snapshot.objects.select_related("crawl", "crawl__created_by").get(id=snapshot_id)
+        snapshot = Snapshot.objects.select_related("crawl", "crawl__created_by").get(id=snapshot_id)
         self.crawl = snapshot.crawl
-        with _perf_span("runner.CrawlRunner.load_snapshot_payload.resolve_persona"):
-            self.persona = snapshot.crawl.resolve_persona()
-        with _perf_span("runner.CrawlRunner.load_snapshot_payload.get_config"):
-            self.base_config = get_config(crawl=snapshot.crawl, persona=self.persona)
-        with _perf_span("runner.CrawlRunner.load_snapshot_payload.runtime_dirs"):
-            self.base_config.update(self.config_overrides)
-            self.crawl_output_dir = str(snapshot.crawl.output_dir)
-            runtime_chrome_overrides = {}
-            if self.persona:
-                if str(self.base_config.get("CHROME_ISOLATION") or "crawl").lower() == "snapshot":
-                    runtime_chrome_overrides.update(
-                        self.persona.prepare_runtime_for_snapshot(
-                            snapshot,
-                            chrome_binary=self.base_config["CHROME_BINARY"],
-                        ),
-                    )
-                else:
-                    crawl_downloads_dir = self.persona.runtime_downloads_dir_for_crawl(snapshot.crawl)
-                    crawl_downloads_dir.mkdir(parents=True, exist_ok=True)
-                    runtime_chrome_overrides.update(
-                        {
-                            "CHROME_USER_DATA_DIR": str(self.persona.runtime_profile_dir_for_crawl(snapshot.crawl)),
-                            "CHROME_DOWNLOADS_DIR": str(crawl_downloads_dir),
-                        },
-                    )
-            snapshot_output_dir = str(snapshot.output_dir)
-        with _perf_span("runner.CrawlRunner.load_snapshot_payload.for_crawl_runtime"):
-            config = self.base_config.for_crawl_runtime(
-                crawl=snapshot.crawl,
-                snapshot=snapshot,
-                persona=self.persona,
-                runtime_overrides=runtime_chrome_overrides,
-                extra_context={"snapshot_id": str(snapshot.id), "snapshot_depth": snapshot.depth},
-            )
-        with _perf_span("runner.CrawlRunner.load_snapshot_payload.serialize"):
-            tags = snapshot.tags_str()
-            normalized_config = normalize_runtime_config(config)
+        self.persona = snapshot.crawl.resolve_persona()
+        self.base_config = get_config(crawl=snapshot.crawl, persona=self.persona)
+        self.base_config.update(self.config_overrides)
+        self.crawl_output_dir = str(snapshot.crawl.output_dir)
+        runtime_chrome_overrides = {}
+        if self.persona:
+            if str(self.base_config.get("CHROME_ISOLATION") or "crawl").lower() == "snapshot":
+                runtime_chrome_overrides.update(
+                    self.persona.prepare_runtime_for_snapshot(
+                        snapshot,
+                        chrome_binary=self.base_config["CHROME_BINARY"],
+                    ),
+                )
+            else:
+                crawl_downloads_dir = self.persona.runtime_downloads_dir_for_crawl(snapshot.crawl)
+                crawl_downloads_dir.mkdir(parents=True, exist_ok=True)
+                runtime_chrome_overrides.update(
+                    {
+                        "CHROME_USER_DATA_DIR": str(self.persona.runtime_profile_dir_for_crawl(snapshot.crawl)),
+                        "CHROME_DOWNLOADS_DIR": str(crawl_downloads_dir),
+                    },
+                )
+        snapshot_output_dir = str(snapshot.output_dir)
+        config = self.base_config.for_crawl_runtime(
+            crawl=snapshot.crawl,
+            snapshot=snapshot,
+            persona=self.persona,
+            runtime_overrides=runtime_chrome_overrides,
+            extra_context={"snapshot_id": str(snapshot.id), "snapshot_depth": snapshot.depth},
+        )
+        tags = snapshot.tags_str()
+        normalized_config = normalize_runtime_config(config)
         return {
             "id": str(snapshot.id),
             "url": snapshot.url,
@@ -851,37 +788,33 @@ class CrawlRunner:
         if self.process_discovered_snapshots_inline and isinstance(get_current_event(), CrawlStartEvent):
             await self.enqueue_pending_snapshots_from_projection()
 
-    @_perf_trace("runner.CrawlRunner.run_crawl")
     async def run_crawl(self, root_snapshot_id: str, snapshot_ids: list[str]) -> None:
-        with _perf_span("runner.CrawlRunner.run_crawl.load_root_payload"):
-            snapshot = await sync_to_async(self.load_snapshot_payload, thread_sensitive=True)(root_snapshot_id)
-        with _perf_span("runner.CrawlRunner.run_crawl.prepare_runtime"):
-            config = normalize_runtime_config(snapshot["config"])
-            derived_config = normalize_runtime_config(self.derived_config)
-            output_dir = Path(self.crawl_output_dir)
-            plugins = self.runtime_plugins()
-            abx_snapshot = AbxSnapshot(
-                id=snapshot["id"],
-                url=snapshot["url"],
-                depth=int(snapshot["depth"]),
-                crawl_id=str(self.crawl.id),
-            )
-            setup_hooks = [(plugin, hook) for plugin in plugins.values() for hook in plugin.filter_hooks("CrawlSetup")]
-            crawl_setup_phase_timeout = compute_phase_timeout(setup_hooks, config)
-            install_phase_timeout = compute_install_phase_timeout(get_install_plugins(plugins), config)
-            snapshot_hooks = [(plugin, hook) for plugin in plugins.values() for hook in plugin.filter_hooks("Snapshot")]
-            max_snapshot_count = max(1, int(config.get("CRAWL_MAX_URLS") or len(snapshot_ids) or 1))
-            snapshot_phase_timeout = compute_phase_timeout(snapshot_hooks, config) * max_snapshot_count
-            crawl_cleanup_phase_timeout = crawl_setup_phase_timeout
-            crawl_lifecycle_timeout = (
-                crawl_setup_phase_timeout
-                + snapshot_phase_timeout
-                + crawl_cleanup_phase_timeout
-                + CrawlCompletedEvent.model_fields["event_timeout"].default
-                + 30.0
-            )
-        with _perf_span("runner.CrawlRunner.run_crawl.emit_machine_config"):
-            await _emit_machine_config(self.bus, config=config, derived_config=derived_config)
+        snapshot = await sync_to_async(self.load_snapshot_payload, thread_sensitive=True)(root_snapshot_id)
+        config = normalize_runtime_config(snapshot["config"])
+        derived_config = normalize_runtime_config(self.derived_config)
+        output_dir = Path(self.crawl_output_dir)
+        plugins = self.runtime_plugins()
+        abx_snapshot = AbxSnapshot(
+            id=snapshot["id"],
+            url=snapshot["url"],
+            depth=int(snapshot["depth"]),
+            crawl_id=str(self.crawl.id),
+        )
+        setup_hooks = [(plugin, hook) for plugin in plugins.values() for hook in plugin.filter_hooks("CrawlSetup")]
+        crawl_setup_phase_timeout = compute_phase_timeout(setup_hooks, config)
+        install_phase_timeout = compute_install_phase_timeout(get_install_plugins(plugins), config)
+        snapshot_hooks = [(plugin, hook) for plugin in plugins.values() for hook in plugin.filter_hooks("Snapshot")]
+        max_snapshot_count = max(1, int(config.get("CRAWL_MAX_URLS") or len(snapshot_ids) or 1))
+        snapshot_phase_timeout = compute_phase_timeout(snapshot_hooks, config) * max_snapshot_count
+        crawl_cleanup_phase_timeout = crawl_setup_phase_timeout
+        crawl_lifecycle_timeout = (
+            crawl_setup_phase_timeout
+            + snapshot_phase_timeout
+            + crawl_cleanup_phase_timeout
+            + CrawlCompletedEvent.model_fields["event_timeout"].default
+            + 30.0
+        )
+        await _emit_machine_config(self.bus, config=config, derived_config=derived_config)
         install_cancel_watcher: asyncio.Task[None] | None = None
         install_event = self.bus.emit(
             InstallEvent(
@@ -901,40 +834,38 @@ class CrawlRunner:
 
         on_archivebox_InstallEvent.__name__ = "on_archivebox_InstallEvent__cancel_watcher"
         self.bus.on(InstallEvent, on_archivebox_InstallEvent)
-        with _perf_span("runner.CrawlRunner.run_crawl.setup_abx_services"):
-            setup_abx_services(
-                self.bus,
-                plugins=plugins,
-                url=snapshot["url"],
-                snapshot=abx_snapshot,
-                output_dir=output_dir,
-                install_enabled=False,
-                crawl_setup_enabled=True,
-                crawl_event_enabled=False,
-                crawl_start_enabled=False,
-                snapshot_cleanup_enabled=False,
-                crawl_cleanup_enabled=True,
-                crawl_completed_enabled=False,
-                crawl_setup_phase_timeout=crawl_setup_phase_timeout,
-                snapshot_phase_timeout=crawl_setup_phase_timeout,
-                snapshot_cleanup_phase_timeout=crawl_setup_phase_timeout,
-                crawl_cleanup_phase_timeout=crawl_setup_phase_timeout,
-                persist_derived=False,
-                auto_install=True,
-                emit_jsonl=False,
-                abort_requested=self.crawl_is_cancelled,
-                MachineService=None,
-                PluginBinariesService=PluginBinariesService,
-                BinaryCacheService=None,
-                BinaryService=None,
-                ProcessService=None,
-                ArchiveResultService=None,
-                TagService=None,
-                SnapshotService=None,
-            )
+        setup_abx_services(
+            self.bus,
+            plugins=plugins,
+            url=snapshot["url"],
+            snapshot=abx_snapshot,
+            output_dir=output_dir,
+            install_enabled=False,
+            crawl_setup_enabled=True,
+            crawl_event_enabled=False,
+            crawl_start_enabled=False,
+            snapshot_cleanup_enabled=False,
+            crawl_cleanup_enabled=True,
+            crawl_completed_enabled=False,
+            crawl_setup_phase_timeout=crawl_setup_phase_timeout,
+            snapshot_phase_timeout=crawl_setup_phase_timeout,
+            snapshot_cleanup_phase_timeout=crawl_setup_phase_timeout,
+            crawl_cleanup_phase_timeout=crawl_setup_phase_timeout,
+            persist_derived=False,
+            auto_install=True,
+            emit_jsonl=False,
+            abort_requested=self.crawl_is_cancelled,
+            MachineService=None,
+            PluginBinariesService=PluginBinariesService,
+            BinaryCacheService=None,
+            BinaryService=None,
+            ProcessService=None,
+            ArchiveResultService=None,
+            TagService=None,
+            SnapshotService=None,
+        )
         try:
-            with _perf_span("runner.CrawlRunner.run_crawl.install_event"):
-                await _run_event_now(install_event, install_phase_timeout)
+            await _run_event_now(install_event, install_phase_timeout)
         finally:
             if install_cancel_watcher is not None:
                 install_cancel_watcher.cancel()
@@ -1039,8 +970,7 @@ class CrawlRunner:
             event_handler_slow_timeout=slow_warning_timeout(crawl_lifecycle_timeout),
         )
         self.root_crawl_event_id = crawl_event.event_id
-        with _perf_span("runner.CrawlRunner.run_crawl.crawl_event"):
-            await _run_event_now(self.bus.emit(crawl_event), None)
+        await _run_event_now(self.bus.emit(crawl_event), None)
         if await self.crawl_is_cancelled():
             self._skip_wait_until_idle = True
             return
@@ -1073,14 +1003,12 @@ class CrawlRunner:
             if completed_process.status == "failed":
                 raise RuntimeError(f"Crawl setup hook {plugin.name}:{hook.name} failed")
 
-    @_perf_trace("runner.CrawlRunner.run_snapshot")
     async def run_snapshot(self, snapshot_id: str, crawl_start_event: CrawlStartEvent | None = None) -> None:
         async with self.snapshot_semaphore:
             crawl_start_event = crawl_start_event or get_current_event()
             if not isinstance(crawl_start_event, CrawlStartEvent):
                 raise RuntimeError("Snapshot events must be emitted from a CrawlStartEvent handler")
-            with _perf_span("runner.CrawlRunner.run_snapshot.load_payload"):
-                snapshot = await sync_to_async(self.load_snapshot_payload, thread_sensitive=True)(snapshot_id)
+            snapshot = await sync_to_async(self.load_snapshot_payload, thread_sensitive=True)(snapshot_id)
             if snapshot["status"] == "sealed" and not self.selected_plugins:
                 await sync_to_async(run_snapshot_maintenance, thread_sensitive=True)(snapshot_id)
                 return
@@ -1105,37 +1033,34 @@ class CrawlRunner:
             ):
                 await sync_to_async(self.seal_snapshot_due_to_limit, thread_sensitive=True)(snapshot_id)
                 return
-            with _perf_span("runner.CrawlRunner.run_snapshot.prepare_runtime"):
-                config = normalize_runtime_config(snapshot["config"])
-                derived_config = normalize_runtime_config(self.derived_config)
-                output_dir = Path(snapshot["output_dir"])
-                plugins = (
-                    filter_plugins(self.plugins, snapshot_selected_plugins, include_providers=True)
-                    if snapshot_selected_plugins
-                    else self.plugins
-                )
-                abx_snapshot = AbxSnapshot(
-                    id=snapshot["id"],
-                    url=snapshot["url"],
-                    depth=int(snapshot["depth"]),
-                    crawl_id=str(self.crawl.id),
-                )
-                snapshot_hooks = [(plugin, hook) for plugin in plugins.values() for hook in plugin.filter_hooks("Snapshot")]
-                snapshot_phase_timeout = compute_phase_timeout(snapshot_hooks, config)
-            with _perf_span("runner.CrawlRunner.run_snapshot.emit_machine_config"):
-                await _emit_machine_config(self.bus, config=config, derived_config=derived_config, parent_event=crawl_start_event)
-            with _perf_span("runner.CrawlRunner.run_snapshot.init_snapshot_service"):
-                snapshot_service = HookSnapshotService(
-                    self.bus,
-                    url=snapshot["url"],
-                    snapshot=abx_snapshot,
-                    output_dir=output_dir,
-                    plugins=plugins,
-                    snapshot_phase_timeout=snapshot_phase_timeout,
-                    snapshot_cleanup_enabled=True,
-                    snapshot_cleanup_phase_timeout=snapshot_phase_timeout,
-                    abort_requested=self.crawl_is_cancelled,
-                )
+            config = normalize_runtime_config(snapshot["config"])
+            derived_config = normalize_runtime_config(self.derived_config)
+            output_dir = Path(snapshot["output_dir"])
+            plugins = (
+                filter_plugins(self.plugins, snapshot_selected_plugins, include_providers=True)
+                if snapshot_selected_plugins
+                else self.plugins
+            )
+            abx_snapshot = AbxSnapshot(
+                id=snapshot["id"],
+                url=snapshot["url"],
+                depth=int(snapshot["depth"]),
+                crawl_id=str(self.crawl.id),
+            )
+            snapshot_hooks = [(plugin, hook) for plugin in plugins.values() for hook in plugin.filter_hooks("Snapshot")]
+            snapshot_phase_timeout = compute_phase_timeout(snapshot_hooks, config)
+            await _emit_machine_config(self.bus, config=config, derived_config=derived_config, parent_event=crawl_start_event)
+            snapshot_service = HookSnapshotService(
+                self.bus,
+                url=snapshot["url"],
+                snapshot=abx_snapshot,
+                output_dir=output_dir,
+                plugins=plugins,
+                snapshot_phase_timeout=snapshot_phase_timeout,
+                snapshot_cleanup_enabled=True,
+                snapshot_cleanup_phase_timeout=snapshot_phase_timeout,
+                abort_requested=self.crawl_is_cancelled,
+            )
             try:
                 snapshot_event = SnapshotEvent(
                     url=snapshot["url"],
@@ -1147,49 +1072,42 @@ class CrawlRunner:
                 )
                 snapshot_event.event_parent_id = crawl_start_event.event_id
                 emitted_snapshot_event = self.bus.emit(snapshot_event)
-                with _perf_span("runner.CrawlRunner.run_snapshot.snapshot_event"):
-                    await _run_event_now(emitted_snapshot_event, snapshot_phase_timeout)
-                with _perf_span("runner.CrawlRunner.run_snapshot.find_completed"):
-                    completed_snapshot = await self.bus.find(
-                        SnapshotCompletedEvent,
-                        child_of=emitted_snapshot_event,
-                        past=True,
-                        future=snapshot_phase_timeout,
-                    )
+                await _run_event_now(emitted_snapshot_event, snapshot_phase_timeout)
+                completed_snapshot = await self.bus.find(
+                    SnapshotCompletedEvent,
+                    child_of=emitted_snapshot_event,
+                    past=True,
+                    future=snapshot_phase_timeout,
+                )
                 if completed_snapshot is None:
                     raise RuntimeError(f"Snapshot {snapshot_id} did not complete")
-                with _perf_span("runner.CrawlRunner.run_snapshot.wait_completed"):
-                    await completed_snapshot.wait(timeout=snapshot_phase_timeout)
-                    await completed_snapshot.event_results_list()
+                await completed_snapshot.wait(timeout=snapshot_phase_timeout)
+                await completed_snapshot.event_results_list()
                 # SnapshotCompletedEvent is the normal projection path, but the
                 # runner is the scheduler owner. Finalize idempotently here too
                 # so a completed snapshot cannot remain STARTED if the event was
                 # observed before its DB projector advanced the state machine.
                 crawl_limit_stop_reason = CrawlLimitState.from_config(config).get_stop_reason()
-                with _perf_span("runner.CrawlRunner.run_snapshot.finalize_completed_snapshot"):
-                    await sync_to_async(finalize_completed_snapshot, thread_sensitive=True)(
-                        snapshot_id,
-                        output_dir=output_dir,
-                        crawl_limit_stop_reason=crawl_limit_stop_reason,
-                    )
+                await sync_to_async(finalize_completed_snapshot, thread_sensitive=True)(
+                    snapshot_id,
+                    output_dir=output_dir,
+                    crawl_limit_stop_reason=crawl_limit_stop_reason,
+                )
                 if snapshot["status"] == "sealed":
-                    with _perf_span("runner.CrawlRunner.run_snapshot.run_snapshot_maintenance"):
-                        await sync_to_async(run_snapshot_maintenance, thread_sensitive=True)(snapshot_id, output_dir=output_dir)
+                    await sync_to_async(run_snapshot_maintenance, thread_sensitive=True)(snapshot_id, output_dir=output_dir)
                     return
-                with _perf_span("runner.CrawlRunner.run_snapshot.enqueue_discovered"):
-                    await self.enqueue_discovered_snapshots_from_outputs(snapshot)
-                with _perf_span("runner.CrawlRunner.run_snapshot.maybe_seal_crawl"):
-                    await sync_to_async(
-                        lambda: (
-                            self.crawl.sm.seal()
-                            if self.crawl.status == self.crawl.StatusChoices.STARTED
-                            and not self.crawl.snapshot_set.filter(
-                                status__in=self.crawl.snapshot_set.model.OPEN_STATES,
-                            ).exists()
-                            else None
-                        ),
-                        thread_sensitive=True,
-                    )()
+                await self.enqueue_discovered_snapshots_from_outputs(snapshot)
+                await sync_to_async(
+                    lambda: (
+                        self.crawl.sm.seal()
+                        if self.crawl.status == self.crawl.StatusChoices.STARTED
+                        and not self.crawl.snapshot_set.filter(
+                            status__in=self.crawl.snapshot_set.model.OPEN_STATES,
+                        ).exists()
+                        else None
+                    ),
+                    thread_sensitive=True,
+                )()
             finally:
                 snapshot_service.close()
 
@@ -1813,7 +1731,6 @@ def _run_due_snapshot_id(snapshot_id, *, lock_seconds: int, interactive_interrup
     return True
 
 
-@_perf_trace("runner._run_due_queued_plugin_result")
 def _run_due_queued_plugin_result(
     plugin_names: frozenset[str],
     *,
@@ -1827,113 +1744,101 @@ def _run_due_queued_plugin_result(
 
     if not plugin_names:
         return False
-    with _perf_span("runner._run_due_queued_plugin_result.prepare_queries"):
-        now = timezone.now()
-        queued_results = ArchiveResult.objects.filter(
-            snapshot_id=OuterRef("pk"),
+    now = timezone.now()
+    queued_results = ArchiveResult.objects.filter(
+        snapshot_id=OuterRef("pk"),
+        status=ArchiveResult.StatusChoices.QUEUED,
+        plugin__in=plugin_names,
+    )
+    first_due_query = (
+        ArchiveResult.objects.filter(
             status=ArchiveResult.StatusChoices.QUEUED,
             plugin__in=plugin_names,
+            snapshot__retry_at__lte=now,
+            snapshot__status=Snapshot.StatusChoices.SEALED,
         )
-        first_due_query = (
-            ArchiveResult.objects.filter(
-                status=ArchiveResult.StatusChoices.QUEUED,
-                plugin__in=plugin_names,
-                snapshot__retry_at__lte=now,
-                snapshot__status=Snapshot.StatusChoices.SEALED,
-            )
-            .filter(**({"snapshot__crawl_id": crawl_id} if crawl_id else {}))
-            .values("snapshot_id", "snapshot__crawl_id")[:1]
-        )
-    with _perf_span("runner._run_due_queued_plugin_result.first_due_query"):
-        first_due_results = list(first_due_query)
+        .filter(**({"snapshot__crawl_id": crawl_id} if crawl_id else {}))
+        .values("snapshot_id", "snapshot__crawl_id")[:1]
+    )
+    first_due_results = list(first_due_query)
     if not first_due_results:
         return False
     root_crawl_id = str(first_due_results[0]["snapshot__crawl_id"])
 
-    with _perf_span("runner._run_due_queued_plugin_result.batch_query"):
-        due_snapshots = Snapshot.objects.filter(
-            retry_at__lte=now,
-            status=Snapshot.StatusChoices.SEALED,
-        ).filter(Exists(queued_results))
-        if crawl_id:
-            due_snapshots = due_snapshots.filter(crawl_id=crawl_id)
-        batch_candidates = list(
-            # The crawl picker above starts from enabled queued ArchiveResult rows
-            # and uses a sliced LIMIT 1. Do not use QuerySet.first() here: it adds
-            # ordering and can turn this hot scheduler check into a temp-sort over
-            # hundreds of thousands of plugin rows. Once a crawl is selected,
-            # sibling order is irrelevant; the crawl_id/status index can fetch this
-            # small local batch directly while EXISTS proves the enabled queued
-            # plugin rows via the existing ArchiveResult unique index.
-            due_snapshots.filter(crawl_id=root_crawl_id).order_by()[:QUEUED_PLUGIN_RESULT_BATCH_SIZE],
-        )
+    due_snapshots = Snapshot.objects.filter(
+        retry_at__lte=now,
+        status=Snapshot.StatusChoices.SEALED,
+    ).filter(Exists(queued_results))
+    if crawl_id:
+        due_snapshots = due_snapshots.filter(crawl_id=crawl_id)
+    batch_candidates = list(
+        # The crawl picker above starts from enabled queued ArchiveResult rows
+        # and uses a sliced LIMIT 1. Do not use QuerySet.first() here: it adds
+        # ordering and can turn this hot scheduler check into a temp-sort over
+        # hundreds of thousands of plugin rows. Once a crawl is selected,
+        # sibling order is irrelevant; the crawl_id/status index can fetch this
+        # small local batch directly while EXISTS proves the enabled queued
+        # plugin rows via the existing ArchiveResult unique index.
+        due_snapshots.filter(crawl_id=root_crawl_id).order_by()[:QUEUED_PLUGIN_RESULT_BATCH_SIZE],
+    )
     if not batch_candidates:
         return False
 
     selected_plugins: list[str] | None = None
     claimed_snapshot_ids: list[str] = []
-    with _perf_span("runner._run_due_queued_plugin_result.claim_loop"):
-        for snapshot in batch_candidates:
-            with _perf_span("runner._run_due_queued_plugin_result.claim_loop.queued_plugins_for_snapshot"):
-                snapshot_selected_plugins = [
-                    plugin_name for plugin_name in (queued_plugins_for_snapshot(str(snapshot.id)) or []) if plugin_name in plugin_names
-                ]
-            if not snapshot_selected_plugins:
-                continue
-            if selected_plugins is None:
-                selected_plugins = snapshot_selected_plugins
-            if snapshot_selected_plugins != selected_plugins:
-                continue
-            with _perf_span("runner._run_due_queued_plugin_result.claim_loop.claim_for_worker"):
-                claimed = Snapshot.claim_for_worker(snapshot, lock_seconds=lock_seconds)
-            if not claimed:
-                continue
-            with _perf_span("runner._run_due_queued_plugin_result.claim_loop.refresh_from_db"):
-                snapshot.refresh_from_db()
-            with _perf_span("runner._run_due_queued_plugin_result.claim_loop.finalize_uploads"):
-                snapshot.finalize_completed_upload_results()
-            if snapshot.fs_migration_needed:
-                with _perf_span("runner._run_due_queued_plugin_result.claim_loop.fs_migration"):
-                    run_snapshot_maintenance(str(snapshot.id))
-                    snapshot.refresh_from_db()
-            if snapshot.status != Snapshot.StatusChoices.SEALED:
-                continue
-            claimed_snapshot_ids.append(str(snapshot.id))
-            with _perf_span("runner._run_due_queued_plugin_result.claim_loop.console_line"):
-                _runner_console_line(crawl_id=snapshot.crawl_id, snapshot=snapshot)
+    for snapshot in batch_candidates:
+        snapshot_selected_plugins = [
+            plugin_name for plugin_name in (queued_plugins_for_snapshot(str(snapshot.id)) or []) if plugin_name in plugin_names
+        ]
+        if not snapshot_selected_plugins:
+            continue
+        if selected_plugins is None:
+            selected_plugins = snapshot_selected_plugins
+        if snapshot_selected_plugins != selected_plugins:
+            continue
+        claimed = Snapshot.claim_for_worker(snapshot, lock_seconds=lock_seconds)
+        if not claimed:
+            continue
+        snapshot.refresh_from_db()
+        snapshot.finalize_completed_upload_results()
+        if snapshot.fs_migration_needed:
+            run_snapshot_maintenance(str(snapshot.id))
+            snapshot.refresh_from_db()
+        if snapshot.status != Snapshot.StatusChoices.SEALED:
+            continue
+        claimed_snapshot_ids.append(str(snapshot.id))
+        _runner_console_line(crawl_id=snapshot.crawl_id, snapshot=snapshot)
 
     if not claimed_snapshot_ids or selected_plugins is None:
         return True
 
-    with _perf_span("runner._run_due_queued_plugin_result.run_crawl"):
-        run_crawl(
-            root_crawl_id,
-            snapshot_ids=claimed_snapshot_ids,
-            selected_plugins=selected_plugins,
-            process_discovered_snapshots_inline=True,
-            interactive_interrupts=interactive_interrupts,
-            config_overrides={
-                "CRAWL_MAX_CONCURRENT_SNAPSHOTS": QUEUED_PLUGIN_RESULT_BATCH_SIZE,
-            },
-        )
+    run_crawl(
+        root_crawl_id,
+        snapshot_ids=claimed_snapshot_ids,
+        selected_plugins=selected_plugins,
+        process_discovered_snapshots_inline=True,
+        interactive_interrupts=interactive_interrupts,
+        config_overrides={
+            "CRAWL_MAX_CONCURRENT_SNAPSHOTS": QUEUED_PLUGIN_RESULT_BATCH_SIZE,
+        },
+    )
     if all(plugin.startswith("search_backend_") for plugin in selected_plugins):
-        with _perf_span("runner._run_due_queued_plugin_result.clear_completed_search"):
-            queued_results = ArchiveResult.objects.filter(
-                snapshot_id=OuterRef("pk"),
-                status=ArchiveResult.StatusChoices.QUEUED,
-                plugin__in=selected_plugins,
-            )
-            Snapshot.objects.filter(
-                id__in=claimed_snapshot_ids,
-                status=Snapshot.StatusChoices.SEALED,
-            ).annotate(
-                has_queued_results=Exists(queued_results),
-            ).filter(
-                has_queued_results=False,
-            ).update(
-                retry_at=None,
-                modified_at=timezone.now(),
-            )
+        queued_results = ArchiveResult.objects.filter(
+            snapshot_id=OuterRef("pk"),
+            status=ArchiveResult.StatusChoices.QUEUED,
+            plugin__in=selected_plugins,
+        )
+        Snapshot.objects.filter(
+            id__in=claimed_snapshot_ids,
+            status=Snapshot.StatusChoices.SEALED,
+        ).annotate(
+            has_queued_results=Exists(queued_results),
+        ).filter(
+            has_queued_results=False,
+        ).update(
+            retry_at=None,
+            modified_at=timezone.now(),
+        )
     return True
 
 
