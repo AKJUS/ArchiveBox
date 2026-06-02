@@ -1026,6 +1026,7 @@ def run_archivebox(data_dir: Path, args: list, timeout: int = 60, env: dict | No
     base_env["USE_COLOR"] = "False"
     base_env["SHOW_PROGRESS"] = "False"
     # Disable ALL extractors for faster tests (can be overridden by env parameter)
+    base_env["PLUGINS"] = "__archivebox_test_no_plugins__"
     base_env["SAVE_ARCHIVEDOTORG"] = "False"
     base_env["SAVE_TITLE"] = "False"
     base_env["SAVE_FAVICON"] = "False"

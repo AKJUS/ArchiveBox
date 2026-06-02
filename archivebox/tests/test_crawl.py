@@ -8,6 +8,7 @@ import pytest
 
 from archivebox.core.models import Snapshot
 from archivebox.crawls.models import Crawl
+from archivebox.tests.conftest import run_queued_crawls
 from archivebox.tests.test_orm_helpers import use_archivebox_db
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -58,6 +59,7 @@ def test_crawl_creates_snapshot_for_url(tmp_path, process, disable_extractors_di
         text=True,
         env=disable_extractors_dict,
     )
+    run_queued_crawls(tmp_path, disable_extractors_dict)
 
     with use_archivebox_db(tmp_path):
         snapshot = Snapshot.objects.filter(url="https://example.com").first()
@@ -75,6 +77,7 @@ def test_crawl_links_snapshot_to_crawl(tmp_path, process, disable_extractors_dic
         text=True,
         env=disable_extractors_dict,
     )
+    run_queued_crawls(tmp_path, disable_extractors_dict)
 
     with use_archivebox_db(tmp_path):
         crawl = Crawl.objects.order_by("-created_at").first()
@@ -101,6 +104,7 @@ def test_crawl_multiple_urls_creates_multiple_snapshots(tmp_path, process, disab
         text=True,
         env=disable_extractors_dict,
     )
+    run_queued_crawls(tmp_path, disable_extractors_dict)
 
     with use_archivebox_db(tmp_path):
         urls = list(Snapshot.objects.order_by("url").values_list("url", flat=True))
@@ -123,6 +127,7 @@ def test_crawl_from_file_creates_snapshot(tmp_path, process, disable_extractors_
         text=True,
         env=disable_extractors_dict,
     )
+    run_queued_crawls(tmp_path, disable_extractors_dict)
 
     with use_archivebox_db(tmp_path):
         snapshot = Snapshot.objects.first()

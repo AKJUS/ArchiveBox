@@ -159,7 +159,7 @@ def test_install_updates_binary_table(tmp_path, process):
     )
 
     result = subprocess.run(
-        ["archivebox", "install", "pip"],
+        ["archivebox", "install", "git"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -175,9 +175,9 @@ def test_install_updates_binary_table(tmp_path, process):
         }
         snapshot_count = Snapshot.objects.count()
         sealed_crawls = Crawl.objects.filter(status="sealed").count()
-        installed_python = Binary.objects.filter(status="installed", name="python").count()
+        installed_git = Binary.objects.filter(status="installed", name="git").count()
 
     assert sealed_crawls == 0
     assert snapshot_count == 0
     assert binary_counts.get("installed", 0) > 0
-    assert installed_python == 1
+    assert installed_git == 1

@@ -379,18 +379,18 @@ def run_hook(
         env["CRAWL_DIR"] = str(crawl_dir)
 
     # Export runtime library roots; abx-dl/abxpkg own executable lookup env.
-    lib_dir = resolved_config.LIB_DIR
+    lib_dir = hook_config.get("LIB_DIR")
     if lib_dir:
         env["LIB_DIR"] = str(lib_dir)
         env["ABXPKG_LIB_DIR"] = str(lib_dir)
 
     # Set Node.js module resolution paths.
     # NODE_PATH may be a path list, but NODE_MODULES_DIR is a single canonical directory.
-    node_modules_dir = resolved_config.get("NODE_MODULES_DIR")
+    node_modules_dir = hook_config.get("NODE_MODULES_DIR")
     if not node_modules_dir and lib_dir:
         node_modules_dir = Path(lib_dir) / "npm" / "node_modules"
 
-    node_path_parts = [part for part in str(resolved_config.get("NODE_PATH") or "").split(os.pathsep) if part]
+    node_path_parts = [part for part in str(hook_config.get("NODE_PATH") or "").split(os.pathsep) if part]
     if node_modules_dir:
         node_modules_dir = Path(node_modules_dir)
         node_modules_dir.mkdir(parents=True, exist_ok=True)

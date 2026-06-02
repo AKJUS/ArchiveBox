@@ -7,7 +7,7 @@ import sys
 
 import rich_click as click
 
-from archivebox.cli.archivebox_add import add
+from archivebox.cli.archivebox_add import add, _collect_input_urls
 
 
 @click.command(context_settings={"ignore_unknown_options": True})
@@ -19,7 +19,7 @@ from archivebox.cli.archivebox_add import add
 def main(depth: int, tag: str, status: str, wait: bool, urls: tuple[str, ...]):
     """Backwards-compatible `archivebox crawl URL...` entrypoint."""
     del status, wait
-    add(list(urls), depth=depth, tag=tag, bg=True)
+    add(_collect_input_urls(urls), depth=depth, tag=tag, bg=True)
     sys.exit(0)
 
 
