@@ -222,7 +222,7 @@ def test_add_view_depth_two_crawl_renders_outputs_over_server(tmp_path, recursiv
 
     port = get_free_port()
     env = cli_env(
-        port,
+        port=port,
         PLUGINS="wget,parse_html_urls",
         PUBLIC_INDEX="True",
         PUBLIC_ADD_VIEW="True",
