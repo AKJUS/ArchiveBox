@@ -301,6 +301,7 @@ def browser_runtime(tmp_path_factory):
     assert browser, "No Chrome/Chromium binary available for browser security tests"
 
     return {
+        "lib_dir": shared_lib,
         "node_modules_dir": shared_lib / "npm" / "node_modules",
         "chrome_binary": browser,
     }
@@ -745,7 +746,8 @@ def test_archivewebpage_wacz_preview_serves_real_capture_frame(initialized_archi
     port = get_free_port()
     env = cli_env(
         port=port,
-        PLUGINS="archivewebpage",
+        PLUGINS="chrome,archivewebpage",
+        BASE_URL=f"http://archivebox.localhost:{port}",
         URL_ALLOWLIST="",
         PUBLIC_INDEX="True",
         PUBLIC_ADD_VIEW="True",
@@ -759,12 +761,29 @@ def test_archivewebpage_wacz_preview_serves_real_capture_frame(initialized_archi
         ARCHIVEWEBPAGE_TIMEOUT="90",
         TIMEOUT="90",
     )
+    env["LIB_DIR"] = str(browser_runtime["lib_dir"])
+    env["ABXPKG_LIB_DIR"] = str(browser_runtime["lib_dir"])
+    env["NODE_PATH"] = str(browser_runtime["node_modules_dir"])
+    env["NODE_MODULES_DIR"] = str(browser_runtime["node_modules_dir"])
+    env["CHROME_EXTENSIONS_DIR"] = str(
+        browser_runtime["lib_dir"] / "chromewebstore" / "extensions",
+    )
 
     try:
+        install_result = run_archivebox_cmd(
+            ["install", "archivewebpage"],
+            cwd=initialized_archive,
+            env=env,
+            timeout=600,
+        )
+        assert install_result.returncode == 0, (
+            f"archivebox install archivewebpage failed:\nSTDOUT:\n{install_result.stdout}\nSTDERR:\n{install_result.stderr}"
+        )
+
         start_daemon_server(initialized_archive, env=env, port=port)
         wait_for_http(port, host=f"archivebox.localhost:{port}", path="/")
         _cmd_result = run_archivebox_cmd(
-            ["add", "--bg", "--depth=0", "--max-urls=1", "--plugins=archivewebpage", url],
+            ["add", "--bg", "--depth=0", "--max-urls=1", "--plugins=chrome,archivewebpage", url],
             cwd=initialized_archive,
             env=env,
             timeout=120,
