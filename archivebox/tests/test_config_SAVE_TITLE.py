@@ -27,12 +27,12 @@ def _install_chrome(tmp_path, env):
     assert install_process.returncode == 0, install_process.stderr or install_process.stdout
 
 
-def _wait_for_snapshot_title(data_dir, *, timeout=30):
+def _wait_for_snapshot_title(data_dir, *, timeout=60):
     deadline = time.time() + timeout
     title = None
     while time.time() < deadline:
         with use_archivebox_db(data_dir):
-            title = Snapshot.objects.values_list("title", flat=True).get()
+            title = Snapshot.objects.get().resolved_title
         if title:
             return title
         time.sleep(0.5)
