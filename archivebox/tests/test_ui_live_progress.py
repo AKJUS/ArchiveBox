@@ -53,7 +53,7 @@ class TestLiveProgressView:
 
         response = client.get("/progress.json", HTTP_HOST=ADMIN_TEST_HOST)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.content
         payload = response.json()
         active_crawl = next(item for item in payload["active_crawls"] if item["id"] == str(crawl.pk))
         active_snapshot = next(item for item in active_crawl["active_snapshots"] if item["id"] == str(snapshot.pk))
@@ -92,7 +92,7 @@ class TestLiveProgressView:
 
         response = client.get("/progress.json", HTTP_HOST=ADMIN_TEST_HOST)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.content
         payload = response.json()
         active_crawl = next(item for item in payload["active_crawls"] if item["id"] == str(crawl.pk))
         active_snapshot = next(item for item in active_crawl["active_snapshots"] if item["id"] == str(snapshot.pk))
@@ -162,6 +162,39 @@ class TestLiveProgressView:
             payload = response.json()
             assert payload["scope"]["crawl_id"] == compact_id
             assert payload["active_crawls"]
+
+    def test_live_progress_shows_old_paused_crawl_with_due_snapshot_work(self, client, admin_user, crawl, snapshot):
+        from datetime import timedelta
+        from archivebox.crawls.models import Crawl
+        from archivebox.core.models import Snapshot
+
+        old_timestamp = timezone.now() - timedelta(days=2)
+        Crawl.objects.filter(pk=crawl.pk).update(
+            status=Crawl.StatusChoices.PAUSED,
+            created_at=old_timestamp,
+            modified_at=old_timestamp,
+            retry_at=None,
+        )
+        Snapshot.objects.filter(pk=snapshot.pk).update(
+            status=Snapshot.StatusChoices.QUEUED,
+            retry_at=timezone.now(),
+            modified_at=timezone.now(),
+        )
+
+        client.force_login(admin_user)
+        response = client.get(reverse("live_progress"), HTTP_HOST=ADMIN_TEST_HOST)
+
+        assert response.status_code == 200, response.content
+        payload = response.json()
+        active_crawl = next(item for item in payload["active_crawls"] if item["id"] == str(crawl.pk))
+        assert active_crawl["status"] == Crawl.StatusChoices.PAUSED
+        assert active_crawl["pending_snapshots"] == 1
+        assert active_crawl["active_snapshots"] == [
+            [
+                str(snapshot.pk),
+                "https://example.com",
+            ],
+        ]
 
     def test_live_progress_reports_real_orchestrator_process_running(self, client, admin_user, db):
         import archivebox.machine.models as machine_models

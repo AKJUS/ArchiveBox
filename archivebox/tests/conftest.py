@@ -26,6 +26,7 @@ import requests
 from django.utils import timezone
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = REPO_ROOT.parent
 PYTEST_BASETEMP_ROOT = (REPO_ROOT / "tests" / "out").resolve()
 SESSION_DATA_DIR = Path(tempfile.mkdtemp(prefix="archivebox-pytest-session-")).resolve()
 (SESSION_DATA_DIR / "tests").mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,29 @@ def _assert_safe_runtime_paths(*, cwd: Path | None = None, env: dict[str, str] |
         value = (env or {}).get(key)
         if value:
             _assert_not_repo_path(Path(value), label=key)
+
+
+def _test_source_pythonpath() -> str:
+    entries: list[str] = []
+    for repo_name in ("abxpkg", "abx-plugins", "abx-dl"):
+        repo_path = WORKSPACE_ROOT / repo_name
+        if repo_path.exists():
+            entries.append(str(repo_path.resolve(strict=False)))
+    return os.pathsep.join(entries)
+
+
+def _set_test_source_pythonpath(env: dict[str, str]) -> None:
+    source_pythonpath = _test_source_pythonpath()
+    existing_entries = [
+        str(Path(entry).expanduser().resolve(strict=False))
+        for entry in (env.get("PYTHONPATH") or "").split(os.pathsep)
+        if entry and Path(entry).expanduser().is_absolute()
+    ]
+    entries = [entry for entry in [*source_pythonpath.split(os.pathsep), *existing_entries] if entry]
+    if entries:
+        env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(entries))
+    else:
+        env.pop("PYTHONPATH", None)
 
 
 def _sync_archivebox_test_data_dir(data_dir: Path) -> None:
@@ -170,9 +194,8 @@ def run_archivebox_cmd(
 
     _assert_not_repo_path(cwd, label="cwd")
 
-    run_env: dict[str, str] | None = None
+    run_env = {} if replace_env else os.environ.copy()
     if default_cli_env or disable_extractors or env is not None:
-        run_env = {} if replace_env else os.environ.copy()
         if default_cli_env:
             run_env["USE_COLOR"] = "False"
             run_env["SHOW_PROGRESS"] = "False"
@@ -198,8 +221,9 @@ def run_archivebox_cmd(
             )
         if env:
             run_env.update(env)
+    _set_test_source_pythonpath(run_env)
 
-    _assert_safe_runtime_paths(cwd=cwd, env=run_env or os.environ)
+    _assert_safe_runtime_paths(cwd=cwd, env=run_env)
 
     if stdin is not None:
         assert input is None, "pass either input or stdin, not both"
@@ -562,6 +586,7 @@ def cli_env(
     **extra: str,
 ) -> dict[str, str]:
     env = {} if replace else os.environ.copy()
+    _set_test_source_pythonpath(env)
     env.update({"USE_COLOR": "False", "SHOW_PROGRESS": "False"})
 
     if disable_extractors or live or server:
@@ -1373,7 +1398,7 @@ def _find_cached_chrome(lib_dir: Path) -> Path | None:
         lib_dir / "puppeteer" / "chromium",
         lib_dir / "puppeteer",
         lib_dir / "ms-playwright",
-        lib_dir / "npm" / "node_modules" / "puppeteer" / ".local-chromium",
+        lib_dir / "pnpm" / "packages" / "chrome" / "node_modules" / "puppeteer" / ".local-chromium",
     ]
     for base in candidates:
         if not base.exists():
@@ -1401,17 +1426,17 @@ def _find_system_browser() -> Path | None:
 
 
 def _ensure_puppeteer(shared_lib: Path) -> None:
-    npm_prefix = shared_lib / "npm"
-    node_modules = npm_prefix / "node_modules"
+    pnpm_prefix = shared_lib / "pnpm" / "packages" / "chrome"
+    node_modules = pnpm_prefix / "node_modules"
     puppeteer_dir = node_modules / "puppeteer"
     if puppeteer_dir.exists():
         return
-    npm_prefix.mkdir(parents=True, exist_ok=True)
+    pnpm_prefix.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["PUPPETEER_SKIP_DOWNLOAD"] = "1"
     subprocess.run(
-        ["npm", "install", "puppeteer"],
-        cwd=str(npm_prefix),
+        ["pnpm", "add", "--dir", str(pnpm_prefix), "puppeteer"],
+        cwd=str(pnpm_prefix),
         env=env,
         check=True,
         capture_output=True,

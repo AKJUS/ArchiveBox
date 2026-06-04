@@ -285,7 +285,6 @@ def run_hook(
     """
     from archivebox.machine.models import Process, Machine, NetworkInterface
     from archivebox.config.common import get_config, normalize_runtime_config
-    import sys
 
     config_scope = {key.removeprefix("config_"): kwargs.pop(key) for key in list(kwargs) if key.startswith("config_")}
     config_overrides = _config_to_overrides(config)
@@ -333,12 +332,15 @@ def run_hook(
         )
         return process
 
-    # Determine the interpreter based on file extension
+    # Python hooks carry their runtime contract in the shebang
+    # (usually `abxpkg run --script python3`), so execute them directly.
+    # For shell/JS hooks we still dispatch through the conventional
+    # interpreter because those hooks do not need per-script Python env setup.
     ext = script.suffix.lower()
     if ext == ".sh":
         cmd = ["bash", str(script)]
     elif ext == ".py":
-        cmd = [sys.executable, str(script)]
+        cmd = [str(script)]
     elif ext == ".js":
         cmd = ["node", str(script)]
     else:
@@ -388,7 +390,7 @@ def run_hook(
     # NODE_PATH may be a path list, but NODE_MODULES_DIR is a single canonical directory.
     node_modules_dir = hook_config.get("NODE_MODULES_DIR")
     if not node_modules_dir and lib_dir:
-        node_modules_dir = Path(lib_dir) / "npm" / "node_modules"
+        node_modules_dir = Path(lib_dir) / "pnpm" / "packages" / "chrome" / "node_modules"
 
     node_path_parts = [part for part in str(hook_config.get("NODE_PATH") or "").split(os.pathsep) if part]
     if node_modules_dir:

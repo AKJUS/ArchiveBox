@@ -432,6 +432,9 @@ class ArchiveResultService(BaseService):
                     ).now()
             return
 
+        # TODO: consider moving this fallback derivation into abx-dl itself.
+        # First try both patterns: if the whole abx-dl process crashes, restarting
+        # the snapshot may be enough, but don't guess before validating it.
         process_failed = event.exit_code not in (0, PROCESS_EXIT_SKIPPED)
         with _perf_span("archivebox.ArchiveResultService.on_ProcessCompletedEvent.emit_archive_result_fallback"):
             await event.emit(
@@ -439,7 +442,7 @@ class ArchiveResultService(BaseService):
                     snapshot_id=snapshot_event.snapshot_id,
                     plugin=event.plugin_name,
                     hook_name=event.hook_name,
-                    status="failed" if process_failed else ("succeeded" if _has_content_files(event.output_files) else "skipped"),
+                    status="failed" if process_failed else ("succeeded" if _has_content_files(event.output_files) else "noresult"),
                     output_str=event.stderr if process_failed else "",
                     output_files=event.output_files,
                     start_ts=event.start_ts,

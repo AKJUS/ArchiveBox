@@ -158,7 +158,7 @@ RUNNER_WORKER = {
     "name": "worker_runner",
     "command": _shell_join([sys.executable, "-m", "archivebox", "run", "--daemon"]),
     "autostart": "false",
-    "autorestart": "unexpected",
+    "autorestart": "true",
     "environment": 'PYTHONUNBUFFERED="1",COLUMNS="200",ARCHIVEBOX_RUNNER_DAEMON="1"',
     "stopasgroup": "true",
     "killasgroup": "true",

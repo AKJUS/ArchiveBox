@@ -7,8 +7,6 @@ from asgiref.sync import sync_to_async
 from abx_dl.events import MachineEvent
 from abx_dl.services.base import BaseService
 
-_BINARY_EVENT_ALLOWED_KEYS = frozenset({"ABX_INSTALL_CACHE"})
-
 
 def _is_binary_event_key(key: str) -> bool:
     """``MachineEvent`` projector only ever writes binary-related state.
@@ -20,7 +18,7 @@ def _is_binary_event_key(key: str) -> bool:
     mirror is a security boundary), so the projector strips anything that
     isn't a binary path or the binary install cache.
     """
-    if key in _BINARY_EVENT_ALLOWED_KEYS:
+    if key.startswith("ABX_") and key.endswith("CACHE"):
         return True
     return key.endswith("_BINARY")
 

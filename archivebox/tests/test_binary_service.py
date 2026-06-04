@@ -134,6 +134,8 @@ def test_binary_request_installs_env_binary_and_recovers_stale_cache(initialized
     assert binary_processes
     assert binary_processes[-1].status == Process.StatusChoices.EXITED
     assert binary_processes[-1].exit_code == 0
+    assert binary_processes[-1].ended_at is not None
+    assert binary_processes[-1].started_at < binary_processes[-1].ended_at
     assert any(f"--name={name}" in arg for arg in binary_processes[-1].cmd)
 
     _cmd_result = run_archivebox_cmd(

@@ -434,6 +434,9 @@ class ProcessAdmin(BaseModelAdmin):
         "crawl_link",
         "cmd_display",
         "env_display",
+        "stdout_display",
+        "stderr_display",
+        "archiveresult_output_display",
         "timeout",
         "pid",
         "exit_code",
@@ -475,7 +478,7 @@ class ProcessAdmin(BaseModelAdmin):
         (
             "Output",
             {
-                "fields": ("stdout", "stderr"),
+                "fields": ("stdout_display", "stderr_display", "archiveresult_output_display"),
                 "classes": ("card", "wide", "collapse"),
             },
         ),
@@ -739,6 +742,28 @@ class ProcessAdmin(BaseModelAdmin):
         if not env_text:
             return "-"
         return _render_copy_block(env_text, multiline=True)
+
+    @admin.display(description="Stdout")
+    def stdout_display(self, process):
+        if not process.stdout:
+            return "-"
+        return _render_copy_block(process.stdout, multiline=True)
+
+    @admin.display(description="Stderr")
+    def stderr_display(self, process):
+        if not process.stderr:
+            return "-"
+        return _render_copy_block(process.stderr, multiline=True)
+
+    @admin.display(description="ArchiveResult Output")
+    def archiveresult_output_display(self, process):
+        try:
+            output = process.archiveresult.output_str
+        except Process.archiveresult.RelatedObjectDoesNotExist:
+            return "-"
+        if not output:
+            return "-"
+        return _render_copy_block(output, multiline=True)
 
 
 def register_admin(admin_site):

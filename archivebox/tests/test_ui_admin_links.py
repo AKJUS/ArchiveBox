@@ -118,7 +118,7 @@ def running_process_record():
 
 
 def test_archiveresult_admin_links_plugin_and_process():
-    from archivebox.core.admin_archiveresults import ArchiveResultAdmin
+    from archivebox.core.admin_archiveresults import ArchiveResultAdmin, render_archiveresults_list
     from archivebox.core.models import ArchiveResult
     from archivebox.machine.models import Process
 
@@ -147,6 +147,17 @@ def test_archiveresult_admin_links_plugin_and_process():
 
     assert "/admin/environment/plugins/builtin.wget/" in plugin_html
     assert f"/admin/machine/process/{process.id}/change" in process_html
+    assert f"<code>{str(process.id)[-8:]}</code>" in process_html
+    assert "<code>-</code>" not in process_html
+
+    machine_html = str(admin.machine_link(result))
+    assert f"/admin/machine/machine/{iface.machine.id}/change" in machine_html
+    assert machine_html == f'<a href="/admin/machine/machine/{iface.machine.id}/change/">{iface.machine.hostname}</a>'
+
+    inline_html = str(render_archiveresults_list(ArchiveResult.objects.filter(id=result.id)))
+    assert f"/admin/machine/process/{process.id}/change" in inline_html
+    assert f">{str(process.id)[-8:]}</a>" in inline_html
+    assert ">-</a>" not in inline_html
 
 
 def test_deleting_binary_and_process_records_preserves_results():

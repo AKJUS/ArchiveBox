@@ -83,6 +83,8 @@ class TestMachineAdmin:
             timeout=90,
             pid=54321,
             exit_code=0,
+            stdout="job stdout\nline 2",
+            stderr="job stderr\nline 2",
             url="https://example.com/status",
             started_at=timezone.now() - timedelta(seconds=52),
             ended_at=timezone.now(),
@@ -96,6 +98,8 @@ class TestMachineAdmin:
         assert b"Kill" in response.content
         assert b"python /tmp/job.py --url=https://example.com" in response.content
         assert b"ENABLED=True" in response.content
+        assert b"job stdout" in response.content
+        assert b"job stderr" in response.content
         assert b"52s" in response.content
         assert b"API_KEY=" not in response.content
         assert b"ACCESS_TOKEN=" not in response.content
@@ -107,6 +111,8 @@ class TestMachineAdmin:
         assert b'name="timeout"' not in response.content
         assert b'name="pid"' not in response.content
         assert b'name="exit_code"' not in response.content
+        assert b'name="stdout"' not in response.content
+        assert b'name="stderr"' not in response.content
         assert b'name="url"' not in response.content
         assert b'name="started_at"' not in response.content
         assert b'name="ended_at"' not in response.content

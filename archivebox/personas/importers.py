@@ -612,7 +612,7 @@ def export_browser_state(
     if not state_script.exists():
         return False, None, f"Browser state export script not found at {state_script}"
 
-    node_modules_dir = get_config().LIB_DIR / "npm" / "node_modules"
+    node_modules_dir = get_config().LIB_DIR / "pnpm" / "packages" / "chrome" / "node_modules"
     chrome_plugin_dir = Path(get_plugins_dir()).resolve()
 
     env = os.environ.copy()

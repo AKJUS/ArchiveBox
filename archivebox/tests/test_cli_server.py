@@ -139,6 +139,7 @@ def test_runner_worker_uses_current_interpreter():
     from archivebox.workers.supervisord_util import RUNNER_WORKER
 
     assert RUNNER_WORKER["command"] == f"{sys.executable} -m archivebox run --daemon"
+    assert RUNNER_WORKER["autorestart"] == "true"
     assert 'ARCHIVEBOX_RUNNER_DAEMON="1"' in RUNNER_WORKER["environment"]
 
 

@@ -327,8 +327,20 @@ def live_progress_view(request):
             .order_by("-modified_at")[:max_active_crawls],
         )
         paused_crawls = list(
-            crawl_scope.filter(status=Crawl.StatusChoices.PAUSED, created_at__gte=paused_crawl_cutoff)
+            crawl_scope.filter(
+                Q(status=Crawl.StatusChoices.PAUSED, created_at__gte=paused_crawl_cutoff)
+                | Q(
+                    status=Crawl.StatusChoices.PAUSED,
+                    snapshot_set__status__in=Snapshot.RUNNABLE_STATES,
+                    snapshot_set__retry_at__lte=now,
+                )
+                | Q(
+                    status=Crawl.StatusChoices.PAUSED,
+                    snapshot_set__archiveresult__status=ArchiveResult.StatusChoices.QUEUED,
+                ),
+            )
             .values(*active_crawl_fields)
+            .distinct()
             .order_by("-modified_at")[:max_active_crawls],
         )
         queued_crawls = list(

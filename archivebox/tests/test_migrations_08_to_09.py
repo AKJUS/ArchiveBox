@@ -404,7 +404,7 @@ def test_migration_creates_process_records(migration_08_data):
 
 
 def test_migration_creates_binary_records(migration_08_data):
-    """Migration should create Binary records from cmd_version data."""
+    """Migration should create and link Binary/NetworkInterface records from migrated Process data."""
     work_dir, db_path, original_data = migration_08_data
     result = run_archivebox_migration_cmd(work_dir, ["init"], timeout=45)
     assert result.returncode == 0, f"Init failed: {result.stderr}"
@@ -419,6 +419,31 @@ def test_migration_creates_binary_records(migration_08_data):
     # Should have at least one binary per unique extractor
     extractors = {ar["extractor"] for ar in original_data["archiveresults"]}
     assert binary_count >= len(extractors), f"Expected at least {len(extractors)} Binaries, got {binary_count}"
+
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM machine_process
+        WHERE cmd != '[]' AND binary_id IS NULL
+    """)
+    missing_binary_count = cursor.fetchone()[0]
+    assert missing_binary_count == 0
+
+    cursor.execute("""
+        SELECT p.cmd, b.name, b.abspath
+        FROM machine_process p
+        JOIN machine_binary b ON p.binary_id = b.id
+        WHERE p.cmd != '[]'
+    """)
+    rows = cursor.fetchall()
+    assert rows
+    for cmd_raw, binary_name, binary_abspath in rows:
+        cmd = json.loads(cmd_raw)
+        assert binary_name == cmd[0]
+        assert binary_abspath == cmd[0]
+
+    cursor.execute("SELECT COUNT(*) FROM machine_process WHERE iface_id IS NULL")
+    missing_iface_count = cursor.fetchone()[0]
+    assert missing_iface_count == 0
 
     conn.close()
 
@@ -746,7 +771,12 @@ def test_archiveresult_files_preserved_after_migration(tmp_path):
             files_before.extend([f for f in d.rglob("*") if f.is_file()])
     files_before_count = len(files_before)
     generated_metadata_names = {"index.html", "index.json", "index.jsonl"}
-    original_payloads = sorted(path.read_text() for path in files_before if path.name not in generated_metadata_names)
+    generated_search_backends = {"search_backend_sqlite", "search_backend_sonic"}
+
+    def is_generated_file(path) -> bool:
+        return path.name in generated_metadata_names or any(part in generated_search_backends for part in path.parts)
+
+    original_payloads = sorted(path.read_text() for path in files_before if not is_generated_file(path))
 
     # Sample some specific files to check they're preserved
     sample_paths_before = {}
@@ -881,9 +911,7 @@ def test_archiveresult_files_preserved_after_migration(tmp_path):
     # the hydrated DB row, so raw file counts are allowed to increase; compare
     # the legacy payload contents after excluding those generated metadata
     # files to keep the no-data-loss assertion strict.
-    migrated_payloads = sorted(
-        path.read_text() for path in [*files_new_structure, *old_files_remaining] if path.name not in generated_metadata_names
-    )
+    migrated_payloads = sorted(path.read_text() for path in [*files_new_structure, *old_files_remaining] if not is_generated_file(path))
     assert original_payloads == migrated_payloads, "Legacy payload files changed or were lost during reorganization"
     assert files_new_count >= files_before_count, "New 0.9 metadata should not replace legacy payload files"
 

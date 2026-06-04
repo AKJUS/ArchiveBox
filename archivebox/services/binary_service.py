@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -186,38 +187,109 @@ class ArchiveBoxDBBinaryCacheBackend:
 class ArchiveBoxBinaryService(BaseService):
     """Preserve ArchiveBox's legacy Binary Process rows around abxpkg requests."""
 
-    LISTENS_TO = [BinaryRequestEvent]
+    LISTENS_TO = [BinaryRequestEvent, BinaryEvent]
     EMITS: list[type[BaseEvent]] = []
 
     def __init__(self, bus: EventBus):
         super().__init__(bus)
+        self.process_ids_by_request_id: dict[str, str] = {}
         self.bus.on(BinaryRequestEvent, self.on_BinaryRequestEvent__project_process)
+        self.bus.on(BinaryRequestEvent, self.on_BinaryRequestEvent__schedule_missing_finalize)
+        self.bus.on(BinaryEvent, self.on_BinaryEvent__finalize_process)
 
     async def on_BinaryRequestEvent__project_process(self, request: BinaryRequestEvent) -> None:
-        from archivebox.machine.models import Binary, Machine, Process, _canonical_binary_name
-        from archivebox.services.process_service import current_network_interface_with_machine
+        from archivebox.machine.models import Machine, Process, _canonical_binary_name
 
         machine = await sync_to_async(Machine.current, thread_sensitive=True)()
         binary_name = _canonical_binary_name(request.name)
         if not binary_name:
             return
-        binary = await Binary.objects.filter(machine=machine, name=binary_name).order_by("-modified_at").afirst()
-        if binary is None:
-            return
+        binary = await self._get_or_create_binary(machine, binary_name, request)
+        started_at = timezone.now()
+        output_dir = self._process_output_dir(binary, request)
+        await sync_to_async(output_dir.mkdir, thread_sensitive=True)(parents=True, exist_ok=True)
+        process = await Process.objects.acreate(
+            machine=machine,
+            iface=None,
+            process_type=Process.TypeChoices.BINARY,
+            worker_type="",
+            pwd=str(output_dir),
+            cmd=self._process_cmd(request),
+            env={},
+            timeout=int(request.event_timeout or request.install_timeout or 600),
+            pid=None,
+            url=None,
+            started_at=started_at,
+            ended_at=None,
+            stdout="",
+            stderr="",
+            exit_code=None,
+            status=Process.StatusChoices.RUNNING,
+            retry_at=None,
+            binary=binary,
+        )
+        self.process_ids_by_request_id[request.event_id] = str(process.id)
 
-        binary_event = await self.bus.find(
-            BinaryEvent,
-            child_of=request,
+    async def on_BinaryEvent__finalize_process(self, event: BinaryEvent) -> None:
+        from archivebox.machine.models import Binary, Process, _canonical_binary_name
+
+        request = await self.bus.find(
+            BinaryRequestEvent,
             past=True,
             future=False,
-            name=request.name,
-            where=lambda candidate: bool(candidate.abspath),
+            where=lambda candidate: self.bus.event_is_child_of(event, candidate),
         )
-        iface = await sync_to_async(current_network_interface_with_machine, thread_sensitive=True)()
-        now = timezone.now()
-        success = isinstance(binary_event, BinaryEvent)
-        output_dir = self._process_output_dir(binary, request)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        request = request if isinstance(request, BinaryRequestEvent) else None
+        process_id = self.process_ids_by_request_id.pop(request.event_id, "") if request is not None else ""
+        if not process_id:
+            return
+        process = await Process.objects.filter(id=process_id).select_related("binary").afirst()
+        if process is None:
+            return
+        binary_name = _canonical_binary_name(event.name)
+        binary = process.binary
+        if binary is not None and binary_name:
+            binary.abspath = event.abspath
+            if event.version:
+                binary.version = str(event.version)
+            if event.sha256:
+                binary.sha256 = str(event.sha256)
+            binary.binproviders = event.binproviders or binary.binproviders
+            binary.binprovider = event.binprovider or binary.binprovider
+            binary.status = Binary.StatusChoices.INSTALLED
+            binary.retry_at = None
+            await binary.asave(
+                update_fields=["abspath", "version", "sha256", "binproviders", "binprovider", "status", "retry_at", "modified_at"],
+            )
+        process.ended_at = timezone.now()
+        process.stdout = json.dumps(self._binary_event_json(event, binary)) + "\n"
+        process.stderr = ""
+        process.exit_code = 0
+        process.status = Process.StatusChoices.EXITED
+        await process.asave(update_fields=["ended_at", "stdout", "stderr", "exit_code", "status", "modified_at"])
+        if binary is not None:
+            await sync_to_async(self._write_binary_index, thread_sensitive=True)(binary, process, Path(process.pwd))
+
+    async def _get_or_create_binary(self, machine, binary_name: str, request: BinaryRequestEvent):
+        from archivebox.machine.models import Binary
+
+        binary_id = str(request.extra_context.get("binary_id") or "")
+        if binary_id:
+            binary = await Binary.objects.filter(id=binary_id).afirst()
+            if binary is not None:
+                return binary
+        binary = await Binary.objects.filter(machine=machine, name=binary_name).order_by("-modified_at").afirst()
+        if binary is not None:
+            return binary
+        return await Binary.objects.acreate(
+            machine=machine,
+            name=binary_name,
+            binproviders=_binproviders_to_str(request.binproviders),
+            overrides=_persisted_overrides_for_request(request),
+            status=Binary.StatusChoices.QUEUED,
+        )
+
+    def _process_cmd(self, request: BinaryRequestEvent) -> list[str]:
         cmd = [
             "abxpkg",
             "install",
@@ -226,29 +298,65 @@ class ArchiveBoxBinaryService(BaseService):
         ]
         if request.overrides:
             cmd.append(f"--overrides={json.dumps(request.overrides, sort_keys=True)}")
-        stdout = json.dumps(binary.to_json()) + "\n" if success else ""
-        stderr = "" if success else f"Binary request did not resolve: {request.name}"
-        process = await Process.objects.acreate(
-            machine=iface.machine,
-            iface=iface,
-            process_type=Process.TypeChoices.BINARY,
-            worker_type="",
-            pwd=str(output_dir),
-            cmd=cmd,
-            env={},
-            timeout=int(request.event_timeout or request.install_timeout or 600),
-            pid=None,
-            url=None,
-            started_at=now,
-            ended_at=now,
-            stdout=stdout,
-            stderr=stderr,
-            exit_code=0 if success else 1,
-            status=Process.StatusChoices.EXITED,
-            retry_at=None,
-            binary=binary,
+        return cmd
+
+    def _binary_event_json(self, event: BinaryEvent, binary) -> dict[str, Any]:
+        if binary is not None:
+            data = binary.to_json()
+        else:
+            data = {"type": "Binary", "name": event.name}
+        data.update(
+            {
+                "type": "Binary",
+                "name": event.name,
+                "binproviders": event.binproviders,
+                "binprovider": event.binprovider,
+                "abspath": event.abspath,
+                "version": str(event.version or ""),
+                "sha256": event.sha256 or "",
+                "status": "installed",
+            },
         )
-        self._write_binary_index(binary, process, output_dir)
+        return data
+
+    async def _finalize_missing_process(self, request: BinaryRequestEvent) -> None:
+        from archivebox.machine.models import Process
+
+        process_id = self.process_ids_by_request_id.pop(request.event_id, "")
+        if not process_id:
+            return
+        process = await Process.objects.filter(id=process_id).afirst()
+        if process is None or process.status == Process.StatusChoices.EXITED:
+            return
+        process.ended_at = timezone.now()
+        process.stderr = f"Binary request did not resolve: {request.name}"
+        process.exit_code = 1
+        process.status = Process.StatusChoices.EXITED
+        await process.asave(update_fields=["ended_at", "stderr", "exit_code", "status", "modified_at"])
+
+    async def _finalize_request_when_done(self, request: BinaryRequestEvent) -> None:
+        try:
+            await request.wait(timeout=request.event_timeout)
+        except TimeoutError:
+            await self._finalize_missing_process(request)
+            return
+        binary_event = await self.bus.find(
+            BinaryEvent,
+            child_of=request,
+            past=True,
+            future=False,
+            name=request.name,
+            where=lambda candidate: bool(candidate.abspath),
+        )
+        if not isinstance(binary_event, BinaryEvent):
+            await self._finalize_missing_process(request)
+
+    def _schedule_missing_finalize(self, request: BinaryRequestEvent) -> None:
+        task = asyncio.create_task(self._finalize_request_when_done(request))
+        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+
+    async def on_BinaryRequestEvent__schedule_missing_finalize(self, request: BinaryRequestEvent) -> None:
+        self._schedule_missing_finalize(request)
 
     def _process_output_dir(self, binary, request: BinaryRequestEvent) -> Path:
         raw_output_dir = str(request.extra_context.get("output_dir") or "").strip()

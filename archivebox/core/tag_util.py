@@ -114,9 +114,9 @@ def add_snapshot_counts(tags: list[Tag], snapshot_queryset: QuerySet[Snapshot] |
     queryset = SnapshotTag.objects.filter(tag_id__in=tag_ids)
     if snapshot_queryset is not None:
         queryset = queryset.filter(snapshot_id__in=snapshot_queryset.values("id"))
-    counts = {row["tag_id"]: row["num_snapshots"] for row in queryset.values("tag_id").annotate(num_snapshots=Count("snapshot_id"))}
+    counts = {int(row["tag_id"]): row["num_snapshots"] for row in queryset.values("tag_id").annotate(num_snapshots=Count("snapshot_id"))}
     for tag in tags:
-        tag.num_snapshots = counts.get(tag.pk, 0)
+        tag.num_snapshots = counts.get(int(tag.pk), 0)
 
 
 def get_tag_creator_choices() -> list[tuple[str, str]]:

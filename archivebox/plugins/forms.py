@@ -130,6 +130,7 @@ HIDDEN_PLUGIN_CONFIG_UI_PLUGINS = {
     "env",
     "media",
     "npm",
+    "opencode",
     "pip",
     "puppeteer",
     "search_backend_ripgrep",

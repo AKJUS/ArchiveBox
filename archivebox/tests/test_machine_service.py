@@ -105,6 +105,7 @@ def test_install_persists_machine_binary_config_and_recovers_stale_path(initiali
                     "LITEPARSE_BINARY": {str(installed_liteparse_path)!r},
                     "NODE_BINARY": {str(external_tool)!r},
                     "ABX_INSTALL_CACHE": {{"lit": "cached"}},
+                    "ABX_UV_CACHE": "/tmp/uv-cache",
                     "CHROME_USER_DATA_DIR": "/tmp/derived-profile",
                 }}, config_type="derived")).now()
                 await bus.emit(MachineEvent(method="unset", key="config/LITEPARSE_BINARY", config_type="derived")).now()
@@ -137,6 +138,8 @@ def test_install_persists_machine_binary_config_and_recovers_stale_path(initiali
 
     assert machine.config["LITEPARSE_BINARY"] == str(installed_liteparse_path)
     assert machine.config["LITEPARSE_BINARY"] != "/tmp/user-config-must-not-persist"
+    assert machine.config["ABX_INSTALL_CACHE"] == {"lit": "cached"}
+    assert machine.config["ABX_UV_CACHE"] == "/tmp/uv-cache"
 
     _cmd_result = run_archivebox_cmd(
         ["version"],

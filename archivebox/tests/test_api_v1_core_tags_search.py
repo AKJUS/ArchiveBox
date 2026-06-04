@@ -41,6 +41,26 @@ def test_tag_search_api_returns_card_payload(client, api_token, tagged_data):
     assert {snap.url for snap in snapshots} == {"https://example.com/one", "https://example.com/two"}
 
 
+def test_tag_search_api_default_includes_empty_tags_and_counts_linked_snapshots(client, api_token, tagged_data, api_admin_user):
+    linked_tag, _snapshots = tagged_data
+    empty_tag = Tag.objects.create(name="Empty Tag", created_by=api_admin_user)
+
+    response = client.get(
+        "/api/v1/core/tags/search/",
+        {"api_key": api_token.token},
+        HTTP_HOST=ADMIN_TEST_HOST,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    cards_by_name = {tag["name"]: tag for tag in payload["tags"]}
+    assert payload["has_snapshots"] == "all"
+    assert cards_by_name["Alpha Research"]["id"] == linked_tag.id
+    assert cards_by_name["Alpha Research"]["num_snapshots"] == 2
+    assert cards_by_name["Empty Tag"]["id"] == empty_tag.id
+    assert cards_by_name["Empty Tag"]["num_snapshots"] == 0
+
+
 def test_tag_search_api_respects_sort_and_filters(client, api_token, admin_user, crawl, tagged_data):
     from datetime import datetime
 

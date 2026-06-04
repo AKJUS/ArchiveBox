@@ -18,11 +18,13 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import rich_click as click
 
 # Set up Django before importing any Django-dependent modules
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "archivebox.settings")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = REPO_ROOT.parent
 RESULT_PREFIX = "__ARCHIVEBOX_TEST_RESULT__="
 
 
@@ -50,7 +52,12 @@ def run_plugin_discovery_subprocess(tmp_path: Path, plugins_dir: Path, script: s
     cwd_plugins_dir = data_dir / "custom_plugins"
     if plugins_dir != cwd_plugins_dir:
         shutil.copytree(plugins_dir, cwd_plugins_dir)
-    env["PYTHONPATH"] = str(REPO_ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    existing_pythonpath = [
+        str(Path(entry).expanduser().resolve(strict=False))
+        for entry in env.get("PYTHONPATH", "").split(os.pathsep)
+        if entry and Path(entry).expanduser().is_absolute()
+    ]
+    env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys([str(REPO_ROOT), *existing_pythonpath]))
     subprocess_script = "\n".join(
         [
             "import json",
@@ -82,6 +89,28 @@ def run_plugin_discovery_subprocess(tmp_path: Path, plugins_dir: Path, script: s
             return json.loads(line.removeprefix(RESULT_PREFIX))
 
     raise AssertionError(f"Subprocess did not emit a result line.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+
+
+def test_cli_env_does_not_emit_relative_pythonpath_entries():
+    from archivebox.tests.conftest import cli_env
+
+    old_pythonpath = os.environ.get("PYTHONPATH")
+    try:
+        os.environ["PYTHONPATH"] = os.pathsep.join(["../abxpkg", "../abx-plugins", "../abx-dl"])
+
+        env = cli_env()
+    finally:
+        if old_pythonpath is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = old_pythonpath
+
+    pythonpath_entries = env["PYTHONPATH"].split(os.pathsep)
+    assert str((WORKSPACE_ROOT / "abxpkg").resolve(strict=False)) in pythonpath_entries
+    assert str((WORKSPACE_ROOT / "abx-plugins").resolve(strict=False)) in pythonpath_entries
+    assert str((WORKSPACE_ROOT / "abx-dl").resolve(strict=False)) in pythonpath_entries
+    assert all(Path(entry).is_absolute() for entry in pythonpath_entries)
+    assert not any(entry.startswith("..") for entry in pythonpath_entries)
 
 
 class TestBackgroundHookDetection:
@@ -704,13 +733,13 @@ def test_run_hook_exports_singular_node_modules_dir_with_colon_node_path(tmp_pat
     from archivebox.plugins.hooks import run_hook
 
     lib_dir = tmp_path / "lib"
-    node_modules_dir = lib_dir / "npm" / "node_modules"
+    node_modules_dir = lib_dir / "pnpm" / "packages" / "chrome" / "node_modules"
     configured_node_path = os.pathsep.join(
         [
-            "/home/archivebox/.npm/lib/node_modules",
+            "/home/archivebox/.pnpm/packages/chrome/node_modules",
             "/usr/lib/node_modules",
             str(node_modules_dir),
-            "/usr/share/archivebox/lib/npm/node_modules",
+            "/usr/share/archivebox/lib/pnpm/packages/chrome/node_modules",
         ],
     )
 
@@ -750,3 +779,47 @@ print(json.dumps({
     assert payload["NODE_MODULE_DIR"] == str(node_modules_dir)
     assert payload["NODE_PATH"].split(os.pathsep) == configured_node_path.split(os.pathsep)
     assert process.env["NODE_MODULES_DIR"] == str(node_modules_dir)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_run_hook_executes_python_hooks_through_script_shebang(tmp_path):
+    """Python hooks must use their abxpkg script header instead of sys.executable."""
+    from archivebox.plugins.hooks import run_hook
+
+    plugin_dir = tmp_path / "plugins" / "shebangprobe"
+    plugin_dir.mkdir(parents=True)
+    hook_path = plugin_dir / "on_Snapshot__99_shebangprobe.py"
+    hook_path.write_text(
+        """#!/usr/bin/env -S abxpkg run --script python3
+# /// script
+# requires-python = ">=3.12"
+# ///
+import json
+import os
+import rich_click
+
+print(json.dumps({
+    "ABXPKG_FAST_SCRIPT": os.environ.get("ABXPKG_FAST_SCRIPT"),
+    "RICH_CLICK_FILE": rich_click.__file__,
+}))
+""",
+        encoding="utf-8",
+    )
+    hook_path.chmod(0o755)
+
+    output_dir = tmp_path / "archive" / "users" / "system" / "snapshots" / "20260603" / "example.com" / "test" / "shebangprobe"
+    process = run_hook(
+        hook_path,
+        output_dir,
+        config={
+            "LIB_DIR": str(tmp_path / "lib"),
+        },
+        timeout=10,
+    )
+    process.refresh_from_db()
+
+    assert process.cmd[0] == str(hook_path)
+    assert process.exit_code == 0, process.stderr
+    payload = json.loads(process.stdout.strip())
+    assert payload["ABXPKG_FAST_SCRIPT"] == "1"
+    assert Path(payload["RICH_CLICK_FILE"]).resolve() == Path(click.__file__).resolve()

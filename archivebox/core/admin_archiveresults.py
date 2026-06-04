@@ -75,6 +75,12 @@ def get_plugin_admin_url(plugin_name: str) -> str:
     return f"{LIVE_PLUGIN_BASE_URL}builtin.{quote(plugin_name)}/"
 
 
+def get_process_link_label(process) -> str:
+    if process.pid:
+        return str(process.pid)
+    return str(process.id)[-8:]
+
+
 def render_archiveresults_list(archiveresults_qs, limit=50, config=None):
     """Render a nice inline list view of archive results with status, plugin, output, and actions."""
 
@@ -139,7 +145,7 @@ def render_archiveresults_list(archiveresults_qs, limit=50, config=None):
             process_display = f'''
                 <a href="{reverse("admin:machine_process_change", args=[process.id])}"
                    style="color: #2563eb; text-decoration: none; font-family: ui-monospace, monospace; font-size: 12px;"
-                   title="View process">{process.pid or "-"}</a>
+                   title="View process">{get_process_link_label(process)}</a>
             '''
 
         machine_display = "-"
@@ -659,7 +665,7 @@ class ArchiveResultAdmin(BaseModelAdmin):
         process = result.process_record
         if not process:
             return "-"
-        process_label = process.pid or "-"
+        process_label = get_process_link_label(process)
         return format_html(
             '<a href="{}"><code>{}</code></a>',
             reverse("admin:machine_process_change", args=[process.id]),
@@ -673,9 +679,8 @@ class ArchiveResultAdmin(BaseModelAdmin):
             return "-"
         machine = process.machine
         return format_html(
-            '<a href="{}"><code>{}</code> {}</a>',
+            '<a href="{}">{}</a>',
             reverse("admin:machine_machine_change", args=[machine.id]),
-            str(machine.id)[:8],
             machine.hostname,
         )
 

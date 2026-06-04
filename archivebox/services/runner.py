@@ -121,6 +121,10 @@ def _count_selected_hooks(plugins: dict[str, Plugin], selected_plugins: list[str
     return sum(1 for plugin in selected.values() for hook in plugin.hooks if "CrawlSetup" in hook.name or "Snapshot" in hook.name)
 
 
+def _discover_archivebox_plugins() -> dict[str, Plugin]:
+    return discover_plugins(runtime="archivebox")
+
+
 def _runner_task_context() -> contextvars.Context:
     context = contextvars.copy_context()
     context.run(EventBus.current_event_context.set, None)
@@ -213,13 +217,13 @@ class CrawlRunner:
     ):
         self.crawl = crawl
         self.bus = create_bus(name=_bus_name("ArchiveBox", str(crawl.id)), total_timeout=3600.0)
-        self.plugins = discover_plugins()
+        self.plugins = _discover_archivebox_plugins()
         HookProcessService(self.bus, emit_jsonl=False, interactive_tty=interactive_interrupts)
         register_sonic_daemon_event_handler(self.bus)
         PersistedProcessService(self.bus)
+        ArchiveBoxBinaryService(self.bus)
         BinaryCacheService(self.bus, backend=ArchiveBoxDBBinaryCacheBackend())
         BinaryService(self.bus)
-        ArchiveBoxBinaryService(self.bus)
         TagService(self.bus)
         CrawlService(self.bus, crawl_id=str(crawl.id))
         MachineService(self.bus)
@@ -839,7 +843,7 @@ class CrawlRunner:
             url=snapshot["url"],
             snapshot=abx_snapshot,
             output_dir=output_dir,
-            install_enabled=False,
+            install_enabled=True,
             crawl_setup_enabled=True,
             crawl_event_enabled=False,
             crawl_start_enabled=False,
@@ -1179,7 +1183,7 @@ async def _run_binary(binary_id: str) -> None:
     from archivebox.machine.models import Binary, Machine
 
     binary = await Binary.objects.aget(id=binary_id)
-    plugins = discover_plugins()
+    plugins = _discover_archivebox_plugins()
     config = get_config(include_machine=False)
     machine = await sync_to_async(Machine.current, thread_sensitive=True)()
     derived_config = normalize_runtime_config(machine.config)
@@ -1187,9 +1191,9 @@ async def _run_binary(binary_id: str) -> None:
     config = normalize_runtime_config(config)
     bus = create_bus(name=_bus_name("ArchiveBox_binary", str(binary.id)), total_timeout=1800.0)
     process_service = PersistedProcessService(bus)
+    ArchiveBoxBinaryService(bus)
     BinaryCacheService(bus, backend=ArchiveBoxDBBinaryCacheBackend())
     BinaryService(bus)
-    ArchiveBoxBinaryService(bus)
     TagService(bus)
     ArchiveResultService(bus)
     MachineService(bus)
@@ -1238,7 +1242,9 @@ def run_binary(binary_id: str) -> None:
 
 @lru_cache(maxsize=1)
 def _snapshot_hook_names_by_plugin() -> dict[str, frozenset[str]]:
-    return {plugin.name: frozenset(hook.name for hook in plugin.filter_hooks("Snapshot")) for plugin in discover_plugins().values()}
+    return {
+        plugin.name: frozenset(hook.name for hook in plugin.filter_hooks("Snapshot")) for plugin in _discover_archivebox_plugins().values()
+    }
 
 
 def queued_plugins_for_snapshot(snapshot_id: str) -> list[str] | None:
@@ -1566,7 +1572,7 @@ async def _run_install(plugin_names: list[str] | None = None) -> None:
     from archivebox.config.common import get_config
     from archivebox.machine.models import Machine
 
-    plugins = discover_plugins()
+    plugins = _discover_archivebox_plugins()
     config = get_config(include_machine=False)
     machine = await sync_to_async(Machine.current, thread_sensitive=True)()
     derived_config = normalize_runtime_config(machine.config)
@@ -1574,9 +1580,9 @@ async def _run_install(plugin_names: list[str] | None = None) -> None:
     config = normalize_runtime_config(config)
     bus = create_bus(name="ArchiveBox_install", total_timeout=3600.0)
     PersistedProcessService(bus)
+    ArchiveBoxBinaryService(bus)
     BinaryCacheService(bus, backend=ArchiveBoxDBBinaryCacheBackend())
     BinaryService(bus)
-    ArchiveBoxBinaryService(bus)
     TagService(bus)
     ArchiveResultService(bus)
     MachineService(bus)

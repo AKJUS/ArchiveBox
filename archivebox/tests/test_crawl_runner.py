@@ -435,6 +435,8 @@ def test_machine_service_persists_only_derived_config_events(tmp_path, hermetic_
                     config={
                         "WGET_BINARY": str(wget_binary),
                         "ABX_INSTALL_CACHE": {"wget": "2026-03-24T00:00:00+00:00"},
+                        "ABX_UV_CACHE": "/tmp/uv-cache",
+                        "ABX_PNPM_CACHE": "/tmp/pnpm-cache",
                         "CHROME_USER_DATA_DIR": "/tmp/stale-derived-profile",
                     },
                     config_type="derived",
@@ -466,6 +468,8 @@ def test_machine_service_persists_only_derived_config_events(tmp_path, hermetic_
     # LIB_DIR) then the unset removed it; ABX_INSTALL_CACHE survives.
     assert machine.config == {
         "ABX_INSTALL_CACHE": {"wget": "2026-03-24T00:00:00+00:00"},
+        "ABX_PNPM_CACHE": "/tmp/pnpm-cache",
+        "ABX_UV_CACHE": "/tmp/uv-cache",
     }
 
 

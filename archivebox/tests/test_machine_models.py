@@ -382,14 +382,14 @@ class TestBinaryModel:
         """Binary.from_json() should persist provider overrides unchanged."""
         overrides = {
             "apt": {"install_args": ["chromium"]},
-            "npm": {"install_args": "puppeteer"},
+            "pnpm": {"install_args": "puppeteer"},
             "custom": {"install": "bash -lc 'echo ok'"},
         }
 
         binary = Binary.from_json(
             {
                 "name": "chrome",
-                "binproviders": "apt,npm,custom",
+                "binproviders": "apt,pnpm,custom",
                 "overrides": overrides,
             },
         )
@@ -414,13 +414,13 @@ class TestBinaryModel:
         """Binary.from_json() should no longer translate legacy non-dict provider overrides."""
         overrides = {
             "apt": ["chromium"],
-            "npm": "puppeteer",
+            "pnpm": "puppeteer",
         }
 
         binary = Binary.from_json(
             {
                 "name": "chrome",
-                "binproviders": "apt,npm",
+                "binproviders": "apt,pnpm",
                 "overrides": overrides,
             },
         )
@@ -428,15 +428,15 @@ class TestBinaryModel:
         assert binary is not None
         assert binary.overrides == overrides
 
-    def test_binary_from_json_prefers_published_readability_package(self):
-        """Binary.from_json() should rewrite readability's npm git URL to the published package."""
+    def test_binary_from_json_preserves_readability_package_metadata(self):
+        """Binary.from_json() should preserve readability's pnpm package metadata."""
         binary = Binary.from_json(
             {
                 "name": "readability-extractor",
-                "binproviders": "env,npm",
+                "binproviders": "env,pnpm",
                 "overrides": {
-                    "npm": {
-                        "install_args": ["https://github.com/ArchiveBox/readability-extractor"],
+                    "pnpm": {
+                        "install_args": ["readability-extractor"],
                     },
                 },
             },
@@ -444,7 +444,7 @@ class TestBinaryModel:
 
         assert binary is not None
         assert binary.overrides == {
-            "npm": {
+            "pnpm": {
                 "install_args": ["readability-extractor"],
             },
         }

@@ -69,8 +69,16 @@ echo "[+] Pulling $DEPLOY_IMAGE..."
 echo "[+] Restarting $DEPLOY_SERVICE..."
 "${COMPOSE[@]}" up -d "$DEPLOY_SERVICE"
 
+if "${COMPOSE[@]}" config --services | grep -qx argo; then
+    echo "[+] Ensuring argo tunnel is running..."
+    "${COMPOSE[@]}" up -d argo
+fi
+
 echo "[+] Container status:"
 "${COMPOSE[@]}" ps "$DEPLOY_SERVICE"
+if "${COMPOSE[@]}" config --services | grep -qx argo; then
+    "${COMPOSE[@]}" ps argo
+fi
 
 echo "[+] ArchiveBox version:"
 "${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" archivebox version | sed -n '1,40p'

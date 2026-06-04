@@ -517,7 +517,7 @@ document.addEventListener('DOMContentLoaded', function () {
             sort: typeof next.sort === 'string' ? next.sort : (sortSelect?.value || 'created_desc'),
             created_by: typeof next.created_by === 'string' ? next.created_by : (createdBySelect?.value || ''),
             year: typeof next.year === 'string' ? next.year : (yearSelect?.value || ''),
-            has_snapshots: typeof next.has_snapshots === 'string' ? next.has_snapshots : (shell.dataset.initialHasSnapshots || 'yes'),
+            has_snapshots: typeof next.has_snapshots === 'string' ? next.has_snapshots : (shell.dataset.initialHasSnapshots || 'all'),
         };
     }
 
@@ -554,7 +554,7 @@ document.addEventListener('DOMContentLoaded', function () {
             url.searchParams.delete('year');
         }
 
-        if (state.has_snapshots && state.has_snapshots !== 'yes') {
+        if (state.has_snapshots && state.has_snapshots !== 'all') {
             url.searchParams.set('has_snapshots', state.has_snapshots);
         } else {
             url.searchParams.delete('has_snapshots');
@@ -570,9 +570,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderCards(nextCards, state) {
-        cards = Array.isArray(nextCards) ? nextCards.filter(function (card) {
-            return Number(card && card.num_snapshots || 0) > 0;
-        }) : [];
+        cards = Array.isArray(nextCards) ? nextCards : [];
         setMeta(state || getCurrentState(), cards.length);
 
         if (!cards.length) {

@@ -320,7 +320,12 @@ def run_runner(daemon: bool = False, crawl_id: str | None = None, maintenance_on
                 interactive_interrupts=interactive_interrupts,
             )
         return 0
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except KeyboardInterrupt:
+        return 0
+    except asyncio.CancelledError as e:
+        if daemon:
+            rprint(f"[red]Runner cancelled unexpectedly: {type(e).__name__}: {e}[/red]", file=sys.stderr)
+            return 1
         return 0
     except Exception as e:
         rprint(f"[red]Runner error: {type(e).__name__}: {e}[/red]", file=sys.stderr)

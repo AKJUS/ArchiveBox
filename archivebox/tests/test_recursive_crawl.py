@@ -11,7 +11,7 @@ import pytest
 
 from archivebox.core.models import ArchiveResult, Snapshot
 from archivebox.crawls.models import Crawl
-from archivebox.machine.models import Process
+from archivebox.machine.models import Binary, Process
 from archivebox.tests.conftest import run_archivebox_cmd, cli_env
 from archivebox.tests.test_orm_helpers import use_archivebox_db
 
@@ -413,6 +413,295 @@ def test_recursive_crawl_depth_two_writes_real_outputs_and_process_records(tmp_p
     assert process_rows
     assert any("parse_html_urls" in (pwd or "") or "parse_html_urls" in (cmd or "") for *_rest, pwd, cmd in process_rows)
     assert any("wget" in (pwd or "") or "wget" in (cmd or "") for *_rest, pwd, cmd in process_rows)
+
+
+@pytest.mark.timeout(1200)
+def test_add_archivewebpage_installs_required_chrome_dependency(initialized_archive):
+    """archivebox add should install selected plugins' required_plugins and binaries before hooks run."""
+
+    env = os.environ.copy()
+    env.pop("CHROME_BINARY", None)
+    env.update(
+        {
+            "USE_COLOR": "false",
+            "SHOW_PROGRESS": "false",
+            "TIMEOUT": "120",
+            "ABXPKG_INSTALL_TIMEOUT": "900",
+            "LIB_DIR": str(initialized_archive / "lib"),
+            "ABXPKG_LIB_DIR": str(initialized_archive / "lib"),
+            "CHROME_HEADLESS": "true",
+            "CHROME_SANDBOX": "false",
+            "CHROME_ISOLATION": "snapshot",
+            "CHROME_EXTENSIONS_DIR": str(initialized_archive / "lib/chromewebstore/extensions"),
+        },
+    )
+
+    result = run_archivebox_cmd(
+        [
+            "add",
+            "--depth=0",
+            "--max-urls=1",
+            "--tag=archivewebpage-required-plugin-preflight",
+            "--parser=url_list",
+            "--plugins=archivewebpage",
+            "https://example.com/",
+        ],
+        cwd=initialized_archive,
+        env=env,
+        timeout=1200,
+    )
+    stdout, stderr = result.stdout, result.stderr
+
+    if stderr:
+        print(f"\n=== STDERR ===\n{stderr}\n=== END STDERR ===\n")
+    if stdout:
+        print(f"\n=== STDOUT (last 4000 chars) ===\n{stdout[-4000:]}\n=== END STDOUT ===\n")
+    assert result.returncode == 0, stderr or stdout
+
+    with use_archivebox_db(initialized_archive):
+        binaries = {
+            row["name"]: row for row in Binary.objects.order_by("name").values("name", "status", "binprovider", "abspath", "version")
+        }
+        archive_results = list(
+            ArchiveResult.objects.order_by("plugin", "hook_name").values_list(
+                "plugin",
+                "hook_name",
+                "status",
+                "output_str",
+                "output_files",
+            ),
+        )
+        process_rows = list(
+            Process.objects.order_by("process_type", "created_at").values_list("process_type", "status", "exit_code", "cmd", "env"),
+        )
+        snapshot_output_dirs = [snapshot.output_dir for snapshot in Snapshot.objects.order_by("created_at")]
+
+    assert "chromium" in binaries
+    assert binaries["chromium"]["status"] == Binary.StatusChoices.INSTALLED
+    assert binaries["chromium"]["binprovider"] == "puppeteer"
+    assert Path(binaries["chromium"]["abspath"]).exists()
+    chromium_version_parts = [int(part) for part in binaries["chromium"]["version"].split(".")[:3]]
+    assert chromium_version_parts >= [149, 0, 0]
+
+    assert "archivewebpage" in binaries
+    assert binaries["archivewebpage"]["status"] == Binary.StatusChoices.INSTALLED
+    assert binaries["archivewebpage"]["binprovider"] == "chromewebstore"
+    archivewebpage_manifest = Path(binaries["archivewebpage"]["abspath"])
+    assert archivewebpage_manifest.exists()
+    assert archivewebpage_manifest.name == "manifest.json"
+
+    plugins_seen = {plugin for plugin, _hook_name, _status, _output_str, _output_files in archive_results}
+    assert {"chrome", "archivewebpage"}.issubset(plugins_seen)
+    assert all(
+        status == ArchiveResult.StatusChoices.SUCCEEDED
+        for plugin, _hook_name, status, _output_str, _output_files in archive_results
+        if plugin in {"chrome", "archivewebpage"}
+    ), archive_results
+    assert snapshot_output_dirs
+    archivewebpage_wacz = Path(snapshot_output_dirs[0]) / "archivewebpage" / "archivewebpage.wacz"
+    assert archivewebpage_wacz.exists()
+    assert archivewebpage_wacz.stat().st_size > 0
+    chrome_hook_envs = [
+        env
+        for process_type, _status, _exit_code, cmd, env in process_rows
+        if process_type == Process.TypeChoices.HOOK and "chrome_launch" in str(cmd)
+    ]
+    assert chrome_hook_envs
+    assert all("{LIB_DIR}" not in str(env) for env in chrome_hook_envs)
+    assert any(process_type == Process.TypeChoices.BINARY for process_type, _status, _exit_code, _cmd, _env in process_rows)
+    assert all(
+        status == Process.StatusChoices.EXITED and exit_code == 0
+        for process_type, status, exit_code, _cmd, _env in process_rows
+        if process_type == Process.TypeChoices.BINARY
+    )
+
+
+@pytest.mark.timeout(1200)
+def test_recursive_crawl_depth_two_all_plugins_runs_snapshots_in_parallel(initialized_archive, free_tcp_port_factory):
+    """Run a bounded real depth=2 crawl with all plugins enabled and verify parallel snapshot execution."""
+
+    from abx_dl.models import discover_plugins
+
+    root_url = "https://example.com/"
+    plugin_selection = ",".join(
+        sorted(plugin for plugin in discover_plugins().keys() if not plugin.startswith("claude")),
+    )
+    env = os.environ.copy()
+    env.pop("CHROME_BINARY", None)
+    env.update(
+        {
+            "USE_COLOR": "false",
+            "SHOW_PROGRESS": "false",
+            "LIB_DIR": str(initialized_archive / "lib"),
+            "ABXPKG_LIB_DIR": str(initialized_archive / "lib"),
+            "TIMEOUT": "90",
+            "ABXPKG_INSTALL_TIMEOUT": "900",
+            "CRAWL_MAX_CONCURRENT_SNAPSHOTS": "3",
+            "SEARCH_BACKEND_SONIC_HOST_NAME": "127.0.0.1",
+            "SEARCH_BACKEND_SONIC_PORT": str(free_tcp_port_factory()),
+            "CHROME_HEADLESS": "true",
+            "CHROME_SANDBOX": "false",
+            "CHROME_ISOLATION": "snapshot",
+        },
+    )
+
+    result = run_archivebox_cmd(
+        [
+            "add",
+            "--depth=2",
+            "--max-urls=8",
+            "--crawl-max-size=100mb",
+            "--tag=recursive-all-plugins",
+            "--parser=url_list",
+            f"--plugins={plugin_selection}",
+            root_url,
+        ],
+        cwd=initialized_archive,
+        env=env,
+        timeout=1200,
+    )
+    stdout, stderr = result.stdout, result.stderr
+
+    if stderr:
+        print(f"\n=== STDERR ===\n{stderr}\n=== END STDERR ===\n")
+    if stdout:
+        print(f"\n=== STDOUT (last 4000 chars) ===\n{stdout[-4000:]}\n=== END STDOUT ===\n")
+    assert result.returncode == 0, stderr or stdout
+
+    with use_archivebox_db(initialized_archive):
+        crawl = Crawl.objects.get(tags_str="recursive-all-plugins")
+        snapshots = list(
+            Snapshot.objects.filter(crawl=crawl)
+            .order_by("depth", "url")
+            .values_list("id", "url", "depth", "status", "parent_snapshot_id", "downloaded_at"),
+        )
+        snapshot_ids_by_output_dir = {
+            str(snapshot.output_dir): str(snapshot.id) for snapshot in Snapshot.objects.filter(crawl=crawl).order_by("depth", "url")
+        }
+        archive_results = list(
+            ArchiveResult.objects.filter(snapshot__crawl=crawl)
+            .select_related("snapshot")
+            .order_by("snapshot__depth", "snapshot__url", "plugin", "hook_name")
+            .values_list(
+                "snapshot_id",
+                "snapshot__url",
+                "snapshot__depth",
+                "plugin",
+                "hook_name",
+                "status",
+                "output_files",
+                "output_size",
+                "output_str",
+            ),
+        )
+        processes = list(
+            Process.objects.filter(process_type=Process.TypeChoices.HOOK, pwd__contains=str(crawl.output_dir))
+            .order_by("started_at")
+            .values_list("pwd", "cmd", "status", "exit_code", "started_at", "ended_at"),
+        )
+
+    assert crawl.max_depth == 2
+    assert crawl.config["CRAWL_MAX_URLS"] == 8
+    assert crawl.config["CRAWL_MAX_SIZE"] == 100 * 1024 * 1024
+    assert crawl.config["CRAWL_MAX_CONCURRENT_SNAPSHOTS"] == 3
+    assert crawl.status == Crawl.StatusChoices.SEALED
+    assert crawl.retry_at is None
+
+    assert len(snapshots) == 8
+    assert any(url == root_url and depth == 0 for _id, url, depth, _status, _parent, _downloaded_at in snapshots)
+    assert any("iana.org" in url and depth == 1 for _id, url, depth, _status, _parent, _downloaded_at in snapshots)
+    assert any(depth == 2 for _id, _url, depth, _status, _parent, _downloaded_at in snapshots)
+    assert all(status == Snapshot.StatusChoices.SEALED for _id, _url, _depth, status, _parent, _downloaded_at in snapshots)
+    assert all(downloaded_at is not None for _id, _url, _depth, _status, _parent, downloaded_at in snapshots)
+
+    assert archive_results
+    allowed_statuses = {
+        ArchiveResult.StatusChoices.SUCCEEDED,
+        ArchiveResult.StatusChoices.NORESULTS,
+        ArchiveResult.StatusChoices.SKIPPED,
+    }
+    unexpected_results = [
+        {
+            "url": url,
+            "depth": depth,
+            "plugin": plugin,
+            "hook_name": hook_name,
+            "status": status,
+            "output_str": output_str,
+        }
+        for _snapshot_id, url, depth, plugin, hook_name, status, _files, _size, output_str in archive_results
+        if not (status in allowed_statuses or (plugin == "archivedotorg" and status == ArchiveResult.StatusChoices.FAILED))
+    ]
+    assert not unexpected_results
+
+    plugins_seen = {plugin for _snapshot_id, _url, _depth, plugin, _hook_name, _status, _files, _size, _output in archive_results}
+    assert {
+        "wget",
+        "headers",
+        "title",
+        "pdf",
+        "screenshot",
+        "dom",
+        "singlefile",
+        "readability",
+        "mercury",
+        "htmltotext",
+        "favicon",
+        "parse_html_urls",
+        "archivedotorg",
+    }.issubset(plugins_seen)
+
+    snapshot_root = initialized_archive / "archive/users/system/snapshots"
+    assert list(snapshot_root.rglob("wget/**/*.html"))
+    assert list(snapshot_root.rglob("headers/**/headers.json"))
+    assert list(snapshot_root.rglob("title/title.txt"))
+    assert list(snapshot_root.rglob("pdf/**/*.pdf"))
+    assert list(snapshot_root.rglob("screenshot/**/*.png"))
+    assert list(snapshot_root.rglob("dom/**/*.html"))
+    assert list(snapshot_root.rglob("singlefile/**/*.html"))
+    assert list(snapshot_root.rglob("readability/**/*.html"))
+    assert list(snapshot_root.rglob("mercury/**/*.html"))
+    assert list(snapshot_root.rglob("htmltotext/**/*.txt"))
+    assert list(snapshot_root.rglob("favicon/**/*"))
+    urls_jsonl_files = list(snapshot_root.rglob("parse_html_urls/urls.jsonl"))
+    assert urls_jsonl_files
+    assert any("iana.org" in path.read_text(errors="ignore") for path in urls_jsonl_files)
+
+    assert processes
+    failed_hook_results = [
+        {
+            "url": url,
+            "depth": depth,
+            "plugin": plugin,
+            "hook_name": hook_name,
+            "status": status,
+            "output_str": output_str,
+        }
+        for _snapshot_id, url, depth, plugin, hook_name, status, _files, _size, output_str in archive_results
+        if status == ArchiveResult.StatusChoices.FAILED and plugin != "archivedotorg"
+    ]
+    assert not failed_hook_results
+    assert all(status == Process.StatusChoices.EXITED for _pwd, _cmd, status, _exit_code, _started_at, _ended_at in processes)
+
+    intervals = []
+    for pwd, cmd, _status, _exit_code, started_at, ended_at in processes:
+        if not started_at or not ended_at:
+            continue
+        process_snapshot_id = next(
+            (snapshot_id for output_dir, snapshot_id in snapshot_ids_by_output_dir.items() if str(pwd).startswith(output_dir)),
+            None,
+        )
+        if process_snapshot_id is None:
+            continue
+        intervals.append((process_snapshot_id, started_at, ended_at, pwd, cmd))
+
+    overlapping = [
+        (left, right)
+        for index, left in enumerate(intervals)
+        for right in intervals[index + 1 :]
+        if left[0] != right[0] and left[1] < right[2] and right[1] < left[2]
+    ]
+    assert overlapping, f"Expected hook processes from different snapshots to overlap, got intervals: {intervals}"
 
 
 def test_crawl_snapshot_has_parent_snapshot_field(tmp_path, initialized_archive):

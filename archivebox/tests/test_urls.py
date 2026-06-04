@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from archivebox.tests.conftest import run_archivebox_cmd
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -253,26 +255,35 @@ class TestUrlRouting:
         )
 
     def test_api_archive_redirect_uses_public_web_base_url(self) -> None:
-        self._run(
-            """
-            client = Client()
-
-            resp = client.get(
-                "/api/archive/https://example.com/",
-                HTTP_HOST="api.archivebox.io",
-                secure=True,
+        try:
+            config_result = run_archivebox_cmd(
+                ["config", "--set", "BASE_URL=https://archivebox.io"],
+                cwd=self.data_dir,
             )
+            assert config_result.returncode == 0, config_result.stderr
+            self._run(
+                """
+                client = Client()
 
-            assert resp.status_code in (301, 302)
-            assert resp["Location"] == "https://web.archivebox.io/web/https://example.com/"
+                resp = client.get(
+                    "/api/archive/https://example.com/",
+                    HTTP_HOST="api.archivebox.io",
+                    secure=True,
+                )
 
-            print("OK")
-            """,
-            mode="safe-subdomains-fullreplay",
-            env_overrides={
-                "BASE_URL": "https://archivebox.io",
-            },
-        )
+                assert resp.status_code in (301, 302)
+                assert resp["Location"] == "https://web.archivebox.io/web/https://example.com/"
+
+                print("OK")
+                """,
+                mode="safe-subdomains-fullreplay",
+            )
+        finally:
+            reset_result = run_archivebox_cmd(
+                ["config", "--set", "BASE_URL=http://archivebox.localhost:8000"],
+                cwd=self.data_dir,
+            )
+            assert reset_result.returncode == 0, reset_result.stderr
 
     def test_web_admin_routing(self) -> None:
         self._run(

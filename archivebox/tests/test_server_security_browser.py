@@ -292,7 +292,7 @@ def _resolve_browser(shared_lib: Path) -> Path | None:
 @pytest.fixture(scope="session")
 def browser_runtime(tmp_path_factory):
     assert shutil.which("node") is not None, "Node.js is required for browser security tests"
-    assert shutil.which("npm") is not None, "npm is required for browser security tests"
+    assert shutil.which("pnpm") is not None, "pnpm is required for browser security tests"
 
     shared_lib = tmp_path_factory.mktemp("archivebox_browser_lib")
     _ensure_puppeteer(shared_lib)
@@ -302,7 +302,7 @@ def browser_runtime(tmp_path_factory):
 
     return {
         "lib_dir": shared_lib,
-        "node_modules_dir": shared_lib / "npm" / "node_modules",
+        "node_modules_dir": shared_lib / "pnpm" / "packages" / "chrome" / "node_modules",
         "chrome_binary": browser,
     }
 

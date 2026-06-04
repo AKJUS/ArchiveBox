@@ -313,7 +313,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     echo "[+] Installing plugin runtime dependencies into $LIB_DIR..." \
     && export PERSONAS_DIR="$LIB_DIR/personas" \
     && export CHROME_USER_DATA_DIR="$LIB_DIR/chrome_profile" \
-    && export ABXPKG_POSTINSTALL_SCRIPTS=True ABXPKG_MIN_RELEASE_AGE=0 \
+    && export ABX_RUNTIME=archivebox ABXPKG_POSTINSTALL_SCRIPTS=True ABXPKG_MIN_RELEASE_AGE=0 \
     && mkdir -p "$LIB_DIR" \
     && apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends build-essential tesseract-ocr tesseract-ocr-eng \
@@ -327,7 +327,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
         accessibility archivedotorg archivewebpage base chrome chrome_mhtml chrome_screencast \
         claudechrome claudecode claudecodecleanup claudecodeextract consolelog defuddle dns dom \
         favicon forumdl gallerydl git hashes headers htmltotext infiniscroll \
-        istilldontcareaboutcookies liteparse media mercury modalcloser opendataloader papersdl \
+        istilldontcareaboutcookies liteparse media mercury modalcloser opencode opendataloader papersdl \
         parse_dom_outlinks parse_html_urls parse_jsonl_urls parse_netscape_urls parse_rss_urls \
         parse_txt_urls pdf readability redirects responses screenshot search_backend_ripgrep \
         search_backend_sonic search_backend_sqlite seo singlefile ssl sslcerts staticfile title \
