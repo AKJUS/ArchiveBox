@@ -197,8 +197,14 @@ PY
     tmpdir="$(mktemp -d)"
     uv --no-cache venv "${tmpdir}/venv" --python 3.13 >/dev/null
     attempts=0
-    until uv --no-cache pip install --dry-run --no-deps --python "${tmpdir}/venv/bin/python" "${package}==${version}" >/dev/null
-    do
+    while true; do
+        set +e
+        uv --no-cache pip install --dry-run --no-deps --python "${tmpdir}/venv/bin/python" "${package}==${version}" >/dev/null
+        status="$?"
+        set -e
+        if [[ "$status" -eq 0 ]]; then
+            break
+        fi
         attempts=$((attempts + 1))
         if [[ "$attempts" -ge 30 ]]; then
             rm -rf "$tmpdir"
