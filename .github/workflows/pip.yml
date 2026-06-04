@@ -42,6 +42,44 @@ jobs:
           packages: ripgrep build-essential python3-dev python3-setuptools libssl-dev libldap2-dev libsasl2-dev zlib1g-dev libatomic1 gnupg2 curl wget python3-ldap python3-msgpack python3-mutagen python3-regex python3-pycryptodome procps
           version: 1.0
 
+      - name: Wait for released ArchiveBox deps on PyPI
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import sys
+          import time
+          import tomllib
+          import urllib.request
+
+          watched = {"abxbus", "abxpkg", "abx-plugins", "abx-dl"}
+          deps = tomllib.loads(open("pyproject.toml", "rb").read().decode())["project"]["dependencies"]
+          required = {}
+          for dep in deps:
+              for name in watched:
+                  match = re.match(rf"{re.escape(name)}\s*(==|>=)\s*([^,;\s]+)", dep)
+                  if match:
+                      required[name] = match.group(2)
+
+          deadline = time.monotonic() + 300
+          missing = required.copy()
+          while missing and time.monotonic() < deadline:
+              for name, version in list(missing.items()):
+                  with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/json", timeout=20) as resp:
+                      releases = json.load(resp)["releases"]
+                  if version in releases:
+                      print(f"{name} {version} is available on PyPI")
+                      missing.pop(name)
+                  else:
+                      print(f"{name} {version} is not available on PyPI yet")
+              if missing:
+                  time.sleep(10)
+
+          if missing:
+              print(f"Missing PyPI releases after wait: {missing}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
       - name: UV install archivebox dev + run sub-dependencies
         run: uv sync --all-extras --no-install-project --no-install-workspace --no-sources --no-cache
 
