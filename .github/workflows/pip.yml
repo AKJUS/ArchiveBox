@@ -22,6 +22,7 @@ jobs:
       id-token: write
 
     runs-on: ubuntu-24.04
+    environment: pypi
     steps:
       - uses: actions/checkout@v4
 
