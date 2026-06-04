@@ -86,8 +86,6 @@ curl -fsSL 'https://get.archivebox.io' | bash
 ``` 
 The script explains what it installs beforehand, and will prompt for user confirmation before making any changes to your system. The script uses Docker if already installed, but you can decline and it will attempt to auto-install everything using `apt`/`brew`/`pkg` + `pip` instead.
 
-<sub>Note: The script will currently still attempt to install via `brew` on macOS. This will fail as ArchiveBox is no longer distributed as a Homebrew formula.</sub>
-
 <img src="https://imgur.zervice.io/VMTzm0G.png" width="99%"/>
 
 After running the setup script, continue with the [Quickstart](https://github.com/ArchiveBox/ArchiveBox#%EF%B8%8F-next-steps) guide... ➡️

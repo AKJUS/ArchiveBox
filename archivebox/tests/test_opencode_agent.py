@@ -1,5 +1,6 @@
 import os
 import socket
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
@@ -97,6 +98,15 @@ def live_opencode(opencode_archive_config):
     settings["archivebox_base_url"] = "http://admin.archivebox.localhost:8000"
     settings["archivebox_admin_url"] = "http://admin.archivebox.localhost:8000/admin"
     settings["archivebox_api_url"] = "http://admin.archivebox.localhost:8000/api/"
+    binary, binary_env = views._resolve_binary(settings["binary"], settings["config"])
+    version = subprocess.run(
+        [binary, "--version"],
+        env={**os.environ, **binary_env},
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    assert version.returncode == 0, version.stderr or version.stdout
     ok, error = views._ensure_opencode(settings)
     assert ok, error
 

@@ -34,15 +34,16 @@ archivebox version       # shows lots of useful info about installed dependencie
 (ensure the version shown is the most recent available from [Releases](https://github.com/ArchiveBox/ArchiveBox/releases))
 
 ### macOS
-**✨ ArchiveBox no longer needs to be `brew`-installed:**  
-✅ ArchiveBox still fully supports macOS, don't worry!  
-📦 Just install it using `pip` (or `pipx`) instead now:
+ArchiveBox can be installed with Homebrew or `pip`/`pipx` on macOS:
 ```bash
+brew tap archivebox/archivebox
+brew install archivebox
+
 mkdir -p ~/archivebox/data
 cd ~/archivebox/data     # (for example, can be anywhere)
 
-pip install archivebox   # just use pip to get archivebox
-archivebox install       # then finish installing dependencies
+archivebox init
+archivebox install       # finish installing runtime dependencies
 ```
 More info: https://github.com/ArchiveBox/homebrew-archivebox
 

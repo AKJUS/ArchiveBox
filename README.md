@@ -295,12 +295,10 @@ See <a href="#%EF%B8%8F-cli-usage">below</a> for more usage examples using the C
 <summary><b><img src="https://user-images.githubusercontent.com/511499/117448075-49597580-af0c-11eb-91ba-f34fff10096b.png" alt="aptitude" height="28px" align="top"/> <code>apt</code></b> (Ubuntu/Debian/etc.)</summary>
 <br/>
 <ol>
-<li>Download and install the <code>.deb</code> package from the <a href="https://github.com/ArchiveBox/ArchiveBox/releases">latest release</a>.
-<pre lang="bash"><code style="white-space: pre-line"># download the .deb for your architecture (amd64 or arm64)
-ARCH="$(dpkg --print-architecture)"
-VERSION="$(curl -fsSL https://api.github.com/repos/ArchiveBox/ArchiveBox/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")"
-curl -fsSL "https://github.com/ArchiveBox/ArchiveBox/releases/latest/download/archivebox_${VERSION}_${ARCH}.deb" -o /tmp/archivebox.deb
-sudo apt install /tmp/archivebox.deb
+<li>Add the third-party ArchiveBox apt repo and install <code>archivebox</code>.
+<pre lang="bash"><code style="white-space: pre-line">echo 'deb [trusted=yes] https://archivebox.github.io/debian-archivebox dev main' | sudo tee /etc/apt/sources.list.d/archivebox.list
+sudo apt update
+sudo apt install archivebox
 archivebox version                         # make sure all dependencies are installed
 </code></pre>
 </li>
