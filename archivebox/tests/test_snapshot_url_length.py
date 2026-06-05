@@ -1,8 +1,8 @@
 """Tests for very long Snapshot URLs.
 
-ArchiveBox supports URLs up to MAX_URL_LENGTH (8000) chars. The url column is stored as a
-variable-length TextField (so short URLs don't reserve 8000 chars) but stays fully indexed,
-so exact, prefix, and substring lookups all keep working for long URLs.
+ArchiveBox supports URLs up to MAX_URL_LENGTH chars. The url column is stored as a
+variable-length TextField (so short URLs don't reserve the full max length) but stays fully
+indexed, so exact, prefix, and substring lookups all keep working for long URLs.
 """
 
 import pytest
@@ -23,8 +23,8 @@ def _make_long_url(length: int, *, needle: str = "", prefix: str = "https://exam
     return url
 
 
-def test_max_url_length_is_8000():
-    assert MAX_URL_LENGTH == 8000
+def test_max_url_length_constant():
+    assert MAX_URL_LENGTH == 65535
 
 
 def test_validate_url_length_accepts_exactly_max():
