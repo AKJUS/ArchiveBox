@@ -15,6 +15,7 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
     from archivebox.core.models import ArchiveResult, Snapshot
     from archivebox.services.archive_result_service import _collect_output_metadata
     from archivebox.machine.models import Process
+    from django.core.exceptions import ValidationError
     from django.db.models import Exists, OuterRef, Q, Subquery, Value
     from django.db.models.functions import Coalesce
 
@@ -117,7 +118,13 @@ def recover_orchestrator_state(*, include_chrome: bool = False) -> dict[str, int
         if not hook_script_name or not process.pwd:
             continue
         plugin_dir = Path(process.pwd)
-        snapshot = Snapshot.objects.filter(id=plugin_dir.parent.name).first()
+        try:
+            # Old or synthetic hook Process rows can point at arbitrary paths.
+            # Only paths whose parent directory is a valid Snapshot id can be
+            # reconstructed into ArchiveResult rows.
+            snapshot = Snapshot.objects.filter(id=plugin_dir.parent.name).first()
+        except ValidationError:
+            continue
         if snapshot is None:
             continue
         result, created = ArchiveResult.objects.get_or_create(

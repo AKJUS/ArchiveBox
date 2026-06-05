@@ -1045,6 +1045,18 @@ class CrawlRunner:
                                 plugin: hooks for plugin, hooks in (selected_hooks_by_plugin or {}).items() if plugin in queued_plugins
                             }
                         snapshot_selected_plugins = queued_plugins
+            elif not self.selected_plugins_from_args:
+                queued_plugins, selected_hooks_by_plugin = await sync_to_async(
+                    queued_plugins_and_hooks_for_snapshot,
+                    thread_sensitive=True,
+                )(snapshot["id"])
+                if queued_plugins:
+                    if snapshot_selected_plugins:
+                        queued_plugins = [plugin for plugin in queued_plugins if plugin in snapshot_selected_plugins]
+                        selected_hooks_by_plugin = {
+                            plugin: hooks for plugin, hooks in (selected_hooks_by_plugin or {}).items() if plugin in queued_plugins
+                        }
+                    snapshot_selected_plugins = queued_plugins
             if snapshot["depth"] > 0 and CrawlLimitState.from_config(snapshot["config"]).get_stop_reason() in (
                 "crawl_max_size",
                 "crawl_timeout",
@@ -1060,6 +1072,11 @@ class CrawlRunner:
                 else self.plugins
             )
             if selected_hooks_by_plugin is not None:
+                await sync_to_async(fail_unavailable_queued_hooks, thread_sensitive=True)(
+                    snapshot["id"],
+                    selected_hooks_by_plugin,
+                    plugins,
+                )
                 filtered_plugins = {}
                 for plugin_name, plugin in plugins.items():
                     selected_hook_names = selected_hooks_by_plugin.get(plugin_name)
@@ -1303,6 +1320,39 @@ def queued_plugins_and_hooks_for_snapshot(snapshot_id: str) -> tuple[list[str] |
 def queued_plugins_for_snapshot(snapshot_id: str) -> list[str] | None:
     queued_plugins, _selected_hooks_by_plugin = queued_plugins_and_hooks_for_snapshot(snapshot_id)
     return queued_plugins
+
+
+def fail_unavailable_queued_hooks(
+    snapshot_id: str,
+    selected_hooks_by_plugin: dict[str, set[str] | None],
+    plugins: dict[str, Plugin],
+) -> None:
+    from archivebox.core.models import ArchiveResult
+
+    now = timezone.now()
+    for plugin_name, selected_hook_names in selected_hooks_by_plugin.items():
+        if selected_hook_names is None or plugin_name not in plugins:
+            continue
+        available_hook_names = {
+            name for hook in plugins[plugin_name].filter_hooks("Snapshot") for name in (hook.name, Path(hook.name).stem)
+        }
+        missing_hook_names = [hook_name for hook_name in selected_hook_names if hook_name not in available_hook_names]
+        if not missing_hook_names:
+            continue
+        # Hook-level resume rows are durable scheduler state. If a plugin is
+        # installed but no longer exposes a queued hook, mark that row failed so
+        # the snapshot is not retried forever with no hook left to execute.
+        ArchiveResult.objects.filter(
+            snapshot_id=snapshot_id,
+            plugin=plugin_name,
+            hook_name__in=missing_hook_names,
+            status=ArchiveResult.StatusChoices.QUEUED,
+        ).update(
+            status=ArchiveResult.StatusChoices.FAILED,
+            start_ts=now,
+            end_ts=now,
+            output_str="Queued hook is no longer available in the installed plugin",
+        )
 
 
 def snapshot_hooks_for_pending_archiveresults(snapshot) -> list[tuple[str, str]]:
