@@ -15,6 +15,8 @@ _REQUIRED_DOCKER_INSTALL_TARGETS = {
     "istilldontcareaboutcookies",
     "liteparse",
     "mercury",
+    "opencode",
+    "opendataloader",
     "papersdl",
     "parse_rss_urls",
     "readability",
@@ -76,9 +78,10 @@ def test_dockerfiles_install_binaries_required_by_version_validation() -> None:
 
 
 def test_dockerfile_prewarms_stable_plugin_dependencies_without_optional_captcha() -> None:
-    targets = _abx_dl_plugin_install_targets(REPO_ROOT / "Dockerfile")
-    assert _REQUIRED_DOCKER_PREINSTALL_TARGETS <= targets
-    assert not (_DOCKER_PREINSTALL_EXCLUDED_TARGETS & targets)
+    text = (REPO_ROOT / "Dockerfile").read_text()
+    assert "archivebox/abx-dl:latest" in text
+    assert "archivebox/abxdl" not in text
+    assert _abx_dl_plugin_install_targets(REPO_ROOT / "Dockerfile") == set()
 
 
 def test_dockerfile_build_installs_disable_release_age_gate() -> None:
@@ -105,3 +108,14 @@ def test_dockerfiles_pin_project_binary_paths_for_validation() -> None:
         assert 'GIT_BINARY="$LIB_DIR/env/bin/git"' in text
         assert 'GALLERYDL_BINARY="$LIB_DIR/env/bin/gallery-dl"' in text
         assert 'FORUMDL_BINARY="$LIB_DIR/env/bin/forum-dl"' in text
+
+
+def test_dockerfiles_use_setpriv_instead_of_gosu() -> None:
+    for dockerfile_name in ("Dockerfile", "Dockerfile.multistage"):
+        text = (REPO_ROOT / dockerfile_name).read_text()
+        assert "gosu" not in text
+        assert "setpriv" in text
+
+    entrypoint = (REPO_ROOT / "bin/docker_entrypoint.sh").read_text()
+    assert "gosu" not in entrypoint
+    assert "setpriv" in entrypoint
