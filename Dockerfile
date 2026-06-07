@@ -175,9 +175,9 @@ RUN echo "[*] Setting up $ARCHIVEBOX_USER user uid=${DEFAULT_PUID}..." \
     && [[ "$(id -g "$ARCHIVEBOX_USER")" == "$DEFAULT_PGID" ]] || groupmod -g "$DEFAULT_PGID" "$ARCHIVEBOX_USER" \
     && (which sonic && sonic --version) | tee -a /VERSION.txt \
     && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "$DATA_DIR" "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" \
-    && chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR" \
     && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "/home/$ARCHIVEBOX_USER" "/home/$ARCHIVEBOX_USER/.config" "/home/$ARCHIVEBOX_USER/.cache" \
     && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "/home/$ARCHIVEBOX_USER/.config/abx" "/home/$ARCHIVEBOX_USER/.cache/abxbus" "/home/$ARCHIVEBOX_USER/.cache/pnpm" "/home/$ARCHIVEBOX_USER/.cache/uv" \
+    && chown "$DEFAULT_PUID:$DEFAULT_PGID" "$DATA_DIR" "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" \
     && openssl rand -hex 16 > /etc/machine-id \
     && echo -e "\nARCHIVEBOX_USER=$ARCHIVEBOX_USER PUID=$(id -u "$ARCHIVEBOX_USER") PGID=$(id -g "$ARCHIVEBOX_USER")" | tee -a /VERSION.txt \
     && echo -e "TMP_DIR=$TMP_DIR\nLIB_DIR=$LIB_DIR\nPLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH\nMACHINE_ID=$(cat /etc/machine-id)\n" | tee -a /VERSION.txt
@@ -191,10 +191,10 @@ RUN echo "[+] Initializing image collection..." \
         "$DATA_DIR"/logs "$DATA_DIR"/logs/* "$DATA_DIR"/sources \
         "$DATA_DIR"/archive "$DATA_DIR"/archive/users "$DATA_DIR"/personas \
         "$DATA_DIR"/tmp "$DATA_DIR"/tmp/* \
+        "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" \
         2>/dev/null || true)
 
-RUN chown -R "$DEFAULT_PUID:$DEFAULT_PGID" "$LIB_DIR" \
-    && chmod +x "$CODE_DIR"/bin/*.sh \
+RUN chmod +x "$CODE_DIR"/bin/*.sh \
     && chmod g+w "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH"
 
 RUN "$LIB_DIR/bin/chromium" --version | tee -a /VERSION.txt \
@@ -202,9 +202,8 @@ RUN "$LIB_DIR/bin/chromium" --version | tee -a /VERSION.txt \
     && /usr/bin/rg --version | head -1 | tee -a /VERSION.txt \
     && /usr/local/bin/sonic --version | tee -a /VERSION.txt \
     && /venv/bin/supervisord --version | tee -a /VERSION.txt \
-    && ! command -v gcc \
-    && ! command -v g++ \
-    && ! command -v make \
+    && for forbidden_bin in gcc g++ make; do ! command -v "$forbidden_bin" || (echo "Unexpected build tool in runtime: $forbidden_bin=$(command -v "$forbidden_bin")" >&2 && exit 1); done \
+    && stat -c "%U:%G %a %n" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups test -w "$LIB_DIR" \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups archivebox version 2>&1 | tee -a /VERSION.txt \
     && rm -rf /root/.cache /var/cache/apt/* /var/lib/apt/lists/*

@@ -11,6 +11,8 @@ __pycache__
 *$py.class
 .mypy_cache/
 .pytest_cache/
+.ruff_cache/
+.uv-cache/
 .github/
 .pdm-build/
 .pdm-python
