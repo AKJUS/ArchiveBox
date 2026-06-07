@@ -169,6 +169,9 @@ COPY --from=archivebox-builder /VERSION.txt /VERSION.txt
 
 RUN echo "[*] Setting up $ARCHIVEBOX_USER user uid=${DEFAULT_PUID}..." \
     && ln -sf /venv/bin/archivebox /usr/local/bin/archivebox \
+    && ln -sf /venv/bin/daphne /usr/local/bin/daphne \
+    && ln -sf /venv/bin/supervisord /usr/local/bin/supervisord \
+    && ln -sf /venv/bin/supervisorctl /usr/local/bin/supervisorctl \
     && getent group "$ARCHIVEBOX_USER" >/dev/null || groupadd --system "$ARCHIVEBOX_USER" \
     && id -u "$ARCHIVEBOX_USER" >/dev/null 2>&1 || useradd --system --create-home --gid "$ARCHIVEBOX_USER" --groups audio,video "$ARCHIVEBOX_USER" \
     && usermod --append --groups audio,video "$ARCHIVEBOX_USER" \
