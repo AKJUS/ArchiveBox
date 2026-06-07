@@ -30,6 +30,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
+          version: "0.10.6"
           enable-cache: false
 
       - uses: actions/setup-node@v4
