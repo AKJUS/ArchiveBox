@@ -489,11 +489,14 @@ def archivebox_daemon_server(initialized_archive, free_tcp_port_factory):
     started: list[tuple[Path, dict[str, str]]] = []
 
     def start(**env_overrides: str):
+        env_config = {
+            "SEARCH_BACKEND_SONIC_HOST_NAME": "127.0.0.1",
+            "SEARCH_BACKEND_SONIC_PORT": str(free_tcp_port_factory()),
+            **{key: str(value) for key, value in env_overrides.items()},
+        }
         env = cli_env(
             live=True,
-            SEARCH_BACKEND_SONIC_HOST_NAME="127.0.0.1",
-            SEARCH_BACKEND_SONIC_PORT=str(free_tcp_port_factory()),
-            **{key: str(value) for key, value in env_overrides.items()},
+            **env_config,
         )
         port = free_tcp_port_factory()
         result = run_archivebox_cmd(
