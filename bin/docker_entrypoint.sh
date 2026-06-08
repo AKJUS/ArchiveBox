@@ -29,9 +29,9 @@ ulimit -c 0 >/dev/null 2>&1 || true
 
 # Load global invariants (set by Dockerfile during image build time, not intended to be customized by users at runtime)
 export DATA_DIR="${DATA_DIR:-/data}"
-export CONFIG_DIR="${CONFIG_DIR:-/home/archivebox/.config/abx}"
+export CONFIG_DIR="${CONFIG_DIR:-/opt/archivebox}"
 export TMP_DIR="${TMP_DIR:-/tmp/archivebox}"
-export LIB_DIR="${LIB_DIR:-/home/archivebox/.config/abx/lib}"
+export LIB_DIR="${LIB_DIR:-/opt/archivebox/lib}"
 export ABXPKG_LIB_DIR="${ABXPKG_LIB_DIR:-$LIB_DIR}"
 export ARCHIVEBOX_USER="${ARCHIVEBOX_USER:-archivebox}"
 export PERSONAS_DIR="${PERSONAS_DIR:-$DATA_DIR/personas}"

@@ -47,10 +47,10 @@ ENV ARCHIVEBOX_USER=archivebox \
 
 ENV CODE_DIR=/app \
     DATA_DIR=/data \
-    CONFIG_DIR=/home/archivebox/.config/abx \
-    LIB_DIR=/home/archivebox/.config/abx/lib \
-    ABXPKG_LIB_DIR=/home/archivebox/.config/abx/lib \
-    PLAYWRIGHT_BROWSERS_PATH=/home/archivebox/.config/abx/lib/playwright/cache \
+    CONFIG_DIR=/opt/archivebox \
+    LIB_DIR=/opt/archivebox/lib \
+    ABXPKG_LIB_DIR=/opt/archivebox/lib \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/archivebox/lib/playwright/cache \
     PERSONAS_DIR=/data/personas \
     CHROME_USER_DATA_DIR=/data/personas/Default/chrome_profile \
     CHROME_HEADLESS=true \
@@ -180,9 +180,9 @@ RUN echo "[*] Setting up $ARCHIVEBOX_USER user uid=${DEFAULT_PUID}..." \
     && [[ "$(id -u "$ARCHIVEBOX_USER")" == "$DEFAULT_PUID" ]] || usermod -u "$DEFAULT_PUID" "$ARCHIVEBOX_USER" \
     && [[ "$(id -g "$ARCHIVEBOX_USER")" == "$DEFAULT_PGID" ]] || groupmod -g "$DEFAULT_PGID" "$ARCHIVEBOX_USER" \
     && (which sonic && sonic --version) | tee -a /VERSION.txt \
-    && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "$DATA_DIR" "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" \
-    && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "/home/$ARCHIVEBOX_USER" "/home/$ARCHIVEBOX_USER/.config" "/home/$ARCHIVEBOX_USER/.cache" \
-    && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "/home/$ARCHIVEBOX_USER/.config/abx" "/home/$ARCHIVEBOX_USER/.cache/abxbus/semaphores" "/home/$ARCHIVEBOX_USER/.cache/pnpm" "/home/$ARCHIVEBOX_USER/.cache/uv" \
+    && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "$DATA_DIR" "$TMP_DIR" "$CONFIG_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" \
+    && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "/home/$ARCHIVEBOX_USER" "/home/$ARCHIVEBOX_USER/.cache" \
+    && install -d -o "$DEFAULT_PUID" -g "$DEFAULT_PGID" "/home/$ARCHIVEBOX_USER/.cache/abxbus/semaphores" "/home/$ARCHIVEBOX_USER/.cache/pnpm" "/home/$ARCHIVEBOX_USER/.cache/uv" \
     && chown "$DEFAULT_PUID:$DEFAULT_PGID" "$DATA_DIR" "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH" "/home/$ARCHIVEBOX_USER/.cache/abxbus" "/home/$ARCHIVEBOX_USER/.cache/abxbus/semaphores" \
     && openssl rand -hex 16 > /etc/machine-id \
     && echo -e "\nARCHIVEBOX_USER=$ARCHIVEBOX_USER PUID=$(id -u "$ARCHIVEBOX_USER") PGID=$(id -g "$ARCHIVEBOX_USER")" | tee -a /VERSION.txt \
