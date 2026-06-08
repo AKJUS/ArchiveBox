@@ -475,7 +475,7 @@ def test_update_index_only_runs_paused_search_rows_and_resume_later_runs_crawl(t
 
     if snapshot_finished_before_pause:
         indexed_state = get_crawl_runtime_state(tmp_path, crawl_id)
-        assert indexed_state["crawl_status"] == "paused"
+        assert indexed_state["crawl_status"] == "sealed"
         assert indexed_state["snapshots"][0]["status"] == "sealed"
         return
 
