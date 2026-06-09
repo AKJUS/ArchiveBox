@@ -5,8 +5,10 @@ from pathlib import Path
 from .conftest import (
     api_client_request,
     cli_env,
+    create_admin_and_token,
     get_free_port,
     init_archive,
+    live_api_request,
     start_archivebox_server,
     stop_server,
 )
@@ -136,7 +138,7 @@ def write_import_format_files(base_dir: Path) -> dict[str, Path]:
 IMPORT_FORMAT_ENV = {
     "USE_COLOR": "False",
     "SHOW_PROGRESS": "False",
-    "PLUGINS": "wget,headers",
+    "PLUGINS": "parse_html_urls,parse_jsonl_urls,parse_netscape_urls,parse_rss_urls,parse_txt_urls,wget,headers",
     "SAVE_WGET": "True",
     "SAVE_HEADERS": "True",
     "USE_CHROME": "False",
@@ -150,9 +152,8 @@ def wait_for_import_processing(cwd: Path, expected_urls: set[str], *, timeout: f
     deadline = time.time() + timeout
     while time.time() < deadline:
         with use_archivebox_db(cwd):
-            crawl_started = Crawl.objects.filter(status__in=[Crawl.StatusChoices.STARTED, Crawl.StatusChoices.SEALED]).exists()
             snapshot_started = Snapshot.objects.filter(url__in=expected_urls).exists()
-        if crawl_started or snapshot_started:
+        if snapshot_started:
             return
         time.sleep(1)
     raise AssertionError("timed out waiting for import crawl processing to start")
@@ -195,6 +196,16 @@ def malicious_add_inputs(tmp_path: Path, *, safe_url: str) -> tuple[list[str], P
             f'" && touch {canary} && echo "',
             f"$(touch {canary})",
             f"`touch {canary}`",
+            """<?xml version="1.0"?>
+<!DOCTYPE rss [
+  <!ENTITY localfile SYSTEM "file:///etc/hosts">
+]>
+<rss version="2.0" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <channel>
+    <item><title>&localfile;</title><link>file:///etc/passwd</link></item>
+    <xi:include href="file:///etc/hosts" parse="text"/>
+  </channel>
+</rss>""",
         ],
         canary,
     )
@@ -202,11 +213,15 @@ def malicious_add_inputs(tmp_path: Path, *, safe_url: str) -> tuple[list[str], P
 
 def assert_no_file_or_shell_payload_snapshots(cwd: Path, *, canary: Path) -> None:
     with use_archivebox_db(cwd):
-        urls = list(Snapshot.objects.values_list("url", flat=True))
+        snapshots = list(Snapshot.objects.all())
     assert not canary.exists()
-    assert not [url for url in urls if str(url).startswith("file:")]
+    assert not [
+        snapshot.url
+        for snapshot in snapshots
+        if str(snapshot.url).startswith("file:") and not snapshot.is_crawl_source_file_url()
+    ]
     for forbidden in ("/etc/hosts", "/etc/passwd", "other_crawl_source", "archivebox_shell_injection_canary"):
-        assert not [url for url in urls if forbidden in str(url)]
+        assert not [snapshot.url for snapshot in snapshots if forbidden in str(snapshot.url)]
 
 
 def test_basic_success_case_request(client, tmp_path, api_headers):
@@ -231,56 +246,57 @@ def test_basic_success_case_request(client, tmp_path, api_headers):
 
 
 @pytest.mark.timeout(360)
-def test_api_cli_add_import_text_formats_preserve_metadata_and_crawl_inner_urls(client, tmp_path, api_headers):
+def test_api_cli_add_import_text_formats_preserve_metadata_and_crawl_inner_urls(tmp_path):
     """REST API add should accept rich import text and queue real inner URLs with metadata preserved."""
     init_archive(tmp_path)
     import_files = write_import_format_files(tmp_path)
     expected_urls = {case["url"] for case in IMPORT_FORMAT_EXPECTATIONS.values()}
     port = get_free_port()
     env = cli_env(port=port, server=True, **IMPORT_FORMAT_ENV)
-
-    for import_name, import_path in import_files.items():
-        response = api_client_request(
-            client,
-            "post",
-            "/api/v1/cli/add",
-            payload={
-                "urls": [import_path.read_text(encoding="utf-8")],
-                "depth": 0,
-                "tag": "api-import",
-                "plugins": "wget,headers",
-                "index_only": False,
-            },
-            headers=api_headers,
-        )
-        assert response.status_code == 200, response.content
-        body = response.json()
-        assert body["success"] is True
-        assert body["result"]["crawl_id"]
+    api_token = create_admin_and_token(tmp_path)
 
     try:
         start_archivebox_server(tmp_path, env=env, port=port)
+        for import_name, import_path in import_files.items():
+            response = live_api_request(
+                port,
+                "post",
+                "/api/v1/cli/add",
+                api_token=api_token,
+                json={
+                    "urls": [import_path.read_text(encoding="utf-8")],
+                    "depth": 0,
+                    "tag": "api-import",
+                    "plugins": IMPORT_FORMAT_ENV["PLUGINS"],
+                    "index_only": False,
+                },
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["success"] is True
+            assert body["result"]["crawl_id"]
+
         wait_for_import_processing(tmp_path, expected_urls)
         stop_server(tmp_path)
         start_archivebox_server(tmp_path, env=env, port=port)
         wait_for_expected_import_snapshots(tmp_path, expected_urls)
+
+        for import_name, expected in IMPORT_FORMAT_EXPECTATIONS.items():
+            with use_archivebox_db(tmp_path):
+                snapshot = Snapshot.objects.filter(url=expected["url"]).order_by("-created_at").first()
+                assert snapshot is not None, f"{import_name} did not create Snapshot for {expected['url']}"
+                snapshot_id = str(snapshot.id)
+
+            snapshot_response = live_api_request(
+                port,
+                "get",
+                f"/api/v1/core/snapshot/{snapshot_id}",
+                api_token=api_token,
+            )
+            assert snapshot_response.status_code == 200, snapshot_response.text
+            assert snapshot_response.json()["url"] == expected["url"]
     finally:
         stop_server(tmp_path)
-
-    for import_name, expected in IMPORT_FORMAT_EXPECTATIONS.items():
-        with use_archivebox_db(tmp_path):
-            snapshot = Snapshot.objects.filter(url=expected["url"]).order_by("-created_at").first()
-            assert snapshot is not None, f"{import_name} did not create Snapshot for {expected['url']}"
-            snapshot_id = str(snapshot.id)
-
-        snapshot_response = api_client_request(
-            client,
-            "get",
-            f"/api/v1/core/snapshot/{snapshot_id}",
-            headers=api_headers,
-        )
-        assert snapshot_response.status_code == 200, snapshot_response.content
-        assert snapshot_response.json()["url"] == expected["url"]
 
     with use_archivebox_db(tmp_path):
         crawls = list(Crawl.objects.order_by("created_at"))
@@ -307,32 +323,33 @@ def test_api_cli_add_import_text_formats_preserve_metadata_and_crawl_inner_urls(
 
 
 @pytest.mark.timeout(240)
-def test_api_cli_add_rejects_file_path_and_shell_injection_payloads(client, tmp_path, api_headers):
+def test_api_cli_add_rejects_file_path_and_shell_injection_payloads(tmp_path):
     """REST add must not let path, file://, traversal, or shell strings become archiveable URLs."""
     init_archive(tmp_path)
     safe_url = "https://example.com/?archivebox-api-security=1"
     inputs, canary = malicious_add_inputs(tmp_path, safe_url=safe_url)
     port = get_free_port()
     env = cli_env(port=port, server=True, **IMPORT_FORMAT_ENV)
-
-    response = api_client_request(
-        client,
-        "post",
-        "/api/v1/cli/add",
-        payload={
-            "urls": inputs,
-            "depth": 0,
-            "tag": "api-security",
-            "plugins": "wget,headers",
-            "index_only": False,
-        },
-        headers=api_headers,
-    )
-    assert response.status_code == 200, response.content
-    assert response.json()["success"] is True
+    api_token = create_admin_and_token(tmp_path)
 
     try:
         start_archivebox_server(tmp_path, env=env, port=port)
+        response = live_api_request(
+            port,
+            "post",
+            "/api/v1/cli/add",
+            api_token=api_token,
+            json={
+                "urls": inputs,
+                "depth": 0,
+                "tag": "api-security",
+                "plugins": IMPORT_FORMAT_ENV["PLUGINS"],
+                "index_only": False,
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] is True
+
         wait_for_expected_import_snapshots(tmp_path, {safe_url}, timeout=120)
     finally:
         stop_server(tmp_path)

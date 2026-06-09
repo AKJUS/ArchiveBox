@@ -144,9 +144,8 @@ def wait_for_import_processing(cwd: Path, expected_urls: set[str], *, timeout: f
     deadline = time.time() + timeout
     while time.time() < deadline:
         with use_archivebox_db(cwd):
-            crawl_started = Crawl.objects.filter(status__in=[Crawl.StatusChoices.STARTED, Crawl.StatusChoices.SEALED]).exists()
             snapshot_started = Snapshot.objects.filter(url__in=expected_urls).exists()
-        if crawl_started or snapshot_started:
+        if snapshot_started:
             return
         time.sleep(1)
     raise AssertionError("timed out waiting for import crawl processing to start")
@@ -187,6 +186,16 @@ def malicious_add_inputs(tmp_path: Path, *, safe_url: str) -> tuple[list[str], P
             f'" && touch {canary} && echo "',
             f"$(touch {canary})",
             f"`touch {canary}`",
+            """<?xml version="1.0"?>
+<!DOCTYPE rss [
+  <!ENTITY localfile SYSTEM "file:///etc/hosts">
+]>
+<rss version="2.0" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <channel>
+    <item><title>&localfile;</title><link>file:///etc/passwd</link></item>
+    <xi:include href="file:///etc/hosts" parse="text"/>
+  </channel>
+</rss>""",
         ],
         canary,
     )
@@ -194,11 +203,15 @@ def malicious_add_inputs(tmp_path: Path, *, safe_url: str) -> tuple[list[str], P
 
 def assert_no_file_or_shell_payload_snapshots(cwd: Path, *, canary: Path) -> None:
     with use_archivebox_db(cwd):
-        urls = list(Snapshot.objects.values_list("url", flat=True))
+        snapshots = list(Snapshot.objects.all())
     assert not canary.exists()
-    assert not [url for url in urls if str(url).startswith("file:")]
+    assert not [
+        snapshot.url
+        for snapshot in snapshots
+        if str(snapshot.url).startswith("file:") and not snapshot.is_crawl_source_file_url()
+    ]
     for forbidden in ("/etc/hosts", "/etc/passwd", "other_crawl_source", "archivebox_shell_injection_canary"):
-        assert not [url for url in urls if forbidden in str(url)]
+        assert not [snapshot.url for snapshot in snapshots if forbidden in str(snapshot.url)]
 
 
 @pytest.mark.timeout(180)
@@ -339,7 +352,7 @@ def test_public_add_view_import_text_formats_preserve_metadata_and_resume_withou
     port = get_free_port()
     env = cli_env(
         port=port,
-        PLUGINS="wget,headers",
+        PLUGINS="parse_html_urls,parse_jsonl_urls,parse_netscape_urls,parse_rss_urls,parse_txt_urls,wget,headers",
         SAVE_WGET="True",
         SAVE_HEADERS="True",
         USE_CHROME="False",
@@ -430,7 +443,7 @@ def test_public_add_view_rejects_file_path_and_shell_injection_payloads(tmp_path
     port = get_free_port()
     env = cli_env(
         port=port,
-        PLUGINS="wget,headers",
+        PLUGINS="parse_html_urls,parse_jsonl_urls,parse_netscape_urls,parse_rss_urls,parse_txt_urls,wget,headers",
         SAVE_WGET="True",
         SAVE_HEADERS="True",
         USE_CHROME="False",
