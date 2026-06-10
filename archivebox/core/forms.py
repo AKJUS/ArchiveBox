@@ -315,12 +315,9 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
 
     def clean_url(self):
         value = self.cleaned_data.get("url") or ""
-        valid_urls = []
-        for url in find_all_urls(value):
-            valid_urls.append(url)
-        if not valid_urls:
+        if not list(find_all_urls(value)):
             raise forms.ValidationError("Enter at least one valid URL.")
-        return "\n".join(valid_urls)
+        return value
 
     def clean_url_filters(self):
         from archivebox.crawls.models import Crawl

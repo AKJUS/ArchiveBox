@@ -176,7 +176,9 @@ def wait_for_expected_import_snapshots(cwd: Path, expected_urls: set[str], *, ti
         if all(count == 1 for count in counts.values()) and not bad_statuses:
             return
         time.sleep(1)
-    raise AssertionError(f"timed out waiting for one queued/started/sealed snapshot per URL, got counts={counts}, bad_statuses={bad_statuses}")
+    raise AssertionError(
+        f"timed out waiting for one queued/started/sealed snapshot per URL, got counts={counts}, bad_statuses={bad_statuses}",
+    )
 
 
 def malicious_add_inputs(tmp_path: Path, *, safe_url: str) -> tuple[list[str], Path]:
@@ -215,24 +217,21 @@ def assert_no_file_or_shell_payload_snapshots(cwd: Path, *, canary: Path) -> Non
     with use_archivebox_db(cwd):
         snapshots = list(Snapshot.objects.all())
     assert not canary.exists()
-    assert not [
-        snapshot.url
-        for snapshot in snapshots
-        if str(snapshot.url).startswith("file:") and not snapshot.is_crawl_source_file_url()
-    ]
+    assert not [snapshot.url for snapshot in snapshots if str(snapshot.url).startswith("file:")]
     for forbidden in ("/etc/hosts", "/etc/passwd", "other_crawl_source", "archivebox_shell_injection_canary"):
         assert not [snapshot.url for snapshot in snapshots if forbidden in str(snapshot.url)]
 
 
 def test_basic_success_case_request(client, tmp_path, api_headers):
     init_archive(tmp_path)
+    submitted_url = "https://example.com/api-cli-add-basic"
 
     response = api_client_request(
         client,
         "post",
         "/api/v1/cli/add",
         payload={
-            "urls": ["https://example.com/api-cli-add-basic"],
+            "urls": [submitted_url],
             "depth": 0,
             "parser": "url_list",
             "plugins": "__archivebox_test_no_plugins__",
@@ -243,6 +242,11 @@ def test_basic_success_case_request(client, tmp_path, api_headers):
 
     assert response.status_code == 200, response.content
     assert response.json()["success"] is True
+    crawl = Crawl.objects.get()
+    root_snapshot = Snapshot.objects.get()
+    assert crawl.urls == submitted_url
+    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8") == submitted_url
 
 
 @pytest.mark.timeout(360)
@@ -275,6 +279,13 @@ def test_api_cli_add_import_text_formats_preserve_metadata_and_crawl_inner_urls(
             body = response.json()
             assert body["success"] is True
             assert body["result"]["crawl_id"]
+            with use_archivebox_db(tmp_path):
+                crawl = Crawl.objects.get(id=body["result"]["crawl_id"])
+                root_snapshot = crawl.snapshot_set.get(url=Snapshot.INTERNAL_INPUT_URL)
+                root_input = (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8")
+            source_text = import_path.read_text(encoding="utf-8")
+            assert crawl.urls == source_text
+            assert root_input == source_text
 
         wait_for_import_processing(tmp_path, expected_urls)
         stop_server(tmp_path)
@@ -300,12 +311,11 @@ def test_api_cli_add_import_text_formats_preserve_metadata_and_crawl_inner_urls(
 
     with use_archivebox_db(tmp_path):
         crawls = list(Crawl.objects.order_by("created_at"))
-        snapshots_by_url = {
-            snapshot.url: snapshot
-            for snapshot in Snapshot.objects.prefetch_related("tags").filter(url__in=expected_urls)
-        }
+        snapshots_by_url = {snapshot.url: snapshot for snapshot in Snapshot.objects.prefetch_related("tags").filter(url__in=expected_urls)}
+        tags_by_url = {snapshot.url: set(snapshot.tags.values_list("name", flat=True)) for snapshot in snapshots_by_url.values()}
 
     assert len(crawls) == len(import_files)
+    assert [crawl.urls for crawl in crawls] == [path.read_text(encoding="utf-8") for path in import_files.values()]
     assert all(crawl.tags_str == "api-import" for crawl in crawls)
     assert all(crawl.status in {Crawl.StatusChoices.STARTED, Crawl.StatusChoices.SEALED} for crawl in crawls)
     assert len(snapshots_by_url) == len(expected_urls)
@@ -319,7 +329,7 @@ def test_api_cli_add_import_text_formats_preserve_metadata_and_crawl_inner_urls(
         if expected.get("date"):
             assert snapshot.bookmarked_at.date().isoformat() == expected["date"]
         if expected.get("tags"):
-            assert expected["tags"] | {"api-import"} <= set(snapshot.tags.values_list("name", flat=True))
+            assert expected["tags"] | {"api-import"} <= tags_by_url[snapshot.url]
 
 
 @pytest.mark.timeout(240)

@@ -1024,7 +1024,9 @@ class CrawlRunner:
                 return
             config = normalize_runtime_config(snapshot["config"])
             snapshot_config_plugins = [name.strip() for name in str(config.get("PLUGINS") or "").split(",") if name.strip()]
-            snapshot_selected_plugins = self.selected_plugins if self.selected_plugins_from_args else (snapshot_config_plugins or self.selected_plugins)
+            snapshot_selected_plugins = (
+                self.selected_plugins if self.selected_plugins_from_args else (snapshot_config_plugins or self.selected_plugins)
+            )
             selected_hooks_by_plugin = None
             if snapshot["status"] == "started":
                 _reset_count, running_count = await sync_to_async(snapshot["_snapshot"].reset_abandoned_results, thread_sensitive=True)()

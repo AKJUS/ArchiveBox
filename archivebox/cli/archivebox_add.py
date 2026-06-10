@@ -5,7 +5,6 @@ __package__ = "archivebox.cli"
 __command__ = "archivebox add"
 
 import sys
-import json
 import os
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 import rich_click as click
 
+from archivebox.config import CONSTANTS
 from archivebox.misc.util import enforce_types, docstring
 from archivebox.misc.util import parse_filesize_to_bytes
 
@@ -47,23 +47,6 @@ def _collect_input_urls(args: tuple[str, ...], *, parser: str = "auto") -> list[
                         raise click.BadParameter(str(err), param_hint="URL") from err
 
     return urls
-
-
-def _direct_url_lines(raw_urls: str | list[str]) -> list[str]:
-    from archivebox.misc.util import validate_url
-
-    lines = [line.strip() for line in raw_urls.splitlines() if line.strip()] if isinstance(raw_urls, str) else [str(url).strip() for url in raw_urls if str(url).strip()]
-    direct_urls = []
-    for line in lines:
-        try:
-            direct_urls.append(validate_url(line))
-        except ValueError:
-            return []
-    return direct_urls
-
-
-def _should_import_as_source(raw_urls: str | list[str]) -> bool:
-    return not bool(_direct_url_lines(raw_urls))
 
 
 @enforce_types
@@ -106,7 +89,6 @@ def add(
     crawl_max_size = parse_filesize_to_bytes(crawl_max_size)
     crawl_timeout = int(crawl_timeout or 0)
     snapshot_max_size = parse_filesize_to_bytes(snapshot_max_size)
-    from archivebox import CONSTANTS
     from archivebox.config.permissions import USER, HOSTNAME
     from archivebox.config.common import get_config
 
@@ -143,25 +125,7 @@ def add(
     created_by_id = created_by_id or get_or_create_system_user_pk()
     started_at = timezone.now()
 
-    import_as_source = _should_import_as_source(urls)
     source_text = urls if isinstance(urls, str) else "\n".join(str(url) for url in urls)
-    if import_as_source:
-        url_list = []
-    elif isinstance(urls, str):
-        url_list = [line.strip() for line in urls.splitlines() if line.strip()]
-    else:
-        url_list = [str(url).strip() for url in urls if str(url).strip()]
-    if snapshot_ids and len(snapshot_ids) != len(url_list):
-        raise ValueError("snapshot_ids length must match urls length")
-    admitted_urls: list[str] = []
-    admitted_snapshot_ids: list[str] | None = [] if snapshot_ids else None
-    for index, url in enumerate(url_list):
-        if Snapshot.is_archivebox_internal_url(url, config=runtime_config):
-            print(f"[yellow][!] Skipping internal ArchiveBox URL: {url}[/yellow]")
-            continue
-        admitted_urls.append(url)
-        if admitted_snapshot_ids is not None and snapshot_ids:
-            admitted_snapshot_ids.append(snapshot_ids[index])
 
     # 2. Create a new Crawl with inline URLs
     cli_args = [*sys.argv]
@@ -200,26 +164,16 @@ def add(
     # stripped by Crawl.save() and rederived when hooks run.
     crawl_config.update(config_overrides)
 
-    if import_as_source:
-        urls_content = ""
-    else:
-        # 1. Save the provided URLs to sources/2024-11-05__23-59-59__cli_add.txt
-        sources_file = CONSTANTS.SOURCES_DIR / f"{timezone.now().strftime('%Y-%m-%d__%H-%M-%S')}__cli_add.txt"
-        sources_file.parent.mkdir(parents=True, exist_ok=True)
-        if admitted_snapshot_ids is not None:
-            sources_file.write_text(
-                "\n".join(
-                    json.dumps({"url": url, "id": admitted_snapshot_ids[index], "tags": tag, "depth": 0})
-                    for index, url in enumerate(admitted_urls)
-                ),
-            )
-        else:
-            sources_file.write_text("\n".join(admitted_urls))
-        urls_content = sources_file.read_text()
-
+    # Crawl.urls is the user's submitted source, not a derived work queue for
+    # this add path. Keeping it byte-for-byte readable is what lets API/UI/CLI
+    # callers audit or resume imports without losing RSS/Netscape/JSON metadata
+    # that is not representable as one plain URL per line.
     crawl = Crawl.objects.create(
-        urls=urls_content,
-        max_depth=depth + 1 if import_as_source else depth,
+        urls=source_text,
+        # The internal root snapshot occupies depth 0. URLs discovered from the
+        # submitted source become normal child snapshots at depth 1, so the
+        # effective crawl limit must be one hop deeper than the user requested.
+        max_depth=depth + 1,
         tags_str=tag,
         persona_id=persona_obj.id,
         label=f"{USER}@{HOSTNAME} $ {cmd_str} [{timestamp}]",
@@ -229,18 +183,18 @@ def add(
         config=crawl_config,
     )
 
-    if import_as_source:
-        sources_file = CONSTANTS.SOURCES_DIR / f"{crawl.id.hex}_{timezone.now().strftime('%Y-%m-%d__%H-%M-%S')}__cli_add.txt"
-        sources_file.parent.mkdir(parents=True, exist_ok=True)
-        sources_file.write_text(source_text)
-        root_snapshot = Snapshot.objects.create(
-            url=sources_file.resolve().as_uri(),
-            crawl=crawl,
-            depth=0,
-            title=sources_file.name,
-        )
-        crawl.urls = json.dumps({"type": "Snapshot", "url": root_snapshot.url, "id": str(root_snapshot.id), "depth": 0})
-        crawl.save(update_fields=["urls", "modified_at"])
+    # Parser plugins consume this root snapshot through the normal Snapshot
+    # hook lifecycle. ArchiveBox does not select parser plugins or call them
+    # directly; non-parser plugins cheaply no-result unsupported internal input.
+    root_snapshot = Snapshot.objects.create(
+        url=Snapshot.INTERNAL_INPUT_URL,
+        crawl=crawl,
+        depth=0,
+        title="stdin.txt",
+    )
+    staticfile_dir = root_snapshot.output_dir / "staticfile"
+    staticfile_dir.mkdir(parents=True, exist_ok=True)
+    (staticfile_dir / "stdin.txt").write_text(source_text, encoding="utf-8")
 
     print(f"[green]\\[+] Created Crawl {crawl.id} with max_depth={depth}[/green]")
     first_url = crawl.get_urls_list()[0] if crawl.get_urls_list() else ""

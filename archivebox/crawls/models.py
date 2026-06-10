@@ -35,7 +35,7 @@ from archivebox.base_models.models import (
 )
 from archivebox.workers.models import RETRY_AT_MAX, ModelWithStateMachine, BaseStateMachine
 from archivebox.crawls.schedule_util import next_run_for_schedule, validate_schedule
-from archivebox.misc.util import validate_url, validate_url_length
+from archivebox.misc.util import parse_date, validate_url, validate_url_length
 
 if TYPE_CHECKING:
     from archivebox.core.models import Snapshot
@@ -521,6 +521,18 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
             return []
         return [url.strip() for url in self.urls.split("\n") if url.strip() and not url.strip().startswith("#")]
 
+    def has_internal_input_root(self) -> bool:
+        """Return True when Crawl.urls is preserved source text, not the work queue.
+
+        `archivebox add` creates a synthetic root snapshot to run parser hooks
+        through the same Snapshot lifecycle as every other extractor. In that
+        mode the raw submitted import text must remain in Crawl.urls forever;
+        parsed URLs live as child Snapshot rows and should not be appended back.
+        """
+        from archivebox.core.models import Snapshot
+
+        return self.snapshot_set.filter(url=Snapshot.INTERNAL_INPUT_URL, depth=0).exists()
+
     @staticmethod
     def normalize_domain(value: str) -> str:
         candidate = (value or "").strip().lower()
@@ -955,6 +967,13 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
 
         if self.status == self.StatusChoices.SEALED:
             return []
+        # Internal-input crawls preserve the submitted text verbatim in
+        # Crawl.urls. The root snapshot's parser hooks are the only supported
+        # path for turning that text into child snapshots, otherwise a later
+        # runner pass could reinterpret plain URL-looking lines as direct
+        # depth-0 work and bypass format-specific metadata parsing.
+        if self.has_internal_input_root():
+            return []
 
         created_snapshots = []
         crawl_tag_names = self.current_tag_names()
@@ -1116,10 +1135,16 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
         allowlist = self.split_filter_patterns(config.get("URL_ALLOWLIST", ""))
         denylist = self.split_filter_patterns(config.get("URL_DENYLIST", ""))
 
+        def metadata_score(record: Mapping[str, Any]) -> int:
+            # Multiple parsers can discover the same URL from one import root.
+            # Keep the record with the richest user-facing metadata so generic
+            # text/HTML extraction does not erase RSS/Netscape/JSON fields.
+            return sum(bool(record.get(field)) for field in ("title", "bookmarked_at", "timestamp", "tags"))
+
         deduped_records: dict[str, Mapping[str, Any]] = {}
         for record in records:
             url = sanitize_extracted_url(fix_url_from_markdown(str(record.get("url") or "").strip()))
-            if not url or url in deduped_records:
+            if not url:
                 continue
             try:
                 validate_url(url)
@@ -1130,10 +1155,42 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
                 print(f"[yellow][!] Skipping internal ArchiveBox discovered snapshot URL: {url}[/yellow]")
                 continue
             if self.url_passes_compiled_filters(url, allowlist=allowlist, denylist=denylist):
-                deduped_records[url] = record
+                existing_record = deduped_records.get(url)
+                if existing_record is None or metadata_score(record) > metadata_score(existing_record):
+                    deduped_records[url] = record
 
         if not deduped_records:
             return []
+
+        existing_in_crawl = {
+            snapshot.url: snapshot for snapshot in self.snapshot_set.prefetch_related("tags").filter(url__in=deduped_records.keys())
+        }
+        for url, snapshot in existing_in_crawl.items():
+            record = deduped_records[url]
+            update_fields = []
+            title = Snapshot._normalize_title_candidate(str(record.get("title") or "").strip()[:512], snapshot_url=url)
+            if title and (not snapshot.title or len(title) > len(snapshot.title or "")):
+                snapshot.title = title
+                update_fields.append("title")
+            bookmarked_at = None
+            try:
+                bookmarked_at = parse_date(record.get("bookmarked_at") or record.get("timestamp"))
+            except (TypeError, ValueError, OSError):
+                pass
+            if bookmarked_at and snapshot.bookmarked_at != bookmarked_at:
+                snapshot.bookmarked_at = bookmarked_at
+                update_fields.append("bookmarked_at")
+            if update_fields:
+                snapshot.save(update_fields=[*update_fields, "modified_at"])
+            tag_names = {
+                *self.parse_tag_names(
+                    str(record.get("tags") or ""),
+                    pattern=self._config_value(config, "TAG_SEPARATOR_PATTERN", r"[,]"),
+                ),
+            }
+            if tag_names:
+                tag_ids = [Tag.objects.get_or_create(name=tag_name)[0].pk for tag_name in tag_names]
+                snapshot.tags.add(*tag_ids)
 
         existing_scope = Snapshot.objects if bool(self._config_value(config, "ONLY_NEW", True)) else self.snapshot_set
         existing_urls = set(existing_scope.filter(url__in=deduped_records.keys()).values_list("url", flat=True))
@@ -1145,25 +1202,32 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
             return []
 
         now = timezone.now()
-        snapshots = [
-            Snapshot(
-                url=url,
-                timestamp=str((now + timedelta(microseconds=index)).timestamp()),
-                title=Snapshot._normalize_title_candidate(
-                    str(deduped_records[url].get("title") or "").strip()[:512],
-                    snapshot_url=url,
-                )
-                or None,
-                crawl=self,
-                parent_snapshot=parent_snapshot,
-                depth=depth,
-                status=Snapshot.StatusChoices.QUEUED,
-                retry_at=now,
-                bookmarked_at=now,
-                created_at=now,
+        snapshots = []
+        for index, url in enumerate(urls):
+            record = deduped_records[url]
+            bookmarked_at = now
+            try:
+                bookmarked_at = parse_date(record.get("bookmarked_at") or record.get("timestamp")) or now
+            except (TypeError, ValueError, OSError):
+                pass
+            snapshots.append(
+                Snapshot(
+                    url=url,
+                    timestamp=str((now + timedelta(microseconds=index)).timestamp()),
+                    title=Snapshot._normalize_title_candidate(
+                        str(record.get("title") or "").strip()[:512],
+                        snapshot_url=url,
+                    )
+                    or None,
+                    crawl=self,
+                    parent_snapshot=parent_snapshot,
+                    depth=depth,
+                    status=Snapshot.StatusChoices.QUEUED,
+                    retry_at=now,
+                    bookmarked_at=bookmarked_at,
+                    created_at=now,
+                ),
             )
-            for index, url in enumerate(urls)
-        ]
         for snapshot in snapshots:
             snapshot.set_delete_at_from_config(self._config_value(config, "DELETE_AFTER", "0"))
 
@@ -1184,7 +1248,11 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
 
         crawl_urls = {url for _raw_line, url in self._iter_url_lines() if url}
         new_url_lines = [snapshot.url for snapshot in created_snapshots if snapshot.url not in crawl_urls]
-        if new_url_lines:
+        # For internal-input crawls, Crawl.urls is the immutable source text.
+        # Child snapshots are the parsed/indexed representation, so appending
+        # discovered URLs here would both duplicate state and destroy the exact
+        # import artifact users submitted through CLI/API/UI.
+        if new_url_lines and not self.has_internal_input_root():
             self.urls = (self.urls.rstrip() + "\n" + "\n".join(new_url_lines)).lstrip("\n")
             self.save(update_fields=["urls", "modified_at"])
 

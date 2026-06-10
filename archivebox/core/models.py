@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import os
 import json
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 from statemachine import State, registry
 
@@ -489,6 +489,8 @@ class SnapshotManager(models.Manager.from_queryset(SnapshotQuerySet)):  # ty: ig
 
 
 class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWithNotes, ModelWithHealthStats, ModelWithStateMachine):
+    INTERNAL_INPUT_URL = "archivebox://internal"
+
     id = CompactUUIDField(primary_key=True, default=uuid7, editable=False, unique=True)
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     modified_at = models.DateTimeField(auto_now=True)
@@ -897,7 +899,7 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
         return False
 
     def validate_url_for_archiving(self, *, config: Mapping[str, Any] | Any | None = None) -> None:
-        if self.is_crawl_source_file_url():
+        if self.is_internal_input_url():
             return
 
         try:
@@ -908,17 +910,8 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
         if self.is_archivebox_internal_url(self.url, config=config):
             raise ValidationError({"url": "ArchiveBox cannot archive its own admin, web, api, or snapshot URLs."})
 
-    def is_crawl_source_file_url(self) -> bool:
-        parsed = urlparse((self.url or "").strip())
-        if parsed.scheme != "file" or self.depth != 0 or not self.crawl_id:
-            return False
-        try:
-            source_path = Path(unquote(parsed.path)).resolve()
-            sources_dir = CONSTANTS.SOURCES_DIR.resolve()
-            source_path.relative_to(sources_dir)
-        except (OSError, ValueError):
-            return False
-        return source_path.is_file() and source_path.name.startswith(f"{self.crawl_id.hex}_")
+    def is_internal_input_url(self) -> bool:
+        return (self.url or "").strip() == self.INTERNAL_INPUT_URL and self.depth == 0 and bool(self.crawl_id)
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
@@ -968,6 +961,12 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
             self.ensure_crawl_symlink()
             crawl = Crawl.objects.filter(pk=self.crawl_id).first()
             if crawl is None:
+                return
+            # Snapshot.save() normally appends newly created URLs to Crawl.urls
+            # so legacy/direct crawls can keep their queue text in sync. For
+            # internal-input crawls that would corrupt the original submitted
+            # import text; parsed URLs are represented by child Snapshot rows.
+            if crawl.has_internal_input_root():
                 return
             if not crawl.url_passes_filters(self.url, snapshot=self, use_effective_config=False):
                 return

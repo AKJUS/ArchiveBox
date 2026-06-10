@@ -418,7 +418,10 @@ def test_add_view_queues_crawl_for_background_runner(client, admin_user, monkeyp
     assert crawl is not None
     assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.retry_at is not None
-    assert crawl.snapshot_set.count() == 0
+    assert crawl.urls == "https://example.com"
+    root_snapshot = crawl.snapshot_set.get()
+    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8") == "https://example.com"
 
 
 def test_add_view_start_paused_creates_paused_crawl_without_snapshots(client, admin_user, monkeypatch):
@@ -452,7 +455,10 @@ def test_add_view_start_paused_creates_paused_crawl_without_snapshots(client, ad
     assert crawl is not None
     assert crawl.status == Crawl.StatusChoices.PAUSED
     assert crawl.retry_at == RETRY_AT_MAX
-    assert crawl.snapshot_set.count() == 0
+    assert crawl.urls == "https://example.com/paused"
+    root_snapshot = crawl.snapshot_set.get()
+    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8") == "https://example.com/paused"
     assert crawl.config.get("INDEX_ONLY") is not True
 
 
@@ -494,17 +500,19 @@ def test_add_view_extracts_urls_from_mixed_text_input(client, admin_user, monkey
 
     crawl = Crawl.objects.order_by("-created_at").first()
     assert crawl is not None
-    assert crawl.urls == "\n".join(
+    expected_input = "\n".join(
         [
-            "https://sweeting.me",
-            "https://google.com",
-            "https://github.com/ArchiveBox/ArchiveBox",
-            "https://news.ycombinator.com",
-            "https://en.wikipedia.org/wiki/Classification_(machine_learning)",
-            "https://example.com/three",
-            "https://example.com/four",
+            "https://sweeting.me,https://google.com",
+            "Notes: [ArchiveBox](https://github.com/ArchiveBox/ArchiveBox), https://news.ycombinator.com",
+            "[Wiki](https://en.wikipedia.org/wiki/Classification_(machine_learning))",
+            '{"items":["https://example.com/three"]}',
+            "csv,https://example.com/four",
         ],
     )
+    assert crawl.urls == expected_input
+    root_snapshot = crawl.snapshot_set.get()
+    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8") == expected_input
 
 
 def test_add_view_trims_trailing_punctuation_from_markdown_urls(client, admin_user, monkeypatch):
@@ -542,12 +550,16 @@ def test_add_view_trims_trailing_punctuation_from_markdown_urls(client, admin_us
 
     crawl = Crawl.objects.order_by("-created_at").first()
     assert crawl is not None
-    assert crawl.urls == "\n".join(
+    expected_input = "\n".join(
         [
-            "https://github.com/ArchiveBox/ArchiveBox",
-            "https://github.com/abc?abc#234234",
+            "Docs: https://github.com/ArchiveBox/ArchiveBox.",
+            "Issue: https://github.com/abc?abc#234234?.",
         ],
     )
+    assert crawl.urls == expected_input
+    root_snapshot = crawl.snapshot_set.get()
+    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8") == expected_input
 
 
 def test_add_view_exposes_api_token_for_tag_widget_autocomplete(client, admin_user, monkeypatch):
