@@ -771,6 +771,17 @@ class CrawlRunner:
         if not discovered_urls:
             return
 
+        if self.crawl.status == self.crawl.StatusChoices.SEALED:
+            # Snapshot completion projectors can observe the root snapshot seal
+            # before the runner has consumed parser urls.jsonl output. A sealed
+            # crawl must not block those freshly discovered child snapshots; the
+            # runner is still inside the same crawl lifecycle and will seal it
+            # again after the discovered queue is empty.
+            await sync_to_async(self.crawl.update_and_requeue, thread_sensitive=True)(
+                status=self.crawl.StatusChoices.STARTED,
+                retry_at=timezone.now(),
+            )
+
         parent_snapshot = await sync_to_async(
             lambda: Snapshot.objects.select_related("crawl", "crawl__created_by").filter(id=snapshot_payload["id"]).first(),
             thread_sensitive=True,
