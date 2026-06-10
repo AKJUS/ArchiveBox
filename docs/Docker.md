@@ -209,7 +209,7 @@ docker run -it -v $PWD:/data archivebox/archivebox init --setup
 
 *(You can create a collection in any directory you want, `~/archivebox/data` is just used as an example here)*
 
-If you encounter permissions issues, you may need configure user/group ownership explicitly with [`PUID`/`PGID`](https://github.com/ArchiveBox/ArchiveBox/wiki/Configuration#puid--pgid).
+If you encounter permissions issues, make sure the mounted data directory is writable by its intended owner. Docker startup automatically uses the first non-root owner detected from the existing collection, or the default `archivebox` user when the data directory is root-owned.
 
 <br/>
 

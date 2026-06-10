@@ -35,14 +35,6 @@
   - ```{autodoc2-docstring} archivebox.config.permissions.DATA_DIR
     :summary:
     ```
-* - {py:obj}`DEFAULT_PUID <archivebox.config.permissions.DEFAULT_PUID>`
-  - ```{autodoc2-docstring} archivebox.config.permissions.DEFAULT_PUID
-    :summary:
-    ```
-* - {py:obj}`DEFAULT_PGID <archivebox.config.permissions.DEFAULT_PGID>`
-  - ```{autodoc2-docstring} archivebox.config.permissions.DEFAULT_PGID
-    :summary:
-    ```
 * - {py:obj}`RUNNING_AS_UID <archivebox.config.permissions.RUNNING_AS_UID>`
   - ```{autodoc2-docstring} archivebox.config.permissions.RUNNING_AS_UID
     :summary:
@@ -117,25 +109,6 @@
 
 ````
 
-````{py:data} DEFAULT_PUID
-:canonical: archivebox.config.permissions.DEFAULT_PUID
-:value: >
-   911
-
-```{autodoc2-docstring} archivebox.config.permissions.DEFAULT_PUID
-```
-
-````
-
-````{py:data} DEFAULT_PGID
-:canonical: archivebox.config.permissions.DEFAULT_PGID
-:value: >
-   911
-
-```{autodoc2-docstring} archivebox.config.permissions.DEFAULT_PGID
-```
-
-````
 
 ````{py:data} RUNNING_AS_UID
 :canonical: archivebox.config.permissions.RUNNING_AS_UID

@@ -597,19 +597,7 @@ Permissions to set on output files written into the archive directory. The direc
 > Set this to `600` if you want archives to be readable only by the ArchiveBox user, or `664`/`775` if you need a shared group to read/write the data dir.
 
 *Related options:*
-[`PUID` / `PGID`](#puid--pgid), [`ENFORCE_ATOMIC_WRITES`](#enforce_atomic_writes)
-
----
-<a id="puid"></a>
-<a id="pgid"></a>
-#### `PUID` / `PGID`
-**Possible Values:** [`911`]/`1000`/...
-*Note: These are Docker-only environment variables — they only take effect when set on the Docker entrypoint at container startup. Setting them in `ArchiveBox.conf` or via `archivebox config --set` has no effect. Outside Docker the UID/GID is auto-detected from the ownership of the data directory (or the running user) and cannot be overridden.*
-
-The UID/GID that the ArchiveBox process should run as (and that all files in the data dir should be owned by). Honored by the Docker entrypoint, which `chown`s the data dir and drops privileges before running ArchiveBox. Outside Docker, ArchiveBox refuses to run as root and instead drops to the user that owns the data dir.
-
-*Learn more:*
-- https://docs.linuxserver.io/general/understanding-puid-and-pgid/
+[`ENFORCE_ATOMIC_WRITES`](#enforce_atomic_writes)
 - https://github.com/ArchiveBox/ArchiveBox/wiki/Troubleshooting#docker-permissions-issues
 
 ---

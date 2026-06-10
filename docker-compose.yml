@@ -23,9 +23,6 @@ services:
             - BASE_URL=${BASE_URL:-http://archivebox.localhost:8000}                  # public URL used to build admin/web/api/snapshot links
             - SERVER_SECURITY_MODE=${SERVER_SECURITY_MODE:-safe-subdomains-fullreplay} # safe-onedomain-nojsreplay if you can't do wildcard DNS *.your.domain
             - PUBLIC_ADD_VIEW=False                              # set to True to allow anonymous users to submit new URLs to archive
-            # - PUID=911                                         # set to your host user's UID & GID if you encounter permissions issues
-            # - PGID=911                                         # UID/GIDs lower than 500 may clash with system uids and are not recommended
-
             # For all other options, it's better to use data/ArchiveBox.conf or the new Personas config feature in the admin UI...
             # - TIMEOUT=60
             # - CHECK_SSL_VALIDITY=False

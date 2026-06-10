@@ -3,10 +3,9 @@
 # This Docker ENTRYPOINT script is called by `docker run archivebox ...` or `docker compose run archivebox ...`.
 # It takes a CMD as $* shell arguments and runs it following these setup steps:
 
-# - Set the archivebox user to use the correct PUID & PGID
-#     1. highest precedence is for valid PUID and PGID env vars passed in explicitly
-#     2. fall back to DETECTED_PUID of files found within existing data dir
-#     3. fall back to DEFAULT_PUID if no data dir or its owned by root
+# - Set the archivebox user to match the existing /data owner when possible
+#     1. use the first non-root owner detected from existing collection files
+#     2. fall back to the image's default archivebox uid/gid when /data is root-owned
 # - Create a new /data dir if necessary and set the correct ownership on it
 # - Create a new /browsers dir if necessary and set the correct ownership on it
 # - Check whether we're running inside QEMU emulation and show a warning if so.
@@ -40,65 +39,47 @@ export ABXBUS_CACHE_DIR="${ABXBUS_CACHE_DIR:-${XDG_CACHE_HOME:-/home/archivebox/
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${XDG_CACHE_HOME:-/home/archivebox/.cache}/uv}"
 export PNPM_HOME="${PNPM_HOME:-${XDG_CACHE_HOME:-/home/archivebox/.cache}/pnpm}"
 
-# Global default PUID and PGID if data dir is empty and no intended PUID+PGID is set manually by user
-export DEFAULT_PUID=911
-export DEFAULT_PGID=911
+# Global default uid/gid used when /data is empty or root-owned.
+export DEFAULT_ARCHIVEBOX_UID="${DEFAULT_ARCHIVEBOX_UID:-911}"
+export DEFAULT_ARCHIVEBOX_GID="${DEFAULT_ARCHIVEBOX_GID:-911}"
 
 detect_data_owner() {
     local path uid gid
     for path in "$DATA_DIR/ArchiveBox.conf" "$DATA_DIR/index.sqlite3" "$DATA_DIR/logs" "$DATA_DIR/archive" "$DATA_DIR"; do
         if [[ -e "$path" ]]; then
-            uid="$(stat -c '%u' "$path" 2>/dev/null || echo "$DEFAULT_PUID")"
-            gid="$(stat -c '%g' "$path" 2>/dev/null || echo "$DEFAULT_PGID")"
+            uid="$(stat -c '%u' "$path" 2>/dev/null || echo "$DEFAULT_ARCHIVEBOX_UID")"
+            gid="$(stat -c '%g' "$path" 2>/dev/null || echo "$DEFAULT_ARCHIVEBOX_GID")"
             if [[ "$uid" != "0" && "$gid" != "0" ]]; then
                 echo "$uid:$gid"
                 return
             fi
         fi
     done
-    echo "$DEFAULT_PUID:$DEFAULT_PGID"
+    echo "$DEFAULT_ARCHIVEBOX_UID:$DEFAULT_ARCHIVEBOX_GID"
 }
 
 export DETECTED_OWNER="$(detect_data_owner)"
-export DETECTED_PUID="${DETECTED_OWNER%%:*}"
-export DETECTED_PGID="${DETECTED_OWNER##*:}"
-export PUID="${PUID:-$DETECTED_PUID}"
-export PGID="${PGID:-$DETECTED_PGID}"
-export REQUESTED_PUID="$PUID"
-export REQUESTED_PGID="$PGID"
-
-if [[ ! "$PUID" =~ ^[0-9]+$ || ! "$PGID" =~ ^[0-9]+$ ]]; then
-    echo -e "\n[X] Error: PUID and PGID must be numeric, got PUID=$PUID PGID=$PGID." > /dev/stderr
-    echo -e "    Example: PUID=$(id -u) PGID=$(id -g) docker compose up" > /dev/stderr
-    exit 3
-fi
-
-# If user tries to set PUID or PGID to root values, keep root only for entrypoint
-# setup and run ArchiveBox/Chrome as the default non-root user instead.
-if [[ "$PUID" == "0" || "$PGID" == "0" ]]; then
-    [[ "$PUID" == "0" ]] && export PUID="$DEFAULT_PUID"
-    [[ "$PGID" == "0" ]] && export PGID="$DEFAULT_PGID"
-    echo -e "\n[!] Warning: Got PUID=$REQUESTED_PUID PGID=$REQUESTED_PGID, but ArchiveBox/Chrome should not run as root." > /dev/stderr
-    echo -e "    The entrypoint will use root only for startup permission repair, then run ArchiveBox as a non-root user." > /dev/stderr
-    echo -e "    Using PUID=$PUID PGID=$PGID. See https://docs.linuxserver.io/general/understanding-puid-and-pgid" > /dev/stderr
-fi
+export TARGET_UID="${DETECTED_OWNER%%:*}"
+export TARGET_GID="${DETECTED_OWNER##*:}"
 
 if [[ "$(id -u)" == "0" ]]; then
-    # Set archivebox user and group ids to desired PUID/PGID.
-    groupmod -o -g "$PGID" "$ARCHIVEBOX_USER" > /dev/null 2>&1 || {
-        echo -e "\n[X] Error: Failed to set $ARCHIVEBOX_USER group to PGID=$PGID." > /dev/stderr
+    # Root is only used for startup permission repair. ArchiveBox/Chrome run as
+    # the existing collection owner, or as the image default user for root-owned
+    # /data, so application code never needs to know about Docker uid mapping.
+    groupmod -o -g "$TARGET_GID" "$ARCHIVEBOX_USER" > /dev/null 2>&1 || {
+        echo -e "\n[X] Error: Failed to set $ARCHIVEBOX_USER group to gid=$TARGET_GID." > /dev/stderr
         exit 3
     }
-    usermod -o -u "$PUID" -g "$PGID" "$ARCHIVEBOX_USER" > /dev/null 2>&1 || {
-        echo -e "\n[X] Error: Failed to set $ARCHIVEBOX_USER user to PUID=$PUID PGID=$PGID." > /dev/stderr
+    usermod -o -u "$TARGET_UID" -g "$TARGET_GID" "$ARCHIVEBOX_USER" > /dev/null 2>&1 || {
+        echo -e "\n[X] Error: Failed to set $ARCHIVEBOX_USER user to uid=$TARGET_UID gid=$TARGET_GID." > /dev/stderr
         exit 3
     }
 
-    export PUID="$(id -u "$ARCHIVEBOX_USER")"
-    export PGID="$(id -g "$ARCHIVEBOX_USER")"
+    export TARGET_UID="$(id -u "$ARCHIVEBOX_USER")"
+    export TARGET_GID="$(id -g "$ARCHIVEBOX_USER")"
 else
-    export PUID="$(id -u)"
-    export PGID="$(id -g)"
+    export TARGET_UID="$(id -u)"
+    export TARGET_GID="$(id -g)"
 fi
 
 # Check if user attempted to run it in the root of their home folder or hard drive (common mistake)
@@ -112,8 +93,8 @@ chown_if_needed() {
     local path="$1"
     [[ -e "$path" ]] || return 0
     [[ "$(id -u)" == "0" ]] || return 0
-    [[ "$(stat -c '%u:%g' "$path" 2>/dev/null || true)" == "$PUID:$PGID" ]] && return 0
-    chown -h "$PUID:$PGID" "$path" 2>/dev/null || true
+    [[ "$(stat -c '%u:%g' "$path" 2>/dev/null || true)" == "$TARGET_UID:$TARGET_GID" ]] && return 0
+    chown -h "$TARGET_UID:$TARGET_GID" "$path" 2>/dev/null || true
 }
 
 chmod_if_possible() {
@@ -140,8 +121,8 @@ ensure_runtime_tree() {
     local path="$1"
     mkdir -p "$path" 2>/dev/null || true
     [[ -e "$path" ]] || return 0
-    if [[ "$(id -u)" == "0" ]] && [[ "$(stat -c '%u:%g' "$path" 2>/dev/null || true)" != "$PUID:$PGID" ]]; then
-        chown -R "$PUID:$PGID" "$path" 2>/dev/null || true
+    if [[ "$(id -u)" == "0" ]] && [[ "$(stat -c '%u:%g' "$path" 2>/dev/null || true)" != "$TARGET_UID:$TARGET_GID" ]]; then
+        chown -R "$TARGET_UID:$TARGET_GID" "$path" 2>/dev/null || true
     fi
     chmod_if_possible "$path"
 }
@@ -150,7 +131,7 @@ ensure_runtime_tmp_tree() {
     mkdir -p "$TMP_DIR" 2>/dev/null || true
     [[ -e "$TMP_DIR" ]] || return 0
     if [[ "$(id -u)" == "0" ]]; then
-        chown -R "$PUID:$PGID" "$TMP_DIR" 2>/dev/null || true
+        chown -R "$TARGET_UID:$TARGET_GID" "$TMP_DIR" 2>/dev/null || true
     fi
     chmod_if_possible "$TMP_DIR"
 }
@@ -160,7 +141,7 @@ ensure_small_runtime_tree() {
     mkdir -p "$path" 2>/dev/null || true
     [[ -e "$path" ]] || return 0
     if [[ "$(id -u)" == "0" ]]; then
-        chown -R "$PUID:$PGID" "$path" 2>/dev/null || true
+        chown -R "$TARGET_UID:$TARGET_GID" "$path" 2>/dev/null || true
     fi
     chmod -R u+rwX,g+rwX "$path" 2>/dev/null || true
 }
@@ -175,12 +156,10 @@ run_as_archivebox() {
 
 permission_error() {
     local path="$1"
-    echo -e "\n[X] Error: archivebox user (PUID=$PUID PGID=$PGID) cannot write to $path." > /dev/stderr
+    echo -e "\n[X] Error: archivebox user (uid=$TARGET_UID gid=$TARGET_GID) cannot write to $path." > /dev/stderr
     echo -e "    Current owner is $(stat -c '%u:%g' "$path" 2>/dev/null || echo 'unknown')." > /dev/stderr
-    echo -e "    Fix ownership on the host, or set PUID/PGID to match the mount owner:" > /dev/stderr
-    echo -e "       PUID=$PUID PGID=$PGID docker compose up" > /dev/stderr
-    echo -e "       chown -R $PUID:$PGID ./data   # only if you intentionally want to repair the full tree" > /dev/stderr
-    echo -e "    https://docs.linuxserver.io/general/understanding-puid-and-pgid" > /dev/stderr
+    echo -e "    Fix ownership on the host so /data is writable by the intended archivebox user:" > /dev/stderr
+    echo -e "       chown -R $TARGET_UID:$TARGET_GID ./data   # only if you intentionally want to repair the full tree" > /dev/stderr
     exit 3
 }
 

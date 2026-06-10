@@ -199,28 +199,6 @@
 
 ````
 
-````{py:attribute} DEFAULT_PUID
-:canonical: archivebox.config.constants.ConstantsDict.DEFAULT_PUID
-:type: int
-:value: >
-   None
-
-```{autodoc2-docstring} archivebox.config.constants.ConstantsDict.DEFAULT_PUID
-```
-
-````
-
-````{py:attribute} DEFAULT_PGID
-:canonical: archivebox.config.constants.ConstantsDict.DEFAULT_PGID
-:type: int
-:value: >
-   None
-
-```{autodoc2-docstring} archivebox.config.constants.ConstantsDict.DEFAULT_PGID
-```
-
-````
-
 ````{py:attribute} IS_INSIDE_VENV
 :canonical: archivebox.config.constants.ConstantsDict.IS_INSIDE_VENV
 :type: bool

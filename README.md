@@ -1144,7 +1144,7 @@ Because ArchiveBox is designed to ingest a large volume of URLs with multiple co
 <li><strong>Don't store large collections on older filesystems like EXT3/FAT</strong> as they may not be able to handle more than 50k directory entries in the <code>data/archive/</code> folder.
 </li>
 <li><strong>Try to keep the <code>data/index.sqlite3</code> file on local drive (not a network mount)</strong> or SSD for maximum performance, however the <code>data/archive/</code> folder can be on a network mount or slower HDD.</li>
-<li>If using Docker or NFS/SMB/FUSE for the <code>data/archive/</code> folder, you may need to set <a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Configuration#puid--pgid"><code>PUID</code> & <code>PGID</code></a> and <a href="https://github.com/ArchiveBox/ArchiveBox/issues/1304">disable <code>root_squash</code></a> on your fileshare server.
+<li>If using Docker or NFS/SMB/FUSE for the <code>data/archive/</code> folder, make sure the mounted data directory is writable by its intended owner and consider disabling <a href="https://github.com/ArchiveBox/ArchiveBox/issues/1304"><code>root_squash</code></a> on your fileshare server.
 </li>
 </ul>
 
@@ -1154,7 +1154,6 @@ Because ArchiveBox is designed to ingest a large volume of URLs with multiple co
 <li><a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Usage#Disk-Layout">Wiki: Usage (Disk Layout)</a></li>
 <li><a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Security-Overview#output-folder">Wiki: Security Overview (Output-Folder)</a></li>
 <li><a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Usage#large-archives">Wiki: Usage (Large Archives)</a></li>
-<li><a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Configuration#puid--pgid">Wiki: Configuration (<code>PUID</code> & <code>GUID</code>)</a></li>
 <li><a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Security-Overview#do-not-run-as-root">Wiki: Security Overview (Do Not Run as Root)</a></li>
 </ul>
 

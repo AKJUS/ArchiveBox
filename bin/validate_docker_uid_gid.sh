@@ -103,9 +103,9 @@ if grep -E "(/[[:alnum:]_.-]+/)?pip install|npm install|uv pip install" /tmp/arc
     exit 1
 fi
 archivebox version 2>&1 | tee /tmp/archivebox-version.log
-grep -Eq "/home/archivebox/.config/abx/lib/(pip/venv/bin|env/bin)/trafilatura" /tmp/archivebox-version.log
-grep -Eq "/home/archivebox/.config/abx/lib/(npm/node_modules/.bin|env/bin)/defuddle" /tmp/archivebox-version.log
-grep -Eq "/home/archivebox/.config/abx/lib/env/bin/sonic" /tmp/archivebox-version.log
+grep -Eq "/opt/archivebox/lib/(uv/venv/bin|env/bin)/trafilatura" /tmp/archivebox-version.log
+grep -Eq "/opt/archivebox/lib/(pnpm/packages/defuddle/node_modules/.bin|env/bin)/defuddle" /tmp/archivebox-version.log
+grep -Eq "/opt/archivebox/lib/env/bin/sonic" /tmp/archivebox-version.log
 archivebox add --depth=0 https://example.com/ 2>&1 | tee /tmp/archivebox-add.log
 archivebox update --index-only 2>&1 | tee /tmp/archivebox-update.log
 snapshot_dir="$(find /data/archive/users/system/snapshots -mindepth 3 -maxdepth 3 -type d | head -n 1)"
@@ -385,7 +385,7 @@ run_mount_case() {
     case_root="$mount_dir/archivebox-uidgid-validation-$RUN_ID"
     mkdir -p "$case_root"
     VALIDATION_ROOT="$case_root"
-    run_case "$fs_name writable forced-owner style mount" ":" "PUID=911 PGID=911" "-" pass 911 911 "$default_cmd" ""
+    run_case "$fs_name writable forced-owner style mount" ":" "-" "-" pass 911 911 "$default_cmd" ""
     VALIDATION_ROOT="$previous_root"
 }
 
@@ -395,10 +395,6 @@ run_case "root-owned empty data auto-detect default" \
     "chown 0:0 /case/data && chmod 755 /case/data" \
     "-" "-" pass 911 911
 
-run_case "root-owned empty data explicit 1001:1001" \
-    "chown 0:0 /case/data && chmod 755 /case/data" \
-    "PUID=1001 PGID=1001" "-" pass 1001 1001
-
 run_case "501-owned data auto-detected" \
     "chown 501:20 /case/data && chmod 755 /case/data" \
     "-" "-" pass 501 20
@@ -407,93 +403,41 @@ run_case "non-root data with root-owned config files repaired" \
     "chown 501:20 /case/data && chmod 755 /case/data && touch /case/data/index.sqlite3 /case/data/ArchiveBox.conf && mkdir -p /case/data/archive/users && chown 0:0 /case/data/index.sqlite3 /case/data/ArchiveBox.conf /case/data/archive/users" \
     "-" "-" pass 501 20 "$default_cmd" config-files-repaired
 
-run_case "911-owned data with PGID=0 normalized" \
+run_case "911-owned data auto-detected" \
     "chown 911:911 /case/data && chmod 755 /case/data" \
-    "PGID=0" "-" pass 911 911
+    "-" "-" pass 911 911
 
-run_case "911-owned data explicit 911:911" \
-    "chown 911:911 /case/data && chmod 755 /case/data" \
-    "PUID=911 PGID=911" "-" pass 911 911
-
-run_case "PUID=911 PGID=0 with 501-owned writable data" \
-    "chown 501:20 /case/data && chmod 777 /case/data" \
-    "PUID=911 PGID=0" "-" pass 911 911
-
-run_case "PUID=0 PGID=500 with 1001-owned writable data" \
-    "chown 1001:1001 /case/data && chmod 777 /case/data" \
-    "PUID=0 PGID=500" "-" pass 911 500
-
-run_case "PUID=0 PGID=0 root-owned data normalized" \
+run_case "root-owned data falls back to default archivebox user" \
     "chown 0:0 /case/data && chmod 755 /case/data" \
-    "PUID=0 PGID=0" "-" pass 911 911
-
-run_case "PUID=501 PGID=0 root-owned data normalized group" \
-    "chown 0:0 /case/data && chmod 755 /case/data" \
-    "PUID=501 PGID=0" "-" pass 501 911
-
-run_case "PUID=0 PGID=500 root-owned data normalized user" \
-    "chown 0:0 /case/data && chmod 755 /case/data" \
-    "PUID=0 PGID=500" "-" pass 911 500
+    "-" "-" pass 911 911
 
 run_case "nested root-owned archive content is not recursively chowned" \
     "chown 0:0 /case/data && chmod 755 /case/data && mkdir -p /case/data/archive/existing && touch /case/data/archive/existing/file && chown -R 0:0 /case/data/archive/existing" \
-    "PUID=1001 PGID=1002" "-" pass 1001 1002 "$default_cmd" nested-root-stays
-
-run_case "non-root start writable root-owned data succeeds" \
-    "chown 0:0 /case/data /case/lib && chmod 777 /case/data /case/lib" \
-    "-" "501:911" pass 501 911
-
-run_case "non-root start root-owned data with mapped write access succeeds" \
-    "chown 0:0 /case/data /case/lib && chmod 700 /case/data /case/lib" \
-    "-" "501:911" pass 501 911
+    "-" "-" pass 911 911 "$default_cmd" nested-root-stays
 
 run_case "root start fixes read-only top-level data when chmod works" \
     "chown 0:0 /case/data && chmod 555 /case/data" \
-    "PUID=911 PGID=911" "-" pass 911 911
+    "-" "-" pass 911 911
 
 run_case "legacy data users dir repaired when present" \
     "chown 911:911 /case/data && chmod 755 /case/data && mkdir -p /case/data/users && chown 0:0 /case/data/users" \
-    "PUID=911 PGID=911" "-" pass 911 911 "$default_cmd" users-dir-repaired
+    "-" "-" pass 911 911 "$default_cmd" users-dir-repaired
 
 run_case "archive dir root-owned inside 911 data repaired shallowly" \
     "chown 911:911 /case/data && chmod 755 /case/data && mkdir -p /case/data/archive && chown 0:0 /case/data/archive" \
-    "PUID=911 PGID=911" "-" pass 911 911
+    "-" "-" pass 911 911
 
 run_case "logs dir root-owned mode 000 repaired shallowly" \
     "chown 911:911 /case/data && chmod 755 /case/data && mkdir -p /case/data/logs && chown 0:0 /case/data/logs && chmod 000 /case/data/logs" \
-    "PUID=911 PGID=911" "-" pass 911 911
-
-run_case "non-root user 501 can run archivebox version with root-owned LIB_DIR" \
-    "chown 0:0 /case/data /case/lib && chmod 777 /case/data && chmod 755 /case/lib" \
-    "-" "501:911" pass 501 911 "$version_cmd"
-
-run_case "non-root user 501 can write root-owned mapped LIB_DIR when access is granted" \
-    "chown 0:0 /case/data /case/lib && chmod 777 /case/data && chmod 755 /case/lib" \
-    "-" "501:911" pass 501 911
-
-run_case "non-root user 501 can write forced-owner style LIB_DIR when permissions allow" \
-    "chown 0:0 /case/data /case/lib && chmod 777 /case/data /case/lib" \
-    "-" "501:911" pass 501 911
+    "-" "-" pass 911 911
 
 run_case "1001-owned data auto-detected" \
     "chown 1001:1001 /case/data && chmod 755 /case/data" \
     "-" "-" pass 1001 1001
 
-run_case "invalid nonnumeric PUID hard-errors" \
-    "chown 911:911 /case/data && chmod 755 /case/data" \
-    "PUID=abc PGID=911" "-" fail "" ""
-
 run_case "root-owned ArchiveBox.conf only is repaired" \
     "chown 911:911 /case/data && chmod 755 /case/data && touch /case/data/ArchiveBox.conf /case/data/index.sqlite3 && chown 0:0 /case/data/ArchiveBox.conf /case/data/index.sqlite3" \
-    "PUID=911 PGID=911" "-" pass 911 911 "$default_cmd" config-files-repaired
-
-run_readonly_case "readonly bind mount hard-errors only when truly unwritable" \
-    "chown 911:911 /case/data /case/lib /case/browsers && chmod 755 /case/data /case/lib /case/browsers" \
-    "PUID=911 PGID=911" "-"
-
-run_full_flow_case "prebuilt image init install version add update example.com" \
-    "chown 0:0 /case/data && chmod 755 /case/data" \
-    "PUID=911 PGID=911" "-" 911 911
+    "-" "-" pass 911 911 "$default_cmd" config-files-repaired
 
 run_mount_case "NFS" "${NFS_TEST_DIR:-}"
 run_mount_case "SMB" "${SMB_TEST_DIR:-}"

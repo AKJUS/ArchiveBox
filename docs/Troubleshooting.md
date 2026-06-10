@@ -170,7 +170,7 @@ if you have problem with a particular nginx config.
 
 #### Docker Permissions issues
 
-Try Setting `PUID` & `PGID`: https://github.com/ArchiveBox/ArchiveBox/wiki/Configuration#puid--pgid
+Make sure the mounted data directory is writable by the user that owns it. For a new or root-owned Docker data directory, make sure it is writable by UID/GID `911:911`.
 
 Try using [`bindfs`](https://github.com/clecherbauer/docker-volume-bindfs) to work around issues by remapping permissions, for example to remap `uid:33 gid:33` on the host to `911:911` inside the container:
 `docker-compose.yml`:

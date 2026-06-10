@@ -358,7 +358,7 @@
         <article>
           <h3>Storage requirements</h3>
           <p>ArchiveBox can use roughly 1 GB to 50 GB per 1,000 snapshots depending on media, video, audio, and extractor settings. Tune <code>YTDLP_ENABLED</code> and <code>YTDLP_MAX_SIZE</code> for media-heavy collections.</p>
-          <p>Keep <code>index.sqlite3</code> on local storage or SSD when possible. Large <code>archive/</code> folders can live on NFS, SMB, FUSE, S3-backed, or HDD storage, but Docker and fileshare setups may need <code>PUID</code>, <code>PGID</code>, and root-squash adjustments. Avoid older filesystems like EXT3 or FAT for very large archives.</p>
+          <p>Keep <code>index.sqlite3</code> on local storage or SSD when possible. Large <code>archive/</code> folders can live on NFS, SMB, FUSE, S3-backed, or HDD storage, but Docker and fileshare setups may need ownership and root-squash adjustments. Avoid older filesystems like EXT3 or FAT for very large archives.</p>
           <a href="https://github.com/ArchiveBox/ArchiveBox/wiki/Usage#large-archives">Plan for large archives</a>
         </article>
       </div>
