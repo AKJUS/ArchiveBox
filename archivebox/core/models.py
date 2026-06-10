@@ -962,6 +962,19 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
             crawl = Crawl.objects.filter(pk=self.crawl_id).first()
             if crawl is None:
                 return
+            crawl_tag_names = crawl.current_tag_names()
+            if crawl_tag_names:
+                # Snapshots can be created by parser hook side-effect records,
+                # direct ORM creates, or legacy crawl URL expansion. Crawl tags
+                # are user-facing metadata on the whole import, so attach them
+                # at the Snapshot.save() boundary instead of relying on every
+                # caller to remember to duplicate this fanout logic.
+                tags_by_name = {tag.name: tag for tag in Tag.objects.filter(name__in=crawl_tag_names)}
+                missing_tags = [Tag(name=name) for name in crawl_tag_names if name not in tags_by_name]
+                if missing_tags:
+                    Tag.objects.bulk_create(missing_tags, ignore_conflicts=True)
+                    tags_by_name = {tag.name: tag for tag in Tag.objects.filter(name__in=crawl_tag_names)}
+                self.tags.add(*[tag.pk for name in crawl_tag_names if (tag := tags_by_name.get(name))])
             # Snapshot.save() normally appends newly created URLs to Crawl.urls
             # so legacy/direct crawls can keep their queue text in sync. For
             # internal-input crawls that would corrupt the original submitted
@@ -2752,15 +2765,18 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
                 )
                 rprint(f"[red]⚠️  Snapshot.from_json auto-created new crawl {crawl.id} for url={url}[/red]", file=sys.stderr)
 
-        # Parse tags (accept either a list ["tag1", "tag2"] or a comma-separated string "tag1,tag2")
+        # Parser hooks emit child Snapshot records through this generic
+        # dispatcher after crawling an internal import root. Those child rows
+        # must inherit crawl-level tags just like direct Crawl.urls snapshots;
+        # otherwise `archivebox add --tag ... < bookmarks.html` loses the tag
+        # unless the parser format also happened to provide its own tags.
         tags_raw = record.get("tags", "")
-        tag_list = []
+        tag_list = list(crawl.current_tag_names()) if crawl else []
         if isinstance(tags_raw, list):
-            tag_list = list(dict.fromkeys(tag.strip() for tag in tags_raw if tag.strip()))
+            tag_list.extend(tag.strip() for tag in tags_raw if tag.strip())
         elif tags_raw:
-            tag_list = list(
-                dict.fromkeys(tag.strip() for tag in re.split(config.TAG_SEPARATOR_PATTERN, tags_raw) if tag.strip()),
-            )
+            tag_list.extend(tag.strip() for tag in re.split(config.TAG_SEPARATOR_PATTERN, tags_raw) if tag.strip())
+        tag_list = list(dict.fromkeys(tag_list))
 
         # Check for existing snapshot with same URL in same crawl
         # (URLs can exist in multiple crawls, but should be unique within a crawl)

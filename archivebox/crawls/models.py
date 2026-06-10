@@ -1183,6 +1183,7 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
             if update_fields:
                 snapshot.save(update_fields=[*update_fields, "modified_at"])
             tag_names = {
+                *crawl_tag_names,
                 *self.parse_tag_names(
                     str(record.get("tags") or ""),
                     pattern=self._config_value(config, "TAG_SEPARATOR_PATTERN", r"[,]"),

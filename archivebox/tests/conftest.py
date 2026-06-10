@@ -65,7 +65,7 @@ def _assert_safe_runtime_paths(*, cwd: Path | None = None, env: dict[str, str] |
 
 
 def _test_source_pythonpath() -> str:
-    entries: list[str] = []
+    entries: list[str] = [str(REPO_ROOT.resolve(strict=False))]
     for repo_name in ("abxpkg", "abx-plugins", "abx-dl"):
         for repo_path in (WORKSPACE_ROOT / repo_name, REPO_ROOT / repo_name):
             if repo_path.exists():
