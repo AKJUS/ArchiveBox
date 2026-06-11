@@ -105,29 +105,70 @@ WORKDIR "$CODE_DIR"
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$TARGETVARIANT \
     --mount=type=cache,target=/root/.cache/uv,sharing=locked,id=uv-$TARGETARCH$TARGETVARIANT \
     --mount=type=bind,source=pyproject.toml,target=/app/pyproject.toml \
-    echo "[+] UV Installing ArchiveBox dependencies from pyproject.toml..." \
-    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "1";' > /etc/apt/apt.conf.d/99keep-cache \
-    && echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/99no-install-recommends \
-    && echo 'APT::Install-Suggests "0";' > /etc/apt/apt.conf.d/99no-install-suggests \
-    && rm -f /etc/apt/apt.conf.d/docker-clean \
-    && apt-get update -qq \
-    && apt-get install -qq -y --no-install-recommends \
-        build-essential gcc libldap2-dev libsasl2-dev libssl-dev \
-    && /usr/bin/uv venv --clear /venv --python "${PYTHON_VERSION}" \
-    && /usr/bin/uv pip install setuptools pip wheel \
-    && /usr/bin/uv sync \
-        --refresh \
-        --python-platform linux \
-        --no-dev \
-        --inexact \
-        --no-install-project \
-        --no-install-workspace \
-        --no-sources \
-    && (find /venv/lib/python3.*/site-packages -type f -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true) \
-    && rm -f /venv/bin/uv /venv/bin/uvx \
-    && apt-get purge -y build-essential gcc libldap2-dev libsasl2-dev libssl-dev \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    <<'EOF'
+echo "[+] UV Installing ArchiveBox dependencies from pyproject.toml..."
+echo 'Binary::apt::APT::Keep-Downloaded-Packages "1";' > /etc/apt/apt.conf.d/99keep-cache
+echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/99no-install-recommends
+echo 'APT::Install-Suggests "0";' > /etc/apt/apt.conf.d/99no-install-suggests
+rm -f /etc/apt/apt.conf.d/docker-clean
+apt-get update -qq
+apt-get install -qq -y --no-install-recommends \
+    build-essential gcc libldap2-dev libsasl2-dev libssl-dev
+/usr/bin/uv venv --clear /venv --python "${PYTHON_VERSION}"
+/usr/bin/uv pip install setuptools pip wheel
+
+mkdir -p /tmp/archivebox-uv-project
+/venv/bin/python - <<'PY'
+from pathlib import Path
+import json
+import re
+import urllib.request
+
+source = Path("/app/pyproject.toml")
+target = Path("/tmp/archivebox-uv-project/pyproject.toml")
+text = source.read_text()
+text = text.replace(
+    'environments = ["sys_platform == \'darwin\'", "sys_platform == \'linux\'"]',
+    'environments = ["sys_platform == \'linux\'"]',
+)
+
+# Docker builds need the just-published internal abx wheels immediately, but
+# PyPI simple can lag the version JSON endpoints by tens of minutes. Generate a
+# Docker-only dependency view from the version JSON so the published package
+# metadata stays normal while image builds remain resumable after a release.
+for package in ("abxpkg", "abx-plugins", "abx-dl"):
+    match = re.search(rf'"{re.escape(package)}>=(?P<version>[^"]+)"', text)
+    if not match:
+        continue
+    version = match.group("version")
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{package}/{version}/json", timeout=20) as response:
+        data = json.load(response)
+    wheel_url = next(url["url"] for url in data["urls"] if url["filename"].endswith(".whl"))
+    text = re.sub(
+        rf'"{re.escape(package)}>=[^"]+"',
+        f'"{package} @ {wheel_url}"',
+        text,
+        count=1,
+    )
+
+target.write_text(text)
+PY
+
+/usr/bin/uv sync \
+    --project /tmp/archivebox-uv-project \
+    --refresh \
+    --python-platform linux \
+    --no-dev \
+    --inexact \
+    --no-install-project \
+    --no-install-workspace \
+    --no-sources
+(find /venv/lib/python3.*/site-packages -type f -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true)
+rm -f /venv/bin/uv /venv/bin/uvx
+apt-get purge -y build-essential gcc libldap2-dev libsasl2-dev libssl-dev
+apt-get autoremove -y
+rm -rf /var/lib/apt/lists/*
+EOF
 
 COPY --chown=root:root --chmod=755 "." "$CODE_DIR/"
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked,id=uv-$TARGETARCH$TARGETVARIANT \

@@ -47,7 +47,6 @@ jobs:
       - name: Wait for released ArchiveBox deps on PyPI
         run: |
           python - <<'PY'
-          import json
           import re
           import sys
           import time
@@ -67,9 +66,12 @@ jobs:
           missing = required.copy()
           while missing and time.monotonic() < deadline:
               for name, version in list(missing.items()):
-                  with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/json", timeout=20) as resp:
-                      releases = json.load(resp)["releases"]
-                  if version in releases:
+                  try:
+                      with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=20):
+                          available = True
+                  except Exception:
+                      available = False
+                  if available:
                       print(f"{name} {version} is available on PyPI")
                       missing.pop(name)
                   else:
@@ -82,8 +84,49 @@ jobs:
               sys.exit(1)
           PY
 
+      - name: Prepare released dependency sync project
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import urllib.request
+
+          source = Path("pyproject.toml")
+          target_dir = Path(".ci-uv-project")
+          target_dir.mkdir(exist_ok=True)
+          text = source.read_text()
+          text = text.replace(
+              'environments = ["sys_platform == \'darwin\'", "sys_platform == \'linux\'"]',
+              'environments = ["sys_platform == \'linux\'"]',
+          )
+
+          # CI runs immediately after publishing internal abx packages. PyPI's
+          # simple index can lag the version JSON endpoint, so sync against the
+          # exact wheel URLs from the version endpoint while leaving package
+          # metadata in pyproject.toml unchanged for the actual build.
+          for package in ("abxpkg", "abx-plugins", "abx-dl"):
+              match = re.search(rf'"{re.escape(package)}>=(?P<version>[^"]+)"', text)
+              if not match:
+                  continue
+              version = match.group("version")
+              with urllib.request.urlopen(f"https://pypi.org/pypi/{package}/{version}/json", timeout=20) as response:
+                  data = json.load(response)
+              wheel_url = next(url["url"] for url in data["urls"] if url["filename"].endswith(".whl"))
+              text = re.sub(
+                  rf'"{re.escape(package)}>=[^"]+"',
+                  f'"{package} @ {wheel_url}"',
+                  text,
+                  count=1,
+              )
+
+          (target_dir / "pyproject.toml").write_text(text)
+          PY
+
       - name: UV install archivebox dev + run sub-dependencies
-        run: uv sync --all-extras --no-install-project --no-install-workspace --no-sources --no-cache
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+        run: uv sync --project .ci-uv-project --all-extras --no-install-project --no-install-workspace --no-sources --no-cache
 
       - name: UV build archivebox and archivebox/pkgs/* packages
         run: |
@@ -97,13 +140,19 @@ jobs:
           password: ${{ secrets.PYPI_PAT_SECRET }}
 
       - name: UV install archivebox and archivebox/pkgs/* locally for tests
-        run: uv sync --all-extras --no-sources --no-cache
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+        run: |
+          uv sync --project .ci-uv-project --all-extras --no-install-project --no-install-workspace --no-sources --no-cache
+          uv pip install --python .venv/bin/python --no-deps dist/archivebox-*.whl
 
       - name: UV run archivebox init + archivebox version
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
         run: |
           mkdir -p data && cd data
-          uv run --no-sync --no-sources archivebox init \
-          && uv run --no-sync --no-sources archivebox version
+          uv run --project ../.ci-uv-project --no-sync --no-sources archivebox init \
+          && uv run --project ../.ci-uv-project --no-sync --no-sources archivebox version
           # && uv run archivebox add 'https://example.com' \
           # && uv run archivebox status \
           # || (echo "UV Failed to run archivebox!" && exit 1)

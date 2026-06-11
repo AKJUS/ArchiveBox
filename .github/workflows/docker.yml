@@ -69,9 +69,12 @@ jobs:
           missing = required.copy()
           while missing and time.monotonic() < deadline:
               for name, version in list(missing.items()):
-                  with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/json", timeout=20) as resp:
-                      releases = json.load(resp)["releases"]
-                  if version in releases:
+                  try:
+                      with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=20):
+                          available = True
+                  except Exception:
+                      available = False
+                  if available:
                       print(f"{name} {version} is available on PyPI")
                       missing.pop(name)
                   else:
