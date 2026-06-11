@@ -121,14 +121,21 @@ def snapshot_filter_kwargs(args: SnapshotFilterCommandSchema, *, default_filter_
 @router.post("/add", response=CLICommandResponseSchema, summary="archivebox add [args] [urls]")
 def cli_add(request: HttpRequest, args: AddCommandSchema):
     from archivebox.cli.archivebox_add import add
+    from archivebox.misc.util import validate_url
 
     config_overrides: dict[str, object] = {}
     if args.only_new is not None:
         config_overrides["ONLY_NEW"] = bool(args.only_new)
     if args.update or args.overwrite:
         config_overrides["ONLY_NEW"] = False
+    submitted_urls: str | list[str] = args.urls
+    if len(args.urls) == 1:
+        try:
+            validate_url(args.urls[0])
+        except ValueError:
+            submitted_urls = args.urls[0]
     crawl, snapshots = add(
-        urls=args.urls,
+        urls=submitted_urls,
         snapshot_ids=args.snapshot_ids,
         tag=args.tag,
         depth=args.depth,

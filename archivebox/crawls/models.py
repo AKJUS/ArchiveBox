@@ -701,7 +701,14 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
                 continue
             try:
                 entry = json.loads(stripped)
-                entries.append((raw_line.rstrip(), str(entry.get("url", "") or "").strip()))
+                # Crawl.urls accepts plain lines and JSONL URL records. Other
+                # valid JSON values, e.g. a quoted string from hostile input,
+                # are not records and must stay inert text instead of raising
+                # during later Snapshot.save() bookkeeping.
+                if isinstance(entry, dict):
+                    entries.append((raw_line.rstrip(), str(entry.get("url", "") or "").strip()))
+                else:
+                    entries.append((raw_line.rstrip(), stripped))
             except json.JSONDecodeError:
                 entries.append((raw_line.rstrip(), stripped))
         return entries

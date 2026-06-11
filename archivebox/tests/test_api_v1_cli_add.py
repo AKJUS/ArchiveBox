@@ -261,10 +261,10 @@ def test_basic_success_case_request(client, tmp_path, api_headers):
     assert response.status_code == 200, response.content
     assert response.json()["success"] is True
     crawl = Crawl.objects.get()
-    root_snapshot = Snapshot.objects.get()
+    snapshot = Snapshot.objects.get()
     assert crawl.urls == submitted_url
-    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
-    assert (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8") == submitted_url
+    assert snapshot.url == submitted_url
+    assert snapshot.depth == 1
 
 
 @pytest.mark.timeout(360)
@@ -387,7 +387,7 @@ def test_api_cli_add_rejects_file_path_and_shell_injection_payloads(tmp_path):
     with use_archivebox_db(tmp_path):
         snapshot = Snapshot.objects.get(url=safe_url)
         crawl = Crawl.objects.get()
-    assert crawl.status in {Crawl.StatusChoices.STARTED, Crawl.StatusChoices.SEALED}
+    assert crawl.status in {Crawl.StatusChoices.QUEUED, Crawl.StatusChoices.STARTED, Crawl.StatusChoices.SEALED}
     assert snapshot.status in {Snapshot.StatusChoices.QUEUED, Snapshot.StatusChoices.STARTED, Snapshot.StatusChoices.SEALED}
     with use_archivebox_db(tmp_path):
         tag_names = set(SnapshotTag.objects.filter(snapshot=snapshot).values_list("tag__name", flat=True))

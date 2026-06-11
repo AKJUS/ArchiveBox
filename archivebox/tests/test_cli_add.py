@@ -247,14 +247,12 @@ def test_add_single_url_records_url_in_crawl(initialized_archive):
 
     with use_archivebox_db(initialized_archive):
         crawl = Crawl.objects.get()
-        root_snapshot = Snapshot.objects.get()
-        root_input = (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8")
+        snapshot = Snapshot.objects.get()
 
     assert crawl.urls == "https://example.com"
     assert crawl.get_urls_list() == ["https://example.com"]
-    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
-    assert root_snapshot.depth == 0
-    assert root_input == "https://example.com"
+    assert snapshot.url == "https://example.com"
+    assert snapshot.depth == 1
 
 
 @pytest.mark.timeout(360)
@@ -462,8 +460,8 @@ def test_run_rejects_depth_two_file_url_snapshot_injected_directly_with_sql(init
     assert file_results == []
 
 
-def test_add_bg_queues_internal_input_root_snapshot(initialized_archive):
-    """Background add stores submitted input on an internal root snapshot for the runner."""
+def test_add_bg_queues_direct_url_snapshot(initialized_archive):
+    """Background add queues explicit URL arguments as real URL snapshots."""
     env = cli_env(disable_extractors=True)
     result = run_archivebox_cmd(
         ["add", "--bg", "--depth=0", "https://example.com"],
@@ -475,15 +473,13 @@ def test_add_bg_queues_internal_input_root_snapshot(initialized_archive):
 
     with use_archivebox_db(initialized_archive):
         crawl = Crawl.objects.get()
-        root_snapshot = Snapshot.objects.get()
-        root_input = (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8")
+        snapshot = Snapshot.objects.get()
 
     assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.retry_at is not None
     assert crawl.urls == "https://example.com"
-    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
-    assert root_snapshot.depth == 0
-    assert root_input == "https://example.com"
+    assert snapshot.url == "https://example.com"
+    assert snapshot.depth == 1
 
 
 @pytest.mark.timeout(180)
@@ -528,15 +524,12 @@ def test_add_tagged_single_url_seals_without_duplicate_snapshot_tags(initialized
 
     assert crawl.status == Crawl.StatusChoices.SEALED
     assert [(snapshot.url, snapshot.depth, snapshot.status) for snapshot in snapshots] == [
-        (Snapshot.INTERNAL_INPUT_URL, 0, Snapshot.StatusChoices.SEALED),
         ("https://example.com/?archivebox-tagged-single-url=1", 1, Snapshot.StatusChoices.SEALED),
     ]
     assert tag_counts == {
-        Snapshot.INTERNAL_INPUT_URL: 1,
         "https://example.com/?archivebox-tagged-single-url=1": 1,
     }
     by_url_plugin = {(url, plugin): status for url, plugin, status, _output in results}
-    assert by_url_plugin[(Snapshot.INTERNAL_INPUT_URL, "parse_txt_urls")] == "succeeded"
     assert by_url_plugin[("https://example.com/?archivebox-tagged-single-url=1", "title")] == "succeeded"
     unexpected_failures = [(url, plugin, status, output) for url, plugin, status, output in results if status == "failed"]
     assert not unexpected_failures
@@ -561,12 +554,12 @@ def test_add_index_only_rejected_urls_leave_empty_crawl_for_runner_to_seal(initi
 
     with use_archivebox_db(initialized_archive):
         crawl = Crawl.objects.get()
-        root_snapshot = Snapshot.objects.get()
+        snapshot_urls = set(Snapshot.objects.values_list("url", flat=True))
 
     assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.retry_at is None
     assert crawl.urls == "https://example.com"
-    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert snapshot_urls == set()
 
     run_queued_crawls(initialized_archive, env)
 
@@ -577,7 +570,7 @@ def test_add_index_only_rejected_urls_leave_empty_crawl_for_runner_to_seal(initi
     assert crawl.status == Crawl.StatusChoices.SEALED
     assert crawl.retry_at is None
     assert crawl.urls == "https://example.com"
-    assert snapshot_urls == {Snapshot.INTERNAL_INPUT_URL}
+    assert snapshot_urls == set()
 
 
 def test_add_index_only_rejects_archivebox_internal_urls(initialized_archive):
@@ -604,7 +597,7 @@ def test_add_index_only_rejects_archivebox_internal_urls(initialized_archive):
     assert crawl.urls == "\n".join(internal_urls)
     assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.retry_at is None
-    assert snapshot_urls == {Snapshot.INTERNAL_INPUT_URL}
+    assert snapshot_urls == set()
 
 
 def test_add_creates_crawl_record(initialized_archive):
@@ -622,8 +615,8 @@ def test_add_creates_crawl_record(initialized_archive):
     assert crawl_count == 1
 
 
-def test_add_creates_internal_input_file(initialized_archive):
-    """Test that add stores submitted text under the root snapshot staticfile output."""
+def test_add_direct_url_creates_snapshot_without_internal_input_file(initialized_archive):
+    """Test that explicit URL args queue real snapshots without stdin import files."""
     env = cli_env(disable_extractors=True)
     run_archivebox_cmd(
         ["add", "--index-only", "--depth=0", "https://example.com"],
@@ -632,9 +625,10 @@ def test_add_creates_internal_input_file(initialized_archive):
     )
 
     with use_archivebox_db(initialized_archive):
-        root_snapshot = Snapshot.objects.get()
-        source_content = (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8")
-    assert source_content == "https://example.com"
+        snapshot = Snapshot.objects.get()
+        assert snapshot.url == "https://example.com"
+        assert snapshot.depth == 1
+        assert not (snapshot.output_dir / "staticfile" / "stdin.txt").exists()
 
 
 def test_add_multiple_urls_single_command(initialized_archive):
@@ -650,11 +644,10 @@ def test_add_multiple_urls_single_command(initialized_archive):
 
     with use_archivebox_db(initialized_archive):
         crawl = Crawl.objects.get()
-        root_snapshot = Snapshot.objects.get()
-        root_input = (root_snapshot.output_dir / "staticfile" / "stdin.txt").read_text(encoding="utf-8")
+        snapshots = list(Snapshot.objects.order_by("url").values_list("url", "depth"))
 
     assert crawl.urls == "https://example.com\nhttps://example.org"
-    assert root_input == "https://example.com\nhttps://example.org"
+    assert snapshots == [("https://example.com", 1), ("https://example.org", 1)]
 
 
 def test_add_rejects_file_path_argument(initialized_archive):
@@ -807,14 +800,11 @@ def test_add_duplicate_url_creates_separate_crawls(initialized_archive):
 
     with use_archivebox_db(initialized_archive):
         crawl_count = Crawl.objects.count()
-        root_inputs = [
-            snapshot.output_dir.joinpath("staticfile", "stdin.txt").read_text(encoding="utf-8")
-            for snapshot in Snapshot.objects.order_by("created_at")
-        ]
+        snapshots = list(Snapshot.objects.order_by("created_at").values_list("url", "depth"))
 
     # Each add creates a new crawl with its own queued work.
     assert crawl_count == 2
-    assert root_inputs == ["https://example.com", "https://example.com"]
+    assert snapshots == [("https://example.com", 1), ("https://example.com", 1)]
 
 
 def test_add_with_overwrite_flag(initialized_archive):
@@ -929,16 +919,17 @@ def test_add_index_only_queues_crawl_without_starting_runner(initialized_archive
 
     with use_archivebox_db(initialized_archive):
         crawl = Crawl.objects.get()
-        root_snapshot = Snapshot.objects.get()
+        snapshot = Snapshot.objects.get()
 
     assert crawl.status == Crawl.StatusChoices.QUEUED
     assert crawl.retry_at is None
     assert crawl.urls == "https://example.com"
-    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert snapshot.url == "https://example.com"
+    assert snapshot.depth == 1
 
 
-def test_add_index_only_creates_only_internal_root_snapshot(initialized_archive):
-    """Test that index-only add creates the input root but not parsed child snapshots."""
+def test_add_index_only_creates_direct_url_snapshot(initialized_archive):
+    """Test that index-only add queues explicit URL args as real URL snapshots."""
     env = cli_env(disable_extractors=True)
     run_archivebox_cmd(
         ["add", "--index-only", "--depth=0", "https://example.com"],
@@ -948,10 +939,11 @@ def test_add_index_only_creates_only_internal_root_snapshot(initialized_archive)
 
     with use_archivebox_db(initialized_archive):
         crawl = Crawl.objects.get()
-        root_snapshot = Snapshot.objects.get()
+        snapshot = Snapshot.objects.get()
 
     assert crawl.urls == "https://example.com"
-    assert root_snapshot.url == Snapshot.INTERNAL_INPUT_URL
+    assert snapshot.url == "https://example.com"
+    assert snapshot.depth == 1
 
 
 def test_snapshot_create_sets_snapshot_timestamp(initialized_archive):
@@ -1188,7 +1180,6 @@ def test_cli_recursive_crawl_processes_discovered_html_urls(initialized_archive,
     assert crawl_config["CRAWL_MAX_URLS"] == 2
     assert crawl_config["CRAWL_MAX_SIZE"] == 50 * 1024 * 1024
     assert crawl_config.get("SNAPSHOT_MAX_SIZE", 0) == 0
-    assert (Snapshot.INTERNAL_INPUT_URL, 0, "sealed") in snapshots
     assert (root_url, 1, "sealed") in snapshots
     assert any(url == child_url and depth == 2 and status == "sealed" for url, depth, status in snapshots)
 

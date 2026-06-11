@@ -1038,6 +1038,15 @@ class CrawlRunner:
             snapshot_selected_plugins = (
                 self.selected_plugins if self.selected_plugins_from_args else (snapshot_config_plugins or self.selected_plugins)
             )
+
+            def queued_plugins_selected_by_config(queued_plugins: list[str]) -> list[str]:
+                if not snapshot_selected_plugins:
+                    return queued_plugins
+                expanded_selected_plugins = set(
+                    filter_plugins(self.plugins, snapshot_selected_plugins, include_providers=True).keys(),
+                )
+                return [plugin for plugin in queued_plugins if plugin in expanded_selected_plugins]
+
             selected_hooks_by_plugin = None
             if snapshot["status"] == "started":
                 _reset_count, running_count = await sync_to_async(snapshot["_snapshot"].reset_abandoned_results, thread_sensitive=True)()
@@ -1062,7 +1071,7 @@ class CrawlRunner:
                     )(snapshot["id"])
                     if queued_plugins:
                         if snapshot_selected_plugins:
-                            queued_plugins = [plugin for plugin in queued_plugins if plugin in snapshot_selected_plugins]
+                            queued_plugins = queued_plugins_selected_by_config(queued_plugins)
                             selected_hooks_by_plugin = {
                                 plugin: hooks for plugin, hooks in (selected_hooks_by_plugin or {}).items() if plugin in queued_plugins
                             }
@@ -1074,7 +1083,7 @@ class CrawlRunner:
                 )(snapshot["id"])
                 if queued_plugins:
                     if snapshot_selected_plugins:
-                        queued_plugins = [plugin for plugin in queued_plugins if plugin in snapshot_selected_plugins]
+                        queued_plugins = queued_plugins_selected_by_config(queued_plugins)
                         selected_hooks_by_plugin = {
                             plugin: hooks for plugin, hooks in (selected_hooks_by_plugin or {}).items() if plugin in queued_plugins
                         }
@@ -1103,7 +1112,7 @@ class CrawlRunner:
                     thread_sensitive=True,
                 )(snapshot["id"])
                 if snapshot_selected_plugins and remaining_queued_plugins:
-                    remaining_queued_plugins = [plugin for plugin in remaining_queued_plugins if plugin in snapshot_selected_plugins]
+                    remaining_queued_plugins = queued_plugins_selected_by_config(remaining_queued_plugins)
                 if not remaining_queued_plugins:
                     await sync_to_async(run_snapshot_maintenance, thread_sensitive=True)(snapshot_id, output_dir=output_dir)
                     return
