@@ -78,6 +78,20 @@ def _render_binary_abspath(abspath: str):
     return Text(abspath, style="green")
 
 
+def _binary_record_matches_runtime(installed, lib_dir: Path) -> bool:
+    if not installed or not installed.is_valid:
+        return False
+    try:
+        abspath = Path(installed.abspath).expanduser().resolve(strict=False)
+        if not abspath.exists():
+            return False
+        if installed.binprovider not in {"", "env", "apt", "brew"}:
+            abspath.relative_to(lib_dir)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 @enforce_types
 def version(
     quiet: bool = False,
@@ -211,7 +225,7 @@ def version(
                     continue
 
                 installed = db_binaries.get(name)
-                if installed and installed.is_valid:
+                if _binary_record_matches_runtime(installed, config.LIB_DIR):
                     display_name = Path(name).expanduser().name if ("/" in name or name.startswith("~")) else name
                     display_path = (
                         _format_binary_abspath(
