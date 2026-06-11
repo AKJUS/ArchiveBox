@@ -184,14 +184,16 @@ pypi_has_release() {
     local version="$2"
 
     uv run python - "$package" "$version" <<'PY'
-import json
 import sys
+import urllib.error
 import urllib.request
 
 package, version = sys.argv[1:]
-with urllib.request.urlopen(f"https://pypi.org/pypi/{package}/json", timeout=10) as response:
-    data = json.load(response)
-raise SystemExit(0 if version in data.get("releases", {}) else 1)
+try:
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{package}/{version}/json", timeout=10):
+        raise SystemExit(0)
+except urllib.error.HTTPError as err:
+    raise SystemExit(1 if err.code == 404 else 2)
 PY
 }
 
