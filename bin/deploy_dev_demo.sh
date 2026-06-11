@@ -82,7 +82,7 @@ if "${COMPOSE[@]}" config --services | grep -qx argo; then
 fi
 
 echo "[+] ArchiveBox version:"
-VERSION_OUTPUT="$("${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" archivebox version)"
+VERSION_OUTPUT="$("${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" archivebox version 2>&1 || true)"
 printf '%s\n' "$VERSION_OUTPUT" | sed -n '1,40p'
 if [[ -n "$DEPLOY_EXPECT_VERSION" ]] && ! grep -q "ArchiveBox v${DEPLOY_EXPECT_VERSION}" <<<"$VERSION_OUTPUT"; then
     echo "[X] Deployed container is not running ArchiveBox ${DEPLOY_EXPECT_VERSION}" >&2
