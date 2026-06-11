@@ -212,27 +212,6 @@ wait_for_pypi() {
         sleep 10
     done
 
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    uv --no-cache venv "${tmpdir}/venv" --python 3.13 >/dev/null
-    attempts=0
-    while true; do
-        set +e
-        uv --no-cache pip install --dry-run --no-deps --python "${tmpdir}/venv/bin/python" "${package}==${version}" >/dev/null
-        status="$?"
-        set -e
-        if [[ "$status" -eq 0 ]]; then
-            break
-        fi
-        attempts=$((attempts + 1))
-        if [[ "$attempts" -ge 30 ]]; then
-            rm -rf "$tmpdir"
-            echo "[X] Timed out waiting for uv to resolve ${package}==${version} from PyPI" >&2
-            exit 1
-        fi
-        sleep 10
-    done
-    rm -rf "$tmpdir"
 }
 
 release_python_repo() {
