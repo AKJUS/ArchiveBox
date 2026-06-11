@@ -11,6 +11,7 @@ DEPLOY_PORT="${DEPLOY_PORT:-44}"
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/archivebox.demo}"
 DEPLOY_SERVICE="${DEPLOY_SERVICE:-archivebox}"
 DEPLOY_IMAGE="${DEPLOY_IMAGE:-archivebox/archivebox:dev}"
+DEPLOY_EXPECT_VERSION="${DEPLOY_EXPECT_VERSION:-}"
 
 VERSION="$(grep '^version = ' pyproject.toml | awk -F'"' '{print $2}')"
 GIT_SHA="sha-$(git rev-parse --short HEAD)"
@@ -40,7 +41,7 @@ if [[ "${SKIP_DEMO:-0}" == "1" ]]; then
 fi
 
 echo "[+] Deploying ${DEPLOY_IMAGE} on ${DEPLOY_HOST}:${DEPLOY_PATH}..."
-ssh -p "$DEPLOY_PORT" "$DEPLOY_HOST" DEPLOY_PATH="$DEPLOY_PATH" DEPLOY_SERVICE="$DEPLOY_SERVICE" DEPLOY_IMAGE="$DEPLOY_IMAGE" 'bash -s' <<'REMOTE'
+ssh -p "$DEPLOY_PORT" "$DEPLOY_HOST" DEPLOY_PATH="$DEPLOY_PATH" DEPLOY_SERVICE="$DEPLOY_SERVICE" DEPLOY_IMAGE="$DEPLOY_IMAGE" DEPLOY_EXPECT_VERSION="$DEPLOY_EXPECT_VERSION" 'bash -s' <<'REMOTE'
 set -Eeuo pipefail
 cd "$DEPLOY_PATH"
 
@@ -81,7 +82,12 @@ if "${COMPOSE[@]}" config --services | grep -qx argo; then
 fi
 
 echo "[+] ArchiveBox version:"
-"${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" archivebox version | sed -n '1,40p'
+VERSION_OUTPUT="$("${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" archivebox version)"
+printf '%s\n' "$VERSION_OUTPUT" | sed -n '1,40p'
+if [[ -n "$DEPLOY_EXPECT_VERSION" ]] && ! grep -q "ArchiveBox v${DEPLOY_EXPECT_VERSION}" <<<"$VERSION_OUTPUT"; then
+    echo "[X] Deployed container is not running ArchiveBox ${DEPLOY_EXPECT_VERSION}" >&2
+    exit 1
+fi
 
 echo "[+] Health check:"
 "${COMPOSE[@]}" exec -T "$DEPLOY_SERVICE" curl -fsS --max-time 10 --connect-timeout 2 -H 'Host: admin.archivebox.io' http://127.0.0.1:8000/health/

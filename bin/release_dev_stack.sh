@@ -256,7 +256,7 @@ commit_push_publish "$ARCHIVEBOX_REPO" dev archivebox "$ARCHIVEBOX_VERSION"
 (
     cd "$ARCHIVEBOX_REPO"
     ./bin/release_docker.sh dev "$ARCHIVEBOX_VERSION" "sha-$(git rev-parse --short HEAD)"
-    SKIP_DOCKER=1 ./bin/deploy_dev_demo.sh
+    DEPLOY_IMAGE="${DOCKER_IMAGE_REPOS%% *}:dev" DEPLOY_EXPECT_VERSION="$ARCHIVEBOX_VERSION" SKIP_DOCKER=1 ./bin/deploy_dev_demo.sh
 )
 
 echo "[√] Released abxpkg ${ABXPKG_VERSION}, abx-plugins/abx-dl ${ABX_SHARED_VERSION}, archivebox ${ARCHIVEBOX_VERSION}"
