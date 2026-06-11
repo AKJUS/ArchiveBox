@@ -1692,7 +1692,14 @@ def run_due_snapshot(snapshot, *, lock_seconds: int, interactive_interrupts: boo
     run_crawl(
         str(snapshot.crawl_id),
         snapshot_ids=[str(snapshot.id)],
-        selected_plugins=queued_plugins_for_snapshot(str(snapshot.id)),
+        # Do not pass this snapshot's queued plugin set as a crawl-wide runner
+        # filter. Internal import roots intentionally queue only parser hooks,
+        # but any child snapshots discovered from that root must still run the
+        # normal crawl plugin surface. run_snapshot() narrows the current
+        # snapshot from its queued ArchiveResult rows immediately before
+        # execution; leaving the runner unconstrained keeps that narrowing
+        # local to the one snapshot that owns those rows.
+        selected_plugins=None,
         process_discovered_snapshots_inline=True,
         interactive_interrupts=interactive_interrupts,
         selected_plugins_are_explicit=False,
