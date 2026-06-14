@@ -2,7 +2,7 @@
 
 # Multistage ArchiveBox Dockerfile that consumes the abx-dl runtime image.
 # abx-dl owns Python, Node, Chromium, and downloader plugin runtimes.
-# ArchiveBox owns ripgrep, sonic, supervisor, Django, and the app runtime.
+# ArchiveBox owns sonic, supervisor, Django, and the app runtime.
 # Build abx-dl first, then point this file at it:
 #   docker buildx build ../abx-dl -f ../abx-dl/Dockerfile \
 #       --build-context abxbus=../abxbus \
@@ -92,12 +92,6 @@ RUN cp /VERSION.txt /ABX-DL-VERSION.txt \
     && which node && node --version \
     && which uv && uv self version \
     ) | tee -a /VERSION.txt
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$TARGETVARIANT \
-    echo "[+] APT Installing ArchiveBox search dependency ripgrep for $TARGETPLATFORM..." \
-    && apt-get update -qq \
-    && apt-get install -qq -y --no-install-recommends ripgrep \
-    && rm -rf /var/lib/apt/lists/*
 
 FROM archivebox-runtime-base AS archivebox-builder
 
@@ -255,7 +249,13 @@ RUN --mount=type=cache,target=/tmp/abxpkg-cache,sharing=locked,mode=1777 \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups test -w "$CONFIG_DIR" \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups test -w "$LIB_DIR" \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups env HOME=/tmp/abxpkg-cache archivebox version 2>&1 | tee -a /VERSION.txt \
+    && python3 -c 'from abx_dl.models import discover_plugins; [print(f"export {plugin.enabled_key}=True") for plugin in discover_plugins(runtime="archivebox").values() if plugin.enabled_key in plugin.config.properties]' > /tmp/archivebox-enable-plugins.env \
+    && sort /tmp/archivebox-enable-plugins.env | tee -a /VERSION.txt \
+    && source /tmp/archivebox-enable-plugins.env \
+    && python3 -c 'from abx_dl.config import get_derived_config, get_initial_env, get_required_binary_requests; from abx_dl.models import discover_plugins; user_env = get_initial_env(); derived_env = get_derived_config(user_env); seen = set(); names = []; [names.append(str(record["name"])) for plugin in discover_plugins(runtime="archivebox").values() for record in get_required_binary_requests(plugin, plugin.config.required_binaries, overrides=user_env, derived_overrides=derived_env, run_output_dir=None) if not (str(record["name"]) in seen or seen.add(str(record["name"])))] ; print(",".join(names))' > /tmp/archivebox-required-binaries.txt \
+    && cat /tmp/archivebox-required-binaries.txt | tee -a /VERSION.txt \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups env HOME=/tmp/abxpkg-cache ABXPKG_NO_CACHE=True ABXPKG_TMP_CACHE_DIR=/tmp/abxpkg-cache archivebox install \
+    && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups env HOME=/tmp/abxpkg-cache archivebox version --binaries "$(cat /tmp/archivebox-required-binaries.txt)" 2>&1 | tee -a /VERSION.txt \
     && rm -rf /root/.cache /var/cache/apt/* /var/lib/apt/lists/*
 
 RUN (echo -e "\n\n[√] Finished ArchiveBox multistage Docker build successfully." \
