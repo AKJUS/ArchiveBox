@@ -2,6 +2,8 @@ import pytest
 import json
 import time
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 from .conftest import (
     api_client_request,
@@ -264,6 +266,66 @@ def test_basic_success_case_request(client, tmp_path, api_headers):
     crawl = Crawl.objects.get()
     assert json.loads(crawl.urls) == {"type": "CrawlSeed", "url": submitted_url, "depth": 0}
     assert Snapshot.objects.count() == 0
+
+
+@pytest.mark.timeout(180)
+def test_api_cli_add_concurrent_first_time_default_persona_creation(tmp_path):
+    """Concurrent live API add requests should share one first-created Default persona."""
+    init_archive(tmp_path)
+    with use_archivebox_db(tmp_path):
+        from archivebox.personas.models import Persona
+
+        Persona.objects.filter(name="Default").delete()
+        assert Persona.objects.filter(name="Default").count() == 0
+
+    port = get_free_port()
+    env = cli_env(port=port, server=True, USE_COLOR="False", SHOW_PROGRESS="False")
+    api_token = create_admin_and_token(tmp_path)
+    submitted_urls = [f"https://example.com/api-cli-add-concurrent-persona-{idx}" for idx in range(4)]
+    start = Event()
+
+    def post_add(url: str):
+        start.wait(timeout=10)
+        return live_api_request(
+            port,
+            "post",
+            "/api/v1/cli/add",
+            api_token=api_token,
+            timeout=60,
+            json={
+                "urls": [url],
+                "depth": 0,
+                "parser": "url_list",
+                "plugins": "__archivebox_test_no_plugins__",
+                "index_only": True,
+            },
+        )
+
+    try:
+        start_archivebox_server(tmp_path, env=env, port=port)
+        with ThreadPoolExecutor(max_workers=len(submitted_urls)) as pool:
+            futures = [pool.submit(post_add, url) for url in submitted_urls]
+            start.set()
+            responses = [future.result(timeout=75) for future in futures]
+    finally:
+        stop_server(tmp_path)
+
+    assert [response.status_code for response in responses] == [200] * len(responses), [response.text[:500] for response in responses]
+    bodies = [response.json() for response in responses]
+    assert all(body["success"] is True for body in bodies)
+    assert {body["result"]["queued_urls"][0] for body in bodies} == set(submitted_urls)
+
+    with use_archivebox_db(tmp_path):
+        from archivebox.personas.models import Persona
+
+        assert Persona.objects.filter(name="Default").count() == 1
+        crawls = list(Crawl.objects.order_by("urls").values_list("urls", flat=True))
+        assert Snapshot.objects.count() == 0
+
+    expected_crawl_sources = sorted(
+        json.dumps({"type": "CrawlSeed", "url": url, "depth": 0}, separators=(",", ":")) for url in submitted_urls
+    )
+    assert crawls == expected_crawl_sources
 
 
 @pytest.mark.timeout(360)

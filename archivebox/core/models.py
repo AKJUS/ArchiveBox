@@ -37,6 +37,7 @@ from archivebox.misc.util import (
     ts_to_date_str,
     urlencode,
     htmlencode,
+    sanitize_html_text,
     urldecode,
     validate_url,
 )
@@ -93,6 +94,12 @@ class Tag(ModelWithUUID):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "name" in update_fields:
+            self.name = sanitize_html_text(self.name).strip()
+        super().save(*args, **kwargs)
 
     @property
     def slug(self) -> str:
@@ -947,6 +954,8 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
 
         if self._state.adding or update_fields is None or "title" in update_fields:
             self.title = self._normalize_title_candidate(self.title, snapshot_url=self.url or "") or None
+        if self._state.adding or update_fields is None or "notes" in update_fields:
+            self.notes = sanitize_html_text(self.notes)
 
         # Migrate filesystem if needed (happens automatically on save)
         existing_snapshot = self.pk and not self._state.adding
@@ -2318,7 +2327,7 @@ class Snapshot(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelW
 
     @staticmethod
     def _normalize_title_candidate(candidate: str | None, *, snapshot_url: str) -> str:
-        title = " ".join(line.strip() for line in str(candidate or "").splitlines() if line.strip()).strip()
+        title = " ".join(line.strip() for line in sanitize_html_text(candidate).splitlines() if line.strip()).strip()
         if not title:
             return ""
         if title.lower() in {"pending...", "no title found", "unable to detect page title"}:

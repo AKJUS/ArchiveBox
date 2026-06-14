@@ -1712,9 +1712,21 @@ def run_due_snapshot(snapshot, *, lock_seconds: int, interactive_interrupts: boo
             )
         finally:
             # Targeted plugin rows can complete while the Snapshot remains
-            # paused. Put retry_at back at MAX so the orchestrator leaves the
-            # paused lifecycle alone until an explicit resume transition.
-            snapshot.restore_paused_scheduler_marker()
+            # paused. Put retry_at back at MAX only after the queued rows are
+            # gone; if a hook was interrupted before projection, keep the
+            # paused row due so the next runner can retry that targeted work
+            # without a user-visible resume transition.
+            if queued_plugins_for_snapshot(str(snapshot.id)):
+                now = timezone.now()
+                type(snapshot).objects.filter(
+                    pk=snapshot.pk,
+                    status=snapshot.StatusChoices.PAUSED,
+                ).update(
+                    retry_at=now,
+                    modified_at=now,
+                )
+            else:
+                snapshot.restore_paused_scheduler_marker()
         return True
     if snapshot.status == Snapshot.StatusChoices.SEALED:
         if not Snapshot.claim_for_worker(snapshot, lock_seconds=lock_seconds):
@@ -1756,6 +1768,14 @@ def run_due_snapshot(snapshot, *, lock_seconds: int, interactive_interrupts: boo
                         status=snapshot.StatusChoices.SEALED,
                     ).update(
                         retry_at=None,
+                        modified_at=timezone.now(),
+                    )
+                else:
+                    type(snapshot).objects.filter(
+                        pk=snapshot.pk,
+                        status=snapshot.StatusChoices.SEALED,
+                    ).update(
+                        retry_at=timezone.now(),
                         modified_at=timezone.now(),
                     )
             return True

@@ -12,6 +12,7 @@ from django.http import HttpRequest
 from django.urls import reverse
 
 from archivebox.config.common import get_config
+from archivebox.misc.util import sanitize_html_text
 from archivebox.core.routes_util import build_snapshot_url, build_web_url
 from archivebox.core.models import Snapshot, SnapshotTag, Tag
 
@@ -33,7 +34,7 @@ TAG_HAS_SNAPSHOTS_CHOICES = (
 
 
 def normalize_tag_name(name: str) -> str:
-    return (name or "").strip()
+    return sanitize_html_text(name).strip()
 
 
 def normalize_tag_sort(sort: str = "created_desc") -> str:

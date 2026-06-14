@@ -34,7 +34,7 @@ from archivebox.base_models.models import (
 )
 from archivebox.workers.models import RETRY_AT_MAX, ModelWithStateMachine, BaseStateMachine
 from archivebox.crawls.schedule_util import next_run_for_schedule, validate_schedule
-from archivebox.misc.util import parse_date, validate_url, validate_url_length
+from archivebox.misc.util import parse_date, sanitize_html_text, validate_url, validate_url_length
 
 if TYPE_CHECKING:
     from archivebox.core.models import Snapshot
@@ -69,9 +69,14 @@ class CrawlSchedule(ModelWithUUID, ModelWithNotes):
         return str(reverse_lazy("api-1:get_any", args=[self.id]))
 
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "label" in update_fields:
+            self.label = sanitize_html_text(self.label).strip()
+        if update_fields is None or "notes" in update_fields:
+            self.notes = sanitize_html_text(self.notes)
         self.schedule = (self.schedule or "").strip()
         validate_schedule(self.schedule)
-        self.label = self.label or (self.template.label if self.template else "")
+        self.label = self.label or (sanitize_html_text(self.template.label).strip() if self.template else "")
         super().save(*args, **kwargs)
         if self.template:
             self.template.safe_update(
@@ -279,6 +284,12 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
+        if update_fields is None or "label" in update_fields:
+            self.label = sanitize_html_text(self.label).strip()
+        if update_fields is None or "notes" in update_fields:
+            self.notes = sanitize_html_text(self.notes)
+        if update_fields is None or "tags_str" in update_fields:
+            self.tags_str = ",".join(self.parse_tag_names(self.tags_str or ""))
         sync_tags = update_fields is None or "tags_str" in update_fields
         old_crawl = type(self).objects.filter(pk=self.pk).first() if self.pk else None
         previous_tag_names = set()
@@ -375,7 +386,7 @@ class Crawl(ModelWithDeleteAfter, ModelWithOutputDir, ModelWithConfig, ModelWith
         tag_names: list[str] = []
         seen: set[str] = set()
         for raw_tag in raw_tags:
-            tag_name = str(raw_tag or "").strip()
+            tag_name = sanitize_html_text(raw_tag).strip()
             if not tag_name:
                 continue
             lowered = tag_name.lower()

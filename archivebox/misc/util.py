@@ -66,6 +66,22 @@ htmlencode = lambda s: s and escape(s, quote=True)
 htmldecode = lambda s: s and unescape(s)
 
 
+def sanitize_html_text(value: Any) -> str:
+    """Strip all HTML from user-editable text before storing it."""
+    if value is None:
+        return ""
+    import bleach
+
+    return bleach.clean(
+        str(value),
+        tags=[],
+        attributes={},
+        protocols=[],
+        strip=True,
+        strip_comments=True,
+    )
+
+
 def ts_to_date_str(ts: Any) -> str | None:
     parsed = parse_date(ts)
     return None if parsed is None else parsed.strftime("%Y-%m-%d %H:%M")

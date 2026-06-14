@@ -6,7 +6,6 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from django import forms
 
 from archivebox.misc.util import URL_REGEX, find_all_urls, parse_filesize_to_bytes
-from taggit.utils import edit_string_for_tags, parse_tags
 from archivebox.base_models.admin import KeyValueWidget
 from archivebox.crawls.schedule_util import validate_schedule
 from archivebox.config.common import get_config, parse_delete_after
@@ -28,6 +27,67 @@ DEPTH_CHOICES = (
     ("3", "depth = 3 (+ URLs three hops away)"),
     ("4", "depth = 4 (+ URLs four hops away)"),
 )
+
+
+def _split_strip(value: str, delimiter: str) -> list[str]:
+    return [part.strip() for part in value.split(delimiter) if part.strip()]
+
+
+def parse_tag_string(value: str | None) -> list[str]:
+    """Parse the legacy tag-editing format without depending on django-taggit."""
+    if not value:
+        return []
+
+    if "," not in value and '"' not in value:
+        return sorted(set(_split_strip(value, " ")))
+
+    tags: list[str] = []
+    buffer: list[str] = []
+    deferred_chunks: list[str] = []
+    saw_unquoted_comma = False
+    in_quote = False
+    chars = iter(value)
+
+    try:
+        while True:
+            char = next(chars)
+            if char == '"':
+                if buffer:
+                    deferred_chunks.append("".join(buffer))
+                    buffer = []
+                in_quote = True
+                char = next(chars)
+                while char != '"':
+                    buffer.append(char)
+                    char = next(chars)
+                tag = "".join(buffer).strip()
+                if tag:
+                    tags.append(tag)
+                buffer = []
+                in_quote = False
+            else:
+                if not saw_unquoted_comma and char == ",":
+                    saw_unquoted_comma = True
+                buffer.append(char)
+    except StopIteration:
+        if buffer:
+            if in_quote and "," in buffer:
+                saw_unquoted_comma = True
+            deferred_chunks.append("".join(buffer))
+
+    delimiter = "," if saw_unquoted_comma else " "
+    for chunk in deferred_chunks:
+        tags.extend(_split_strip(chunk, delimiter))
+
+    return sorted(set(tags))
+
+
+def edit_string_for_tag_names(tags) -> str:
+    names = []
+    for tag in tags:
+        name = tag.name
+        names.append(f'"{name}"' if "," in name or " " in name else name)
+    return ", ".join(sorted(names))
 
 
 class AddLinkForm(PluginConfigFormMixin, forms.Form):
@@ -423,7 +483,7 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
 class TagWidget(forms.TextInput):
     def format_value(self, value):
         if value is not None and not isinstance(value, str):
-            value = edit_string_for_tags(value)
+            value = edit_string_for_tag_names(value)
         return super().format_value(value)
 
 
@@ -432,12 +492,7 @@ class TagField(forms.CharField):
 
     def clean(self, value):
         value = super().clean(value)
-        try:
-            return parse_tags(value)
-        except ValueError:
-            raise forms.ValidationError(
-                "Please provide a comma-separated list of tags.",
-            )
+        return parse_tag_string(value)
 
     def has_changed(self, initial, data):
         # Always return False if the field is disabled since self.bound_data
