@@ -1405,7 +1405,8 @@ class AddView(UserPassesTestMixin, FormView):
         return get_request_config(self.request).PUBLIC_ADD_VIEW or self.request.user.is_authenticated
 
     def _can_override_crawl_config(self) -> bool:
-        return is_admin_user(self.request)
+        user = self.request.user
+        return bool(user.is_authenticated and user.is_active and user.is_superuser)
 
     def _get_custom_config_overrides(self, form: AddLinkForm) -> dict:
         custom_config = form.cleaned_data.get("config") or {}

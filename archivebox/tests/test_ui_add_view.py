@@ -99,6 +99,61 @@ def test_add_view_admin_renders_plugin_config_grid(client, admin_user, monkeypat
     assert b"plugin_config__wget__WGET_ENABLED" not in response.content
 
 
+def test_add_view_staff_user_cannot_override_raw_or_plugin_config(client):
+    staff_user = User.objects.create_user(
+        username="addviewstaff",
+        email="addviewstaff@test.com",
+        password="testpassword",
+        is_staff=True,
+        is_superuser=False,
+    )
+    client.force_login(staff_user)
+
+    response = client.get(reverse("add"), HTTP_HOST=ADMIN_HOST)
+    assert response.status_code == 200
+    assert response.context["can_override_crawl_config"] is False
+    assert response.context["form"].plugin_groups == []
+    assert b"plugin_config__wget__WGET_TIMEOUT" not in response.content
+    assert b"Custom config overrides" not in response.content
+
+    response = client.post(
+        reverse("add"),
+        data={
+            "url": "https://example.com/staff-config",
+            "tag": "",
+            "depth": "0",
+            "max_urls": "0",
+            "crawl_max_size": "0",
+            "crawl_timeout": "0",
+            "timeout": "60",
+            "snapshot_max_size": "0",
+            "delete_after": "0",
+            "crawl_max_concurrent_snapshots": "1",
+            "url_filters_allowlist": "",
+            "url_filters_denylist": "",
+            "notes": "",
+            "schedule": "daily",
+            "persona": "Default",
+            "permissions": "public",
+            "start_paused": "on",
+            "main_plugins": ["wget"],
+            "plugin_config__wget__WGET_TIMEOUT": "77",
+            "config": '{"WGET_TIMEOUT": 77, "YTDLP_ARGS_EXTRA": ["--exec", "touch /tmp/owned"]}',
+        },
+        HTTP_HOST=ADMIN_HOST,
+    )
+
+    assert response.status_code == 302
+    crawl = Crawl.objects.order_by("-created_at").first()
+    assert crawl is not None
+    assert crawl.created_by == staff_user
+    assert crawl.status == Crawl.StatusChoices.QUEUED
+    assert crawl.schedule is None
+    assert crawl.config.get("PLUGINS", "") == ""
+    assert crawl.config.get("WGET_TIMEOUT") != 77
+    assert crawl.config.get("YTDLP_ARGS_EXTRA") != ["--exec", "touch /tmp/owned"]
+
+
 def test_add_view_embeds_selected_persona_config_for_ui_hydration(client, admin_user, monkeypatch):
     monkeypatch.setenv("PUBLIC_ADD_VIEW", "true")
     client.force_login(admin_user)

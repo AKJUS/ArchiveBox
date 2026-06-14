@@ -9,7 +9,7 @@ from archivebox.misc.util import URL_REGEX, find_all_urls, parse_filesize_to_byt
 from archivebox.base_models.admin import KeyValueWidget
 from archivebox.crawls.schedule_util import validate_schedule
 from archivebox.config.common import get_config, parse_delete_after
-from archivebox.core.permissions import PERMISSIONS_CHOICES, PERMISSIONS_PUBLIC, filter_personas_by_permissions, is_admin_user
+from archivebox.core.permissions import PERMISSIONS_CHOICES, PERMISSIONS_PUBLIC, filter_personas_by_permissions
 from archivebox.core.widgets import TagEditorWidget, URLFiltersWidget
 from archivebox.plugins.discovery import get_plugins
 from archivebox.plugins.forms import (
@@ -299,7 +299,10 @@ class AddLinkForm(PluginConfigFormMixin, forms.Form):
 
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
-        self.can_override_crawl_config = bool(self.request and is_admin_user(self.request))
+        self.can_override_crawl_config = False
+        if self.request is not None:
+            user = self.request.user
+            self.can_override_crawl_config = bool(user.is_authenticated and user.is_active and user.is_superuser)
         super().__init__(*args, **kwargs)
 
         default_persona = Persona.get_or_create_default()
