@@ -13,11 +13,11 @@ supported-markers = [
 ]
 
 [options]
-exclude-newer = "2026-06-09T17:52:18.044630754Z"
+exclude-newer = "2026-06-09T17:58:34.589335911Z"
 exclude-newer-span = "P5D"
 
 [options.exclude-newer-package]
-abxbus = { timestamp = "2026-06-14T17:52:17.044642876Z", span = "PT1S" }
+abxbus = { timestamp = "2026-06-14T17:58:33.589348259Z", span = "PT1S" }
 abx-plugins = "2100-01-01T00:00:00Z"
 abx-dl = "2100-01-01T00:00:00Z"
 abxpkg = "2100-01-01T00:00:00Z"
