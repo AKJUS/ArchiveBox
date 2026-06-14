@@ -34,7 +34,7 @@ def _split_strip(value: str, delimiter: str) -> list[str]:
 
 
 def parse_tag_string(value: str | None) -> list[str]:
-    """Parse the legacy tag-editing format without depending on django-taggit."""
+    """Parse the legacy tag-editing format used by the admin tag field."""
     if not value:
         return []
 

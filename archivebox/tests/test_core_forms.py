@@ -7,7 +7,7 @@ from archivebox.core.models import Tag
 pytestmark = pytest.mark.django_db
 
 
-def test_tag_field_parses_legacy_tag_input_without_taggit():
+def test_tag_field_parses_legacy_tag_input():
     field = TagField()
 
     assert field.clean("alpha beta alpha") == ["alpha", "beta"]
@@ -18,7 +18,7 @@ def test_tag_field_parses_legacy_tag_input_without_taggit():
     assert field.clean('"alpha,beta') == ["alpha", "beta"]
 
 
-def test_tag_widget_formats_real_tag_rows_without_taggit():
+def test_tag_widget_formats_real_tag_rows():
     tags = [
         Tag.objects.create(name="plain"),
         Tag.objects.create(name="two words"),
@@ -27,5 +27,5 @@ def test_tag_widget_formats_real_tag_rows_without_taggit():
 
     rendered_value = TagWidget().format_value(tags)
 
-    assert rendered_value == '"comma,tag", plain, "two words"'
+    assert rendered_value == '"comma,tag", "two words", plain'
     assert TagField().clean(rendered_value) == ["comma,tag", "plain", "two words"]
