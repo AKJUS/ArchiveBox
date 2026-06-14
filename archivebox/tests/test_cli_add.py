@@ -1104,7 +1104,7 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(initialized_a
 
     snapshot_urls = {url for _id, url, _depth, _status, _title in snapshots}
     assert snapshot_urls >= {*wget_urls, chrome_url}
-    assert all(depth == (0 if url == Snapshot.INTERNAL_INPUT_URL else 1) for _id, url, depth, _status, _title in snapshots)
+    assert all(depth == 0 for _id, url, depth, _status, _title in snapshots)
 
     by_url_plugin = {(url, plugin): status for url, plugin, status, _files, _size, _output in archive_results}
     assert by_url_plugin[("https://example.com", "wget")] == "succeeded"
