@@ -245,7 +245,8 @@ RUN echo "[+] Initializing image collection..." \
 RUN chmod +x "$CODE_DIR"/bin/*.sh \
     && chmod g+w "$TMP_DIR" "$LIB_DIR" "$PLAYWRIGHT_BROWSERS_PATH"
 
-RUN "$LIB_DIR/playwright/bin/chromium" --version | tee -a /VERSION.txt \
+RUN --mount=type=cache,target=/tmp/abxpkg-cache,sharing=locked,mode=1777 \
+    "$LIB_DIR/playwright/bin/chromium" --version | tee -a /VERSION.txt \
     && "$LIB_DIR/uv/packages/papers-dl/venv/bin/papers-dl" --version | tee -a /VERSION.txt \
     && /usr/bin/rg --version | head -1 | tee -a /VERSION.txt \
     && /usr/local/bin/sonic --version | tee -a /VERSION.txt \
@@ -255,7 +256,7 @@ RUN "$LIB_DIR/playwright/bin/chromium" --version | tee -a /VERSION.txt \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups test -w "$CONFIG_DIR" \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups test -w "$LIB_DIR" \
     && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups archivebox version 2>&1 | tee -a /VERSION.txt \
-    && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups archivebox install \
+    && setpriv --reuid="$ARCHIVEBOX_USER" --regid="$ARCHIVEBOX_USER" --init-groups env ABXPKG_NO_CACHE=True ABXPKG_TMP_CACHE_DIR=/tmp/abxpkg-cache archivebox install \
     && rm -rf /root/.cache /var/cache/apt/* /var/lib/apt/lists/*
 
 RUN (echo -e "\n\n[√] Finished ArchiveBox multistage Docker build successfully." \
