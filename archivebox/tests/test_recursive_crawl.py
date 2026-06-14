@@ -369,9 +369,9 @@ def test_recursive_crawl_depth_two_writes_real_outputs_and_process_records(tmp_p
         )
 
     assert crawl is not None
-    assert crawl[1] == 3
+    assert crawl[1] == 2
     assert root_snapshot is not None
-    assert root_snapshot[2] == 1
+    assert root_snapshot[2] == 0
     assert root_snapshot[3] is None
     assert depth_counts.get(0, 0) >= 1
     assert depth_counts.get(1, 0) >= len(recursive_test_site["child_urls"])

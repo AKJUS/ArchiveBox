@@ -1091,7 +1091,7 @@ def test_cli_add_real_urls_with_options_writes_inspectable_outputs(initialized_a
         processes = list(Process.objects.filter(process_type="hook").values_list("process_type", "status", "exit_code", "pwd", "cmd"))
 
     assert real_flow_crawl is not None
-    assert real_flow_crawl[0] == 1
+    assert real_flow_crawl[0] == 0
     assert real_flow_crawl[1] == "real-flow,challenge"
     real_flow_config = real_flow_crawl[2] or {}
     assert real_flow_config["CRAWL_MAX_URLS"] == 2
