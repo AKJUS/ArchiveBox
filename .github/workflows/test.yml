@@ -81,10 +81,15 @@ jobs:
           pwd
           ls
 
-      - name: Archivebox version
+      - name: ArchiveBox full install check
         run: |
-          mkdir -p tests/out/data
-          DATA_DIR="$PWD/tests/out/data" uv run --no-sync --no-sources archivebox version
+          set -Eeuo pipefail
+          DATA_DIR="$PWD/tests/out/data"
+          mkdir -p "$DATA_DIR"
+          uv run --directory "$DATA_DIR" --no-sync --no-sources archivebox init
+          timeout 30m uv run --directory "$DATA_DIR" --no-sync --no-sources archivebox install
+          uv run --directory "$DATA_DIR" --no-sync --no-sources archivebox version
+          uv run --directory "$DATA_DIR" --no-sync --no-sources archivebox status
 
       - name: Test built package with pytest
         # TODO: remove this exception for windows once we get tests passing on that platform

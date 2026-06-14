@@ -146,13 +146,14 @@ jobs:
           uv sync --project .ci-uv-project --all-extras --no-install-project --no-install-workspace --no-sources --no-cache
           uv pip install --python .venv/bin/python --no-deps dist/archivebox-*.whl
 
-      - name: UV run archivebox init + archivebox version
+      - name: Verify built package full install
         env:
           UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
         run: |
-          mkdir -p data && cd data
-          uv run --project ../.ci-uv-project --no-sync --no-sources archivebox init \
-          && uv run --project ../.ci-uv-project --no-sync --no-sources archivebox version
-          # && uv run archivebox add 'https://example.com' \
-          # && uv run archivebox status \
-          # || (echo "UV Failed to run archivebox!" && exit 1)
+          set -Eeuo pipefail
+          DATA_DIR="$(mktemp -d)"
+          cd "$DATA_DIR"
+          uv run --project "$GITHUB_WORKSPACE/.ci-uv-project" --no-sync --no-sources archivebox init
+          timeout 30m uv run --project "$GITHUB_WORKSPACE/.ci-uv-project" --no-sync --no-sources archivebox install
+          uv run --project "$GITHUB_WORKSPACE/.ci-uv-project" --no-sync --no-sources archivebox version
+          uv run --project "$GITHUB_WORKSPACE/.ci-uv-project" --no-sync --no-sources archivebox status

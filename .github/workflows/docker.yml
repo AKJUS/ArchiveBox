@@ -203,8 +203,14 @@ jobs:
           IMAGE="${DOCKERHUB_IMAGE}@${{ steps.docker_build.outputs.digest }}"
           SHORT_SHA="${GITHUB_SHA::7}"
 
-          docker run --rm --platform '${{ matrix.platform }}' --entrypoint bash "$IMAGE" -lc \
-            'set -Eeuo pipefail; archivebox version | tee /tmp/archivebox-version.out; grep -F "ArchiveBox v${{ steps.docker_meta.outputs.version }}" /tmp/archivebox-version.out; grep -F "COMMIT_HASH='"${SHORT_SHA}"'" /tmp/archivebox-version.out; grep -Fx "COMMIT_HASH='"${GITHUB_SHA}"'" /VERSION.txt'
+          DATA_DIR="$(mktemp -d)"
+          docker run --rm --platform '${{ matrix.platform }}' -v "$DATA_DIR":/data "$IMAGE" archivebox init
+          docker run --rm --platform '${{ matrix.platform }}' -v "$DATA_DIR":/data "$IMAGE" archivebox version | tee /tmp/archivebox-version.out
+          docker run --rm --platform '${{ matrix.platform }}' -v "$DATA_DIR":/data "$IMAGE" archivebox status
+          docker run --rm --platform '${{ matrix.platform }}' --entrypoint cat "$IMAGE" /VERSION.txt > /tmp/archivebox-image-version.txt
+          grep -F "ArchiveBox v${{ steps.docker_meta.outputs.version }}" /tmp/archivebox-version.out
+          grep -F "COMMIT_HASH=${SHORT_SHA}" /tmp/archivebox-version.out
+          grep -Fx "COMMIT_HASH=${GITHUB_SHA}" /tmp/archivebox-image-version.txt
 
           python3 - "$IMAGE" <<'PY'
           import json
