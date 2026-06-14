@@ -78,6 +78,48 @@ def _render_binary_abspath(abspath: str):
     return Text(abspath, style="green")
 
 
+def _build_binary_table(rows: list[dict[str, object]]):
+    from rich import box
+    from rich.table import Table
+
+    table = Table(title="Binary Dependencies", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Plugin", no_wrap=True, max_width=24)
+    table.add_column("State", no_wrap=True, width=8)
+    table.add_column("Status", justify="center", no_wrap=True, width=6)
+    table.add_column("Binary", no_wrap=True, max_width=28)
+    table.add_column("Version", no_wrap=True, width=16)
+    table.add_column("Provider", no_wrap=True, width=8)
+    table.add_column("Path", overflow="fold", ratio=1)
+    for row in rows:
+        table.add_row(
+            str(row["plugin"]),
+            str(row["state"]),
+            str(row["status"]),
+            str(row["binary"]),
+            str(row["version"]),
+            str(row["provider"]),
+            row["path"],
+            style=str(row.get("style") or ""),
+        )
+    return table
+
+
+def _print_binary_row(prnt, row: dict[str, object]) -> None:
+    prnt(
+        "",
+        row["status"],
+        str(row["plugin"]).ljust(24),
+        str(row["state"]).ljust(8),
+        str(row["binary"]).ljust(28),
+        str(row["version"]).ljust(16),
+        str(row["provider"]).ljust(8),
+        row["path"],
+        overflow="ignore",
+        crop=False,
+        style=str(row.get("style") or ""),
+    )
+
+
 def _binary_record_matches_runtime(installed, lib_dir: Path) -> bool:
     if not installed or not installed.is_valid or not installed.version:
         return False
@@ -108,6 +150,7 @@ def version(
 
     from rich.panel import Panel
     from rich.console import Console
+    from rich.live import Live
 
     from archivebox.config import CONSTANTS
     from archivebox.config.version import get_COMMIT_HASH, get_BUILD_TIME
@@ -236,116 +279,109 @@ def version(
             prnt()
             prnt("", f"[yellow]Warning: Could not query collection binary records, falling back to abxpkg state: {e}[/yellow]")
 
-    binary_rows = {}
-    for plugin_name, plugin in plugins.items():
-        plugin_enabled = plugin_name in enabled_plugin_names
-        logical_records = get_required_binary_requests(
-            plugin,
-            plugin.config.required_binaries,
-            overrides=runtime_config,
-            derived_overrides=derived_config,
-            run_output_dir=CONSTANTS.DATA_DIR,
-        )
-        actual_records = get_required_binary_requests(
-            plugin,
-            plugin.config.required_binaries,
-            overrides=runtime_config,
-            derived_overrides=derived_config,
-            run_output_dir=CONSTANTS.DATA_DIR,
-            logical_names=False,
-        )
-        for logical_record, actual_record in zip(logical_records, actual_records, strict=False):
-            logical_name = str(logical_record["name"])
-            actual_name = str(actual_record["name"])
-            display_name = Path(actual_name).expanduser().name if ("/" in actual_name or actual_name.startswith("~")) else logical_name
-            if (
-                requested_names
-                and logical_name not in requested_names
-                and actual_name not in requested_names
-                and display_name not in requested_names
-            ):
-                continue
-            row = binary_rows.setdefault(
-                logical_name,
-                {
-                    "actual_record": actual_record,
-                    "display_name": display_name,
-                    "enabled": False,
-                },
+    rows: list[dict[str, object]] = []
+    any_rows = False
+    any_available = False
+    compact_paths = console.is_terminal
+    live_enabled = console.is_terminal
+    live_cm = Live(_build_binary_table(rows), console=console, refresh_per_second=8) if live_enabled else None
+    if not live_enabled:
+        prnt("", "Status", "Plugin".ljust(24), "State".ljust(8), "Binary".ljust(28), "Version".ljust(16), "Provider".ljust(8), "Path")
+
+    def emit_row(row: dict[str, object]) -> None:
+        rows.append(row)
+        if live_cm is not None:
+            live_cm.update(_build_binary_table(rows), refresh=True)
+        else:
+            _print_binary_row(prnt, row)
+
+    if live_cm is not None:
+        live_cm.start()
+    try:
+        for plugin_name, plugin in plugins.items():
+            plugin_enabled = plugin_name in enabled_plugin_names
+            logical_records = get_required_binary_requests(
+                plugin,
+                plugin.config.required_binaries,
+                overrides=runtime_config,
+                derived_overrides=derived_config,
+                run_output_dir=CONSTANTS.DATA_DIR,
             )
-            if plugin_enabled:
-                row["actual_record"] = actual_record
-                row["display_name"] = display_name
-                row["enabled"] = True
+            actual_records = get_required_binary_requests(
+                plugin,
+                plugin.config.required_binaries,
+                overrides=runtime_config,
+                derived_overrides=derived_config,
+                run_output_dir=CONSTANTS.DATA_DIR,
+                logical_names=False,
+            )
+            for logical_record, actual_record in zip(logical_records, actual_records, strict=False):
+                logical_name = str(logical_record["name"])
+                actual_name = str(actual_record["name"])
+                display_name = Path(actual_name).expanduser().name if ("/" in actual_name or actual_name.startswith("~")) else logical_name
+                if (
+                    requested_names
+                    and logical_name not in requested_names
+                    and actual_name not in requested_names
+                    and display_name not in requested_names
+                ):
+                    continue
 
-    if not binary_rows:
-        prnt("", "[grey53]No required binaries declared for discovered plugins.[/grey53]")
-    else:
-        any_available = False
-        compact_paths = console.is_terminal
-        for logical_name, row in sorted(binary_rows.items()):
-            binary_enabled = bool(row["enabled"])
-            installed = db_binaries.get(logical_name) if db_available else None
-            loaded = None
+                any_rows = True
+                installed = db_binaries.get(logical_name) if db_available else None
+                if _binary_record_matches_runtime(installed, config.LIB_DIR):
+                    abspath = installed.abspath
+                    version_str = (installed.version or "unknown")[:15]
+                    provider = (installed.binprovider or "env")[:8]
+                    valid = True
+                else:
+                    loaded = load_binary(actual_record)
+                    abspath = str(loaded.loaded_abspath or "")
+                    version_str = str(loaded.loaded_version or "unknown")[:15]
+                    provider = (loaded.loaded_binprovider.name if loaded.loaded_binprovider else "env")[:8]
+                    valid = loaded.is_valid
 
-            if _binary_record_matches_runtime(installed, config.LIB_DIR):
-                abspath = installed.abspath
-                version_str = (installed.version or "unknown")[:15]
-                provider = (installed.binprovider or "env")[:8]
-                valid = True
-            else:
-                loaded = load_binary(row["actual_record"])
-                abspath = str(loaded.loaded_abspath or "")
-                version_str = str(loaded.loaded_version or "unknown")[:15]
-                provider = (loaded.loaded_binprovider.name if loaded.loaded_binprovider else "env")[:8]
-                valid = loaded.is_valid
-
-            display_name = str(row["display_name"])
-            if valid:
-                display_path = (
-                    _format_binary_abspath(
-                        abspath,
-                        pwd=Path.cwd(),
-                        lib_dir=config.LIB_DIR,
-                        personas_dir=CONSTANTS.PERSONAS_DIR,
-                        home=Path.home(),
+                if valid:
+                    display_path = (
+                        _format_binary_abspath(
+                            abspath,
+                            pwd=Path.cwd(),
+                            lib_dir=config.LIB_DIR,
+                            personas_dir=CONSTANTS.PERSONAS_DIR,
+                            home=Path.home(),
+                        )
+                        if compact_paths
+                        else abspath
                     )
-                    if compact_paths
-                    else abspath
-                )
-                rendered_path = _render_binary_abspath(display_path) if compact_paths else display_path
-                status = "[green]√[/green]" if binary_enabled else "[grey53]-[/grey53]"
-                prnt(
-                    "",
-                    status,
-                    "",
-                    display_name.ljust(18),
-                    version_str.ljust(16),
-                    provider.ljust(8),
-                    rendered_path,
-                    overflow="ignore",
-                    crop=False,
-                    style=None if binary_enabled else "dim",
-                )
-                any_available = True
-                continue
+                    rendered_path = _render_binary_abspath(display_path) if compact_paths else display_path
+                    status = "[green]√[/green]" if plugin_enabled else "[grey53]-[/grey53]"
+                    any_available = True
+                else:
+                    rendered_path = "[grey53]not installed[/grey53]"
+                    status = "[red]X[/red]" if plugin_enabled else "[grey53]-[/grey53]"
+                    if plugin_enabled:
+                        failures.append(display_name)
 
-            status = "[red]X[/red]" if binary_enabled else "[grey53]-[/grey53]"
-            prnt(
-                "",
-                status,
-                "",
-                display_name.ljust(18),
-                "[grey53]not installed[/grey53]",
-                overflow="ignore",
-                crop=False,
-                style=None if binary_enabled else "dim",
-            )
-            if binary_enabled:
-                failures.append(display_name)
+                emit_row(
+                    {
+                        "plugin": plugin_name,
+                        "state": "enabled" if plugin_enabled else "disabled",
+                        "status": status,
+                        "binary": display_name,
+                        "version": version_str if valid else "-",
+                        "provider": provider if valid else "-",
+                        "path": rendered_path,
+                        "style": "" if plugin_enabled else "dim",
+                    },
+                )
+    finally:
+        if live_cm is not None:
+            live_cm.stop()
 
-        if not any_available:
-            prnt("", "[grey53]No binaries detected. Run [green]archivebox install[/green] to detect dependencies.[/grey53]")
+    if not any_rows:
+        prnt("", "[grey53]No required binaries declared for discovered plugins.[/grey53]")
+    elif not any_available:
+        prnt("", "[grey53]No binaries detected. Run [green]archivebox install[/green] to detect dependencies.[/grey53]")
 
     if not binaries:
         # Show code and data locations
