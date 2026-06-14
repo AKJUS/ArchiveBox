@@ -214,6 +214,23 @@ wait_for_pypi() {
     done
 }
 
+wait_for_docker_image() {
+    local image="$1"
+    local attempts=0
+    local max_attempts="${DOCKER_IMAGE_WAIT_ATTEMPTS:-60}"
+
+    until docker buildx imagetools inspect "$image" >/dev/null
+    do
+        attempts=$((attempts + 1))
+        if [[ "$attempts" -ge "$max_attempts" ]]; then
+            echo "[X] Timed out waiting for ${image}" >&2
+            exit 1
+        fi
+        echo "[*] ${image} is not published yet; waiting..."
+        sleep 30
+    done
+}
+
 release_python_repo() {
     local repo_name="$1"
     local branch="$2"
@@ -256,6 +273,7 @@ commit_push_publish "$ARCHIVEBOX_REPO" dev archivebox "$ARCHIVEBOX_VERSION"
 
 (
     cd "$ARCHIVEBOX_REPO"
+    wait_for_docker_image "archivebox/abx-dl:${ABX_SHARED_VERSION}"
     ./bin/release_docker.sh dev "$ARCHIVEBOX_VERSION" "sha-$(git rev-parse --short HEAD)"
     DEPLOY_IMAGE="${DOCKER_IMAGE_REPOS%% *}:dev" DEPLOY_EXPECT_VERSION="$ARCHIVEBOX_VERSION" SKIP_DOCKER=1 ./bin/deploy_dev_demo.sh
 )
