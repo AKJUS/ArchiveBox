@@ -237,12 +237,12 @@ def _should_update_snapshot_title(current_title: str, next_title: str, *, snapsh
     return len(next_title) > len(current)
 
 
-def _has_content_files(output_files: Any) -> bool:
-    return any(Path(path).suffix not in {".log", ".pid", ".sh"} for path in _normalize_output_files(output_files))
-
-
-def _is_signal_interrupted_exit(exit_code: int) -> bool:
-    return exit_code < 0 or (exit_code >= 128 and exit_code != PROCESS_EXIT_SKIPPED)
+def _status_for_process_without_archive_result(event: ProcessCompletedEvent) -> str:
+    if event.exit_code == PROCESS_EXIT_SKIPPED:
+        return "skipped"
+    if event.exit_code != 0:
+        return "failed"
+    return "noresults"
 
 
 def _iter_archiveresult_records(stdout: str) -> list[dict]:
@@ -444,24 +444,14 @@ class ArchiveResultService(BaseService):
                     ).now()
             return
 
-        # TODO: consider moving this fallback derivation into abx-dl itself.
-        # First try both patterns: if the whole abx-dl process crashes, restarting
-        # the snapshot may be enough, but don't guess before validating it.
-        process_interrupted = _is_signal_interrupted_exit(event.exit_code)
-        process_failed = event.exit_code not in (0, PROCESS_EXIT_SKIPPED) and not process_interrupted
+        process_failed = _status_for_process_without_archive_result(event) == "failed"
         with _perf_span("archivebox.ArchiveResultService.on_ProcessCompletedEvent.emit_archive_result_fallback"):
             await event.emit(
                 ArchiveResultEvent(
                     snapshot_id=snapshot_event.snapshot_id,
                     plugin=event.plugin_name,
                     hook_name=event.hook_name,
-                    status=(
-                        "queued"
-                        if process_interrupted
-                        else "failed"
-                        if process_failed
-                        else ("succeeded" if _has_content_files(event.output_files) else "noresult")
-                    ),
+                    status=_status_for_process_without_archive_result(event),
                     output_str=event.stderr if process_failed else "",
                     output_files=event.output_files,
                     start_ts=event.start_ts,

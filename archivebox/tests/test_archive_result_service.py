@@ -3,7 +3,7 @@ import pytest
 
 
 from abxpkg.binary_service import BinaryRequestEvent
-from abx_dl.events import ArchiveResultEvent, ProcessEvent, ProcessStartedEvent
+from abx_dl.events import ArchiveResultEvent, ProcessCompletedEvent, ProcessEvent, ProcessStartedEvent, SnapshotEvent
 from abx_dl.orchestrator import create_bus
 from abx_dl.output_files import OutputFile
 
@@ -329,6 +329,55 @@ def test_process_completed_projects_noresults_archiveresult():
     result = ArchiveResult.objects.get(snapshot=snapshot, plugin="title", hook_name="on_Snapshot__54_title.js")
     assert result.status == ArchiveResult.StatusChoices.NORESULTS
     assert result.output_str == "No title found"
+
+
+def test_process_completed_without_archive_result_does_not_infer_success_from_output_files(snapshot):
+    from archivebox.core.models import ArchiveResult
+    from archivebox.services.archive_result_service import ArchiveResultService
+    import asyncio
+
+    plugin_dir = Path(snapshot.output_dir) / "wget"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "index.html").write_text("<html>downloaded but not reported</html>")
+
+    bus = create_bus(name="test_process_completed_without_archive_result_output_files")
+    ArchiveResultService(bus)
+
+    snapshot_event = SnapshotEvent(
+        url=snapshot.url,
+        snapshot_id=str(snapshot.id),
+        output_dir=str(snapshot.output_dir),
+    )
+    completed_event = ProcessCompletedEvent(
+        plugin_name="wget",
+        hook_name="on_Snapshot__06_wget.finite.bg",
+        hook_path="/usr/bin/env",
+        hook_args=[],
+        env={},
+        timeout=60,
+        stdout="",
+        stderr="",
+        exit_code=0,
+        status="succeeded",
+        output_dir=str(plugin_dir),
+        output_files=[OutputFile(path="index.html", extension="html", mimetype="text/html", size=36)],
+        start_ts="2026-03-22T12:00:00+00:00",
+        end_ts="2026-03-22T12:00:01+00:00",
+        event_parent_id=snapshot_event.event_id,
+    )
+
+    async def emit_events() -> None:
+        await bus.emit(snapshot_event).now()
+        await bus.emit(completed_event).now()
+        await bus.wait_until_idle()
+
+    asyncio.run(emit_events())
+
+    result = ArchiveResult.objects.get(snapshot=snapshot, plugin="wget", hook_name="on_Snapshot__06_wget.finite.bg")
+    assert result.status == ArchiveResult.StatusChoices.NORESULTS
+    assert result.output_str == ""
+    assert result.output_files == {"index.html": {"extension": "html", "mimetype": "text/html", "size": 36}}
+    _cleanup_machine_process_rows()
 
 
 def test_retry_failed_archiveresults_requeues_snapshot_in_queued_state():

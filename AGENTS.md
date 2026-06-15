@@ -1,14 +1,87 @@
-I found 31 unique `no mocking` prompts in recent Codex history, across 21 session transcripts. Only one transcript literally started with `no mocking`; most had it later as testing guidance. Consolidated advice:
+# ArchiveBox Agent Guide
 
-- Tests must hit real user-facing code paths: CLI commands, REST/API calls, browser UI, real hooks, real ArchiveBox data dirs, real pytest fixtures, and real subprocess/binary behavior.
-- No mocking, faking, simulating, monkey patching, handwritten fake objects, fake buses, fake hooks, fake binaries, fake handlers, or direct-post shortcuts when the user path is through UI/extension/CLI.
-- No skipped, xfailed, flaky, or “works around platform” tests. Flakiness is treated as a bug, especially on macOS/browser flows.
-- Prefer live integration tests over narrow unit tests when behavior depends on browsers, binaries, ArchiveBox crawls, plugins, LLMs, or server state.
-- Assertions must validate real correctness: returned values, exit codes, DB rows, filesystem contents, field values, uploaded files, rendered output, and side effects. “No error occurred” or “attribute exists” is not enough.
-- Start fixes with failing red tests that reproduce the missing behavior or regression, then implement the minimal fix and confirm the test passes.
-- Use realistic setup patterns “like a user would”: events + bus + handlers, real browser pages/CDP sessions, real URLs or `pytest-httpserver`, real rows, real snapshots, real installs, real local browser/server state.
-- For ArchiveBox/API tests, use existing `conftest.py` fixtures and test harnesses, real test DB rows/data dirs, and user-facing commands/APIs rather than bespoke helpers.
-- For browser/extension tests, trigger behavior through the real extension UI or actual browser session, not direct posting or mocked browser/session objects.
-- For binary/provider tests, use real binaries and real installs; verify constraints and final installed package metadata, not just install success.
-- For coverage quality, keep tests strict, deterministic, grouped consistently, and use a few larger realistic tests when that gives better surface coverage than many tiny fake unit tests.
-- Avoid weakening test coverage, adding compatibility/shim/fallback layers, or guessing from code shape. Trace root causes, verify assumptions with tests/scripts, and let real type/parse errors surface normally.
+ArchiveBox is the full self-hosted web archiving app. Keep this repo on the `dev` branch.
+
+## Shared Standards
+
+- Use `uv` and `uv run` for Python commands. Do not use system `python`, direct `.venv/bin/python`, or `pip` commands.
+- Prefer existing repo patterns, helper APIs, fixtures, scripts, and command surfaces.
+- Keep edits focused and minimal. Do not add wrappers, shims, aliases, or extra abstraction layers unless the current code path requires them.
+- Do not weaken assertions, skip tests, xfail tests, or accept flaky behavior.
+- No mocks, monkeypatches, fakes, simulated handlers, fake binaries, fake hooks, fake buses, or direct shortcuts around user-facing flows.
+- Tests and verification should use real CLI commands, REST/API calls, browser UI flows, real hooks, real installs, real subprocesses, real DB rows, real files, and existing fixtures.
+- Assertions must verify real correctness: exit codes, returned values, DB state, filesystem contents, field values, rendered output, and side effects.
+- Start behavior fixes with a red failing test when a test is requested or practical.
+- Trace root causes from observed behavior. Do not paper over failures with retries, wider timeouts, broad fallbacks, or looser assertions.
+- Read `README.md` for the full setup, CLI, Docker, API, and release surface.
+
+## Development Setup
+
+```bash
+uv sync --dev --all-extras
+mkdir -p data
+cd data
+uv run --project .. archivebox init --install
+```
+
+Run collection commands from inside an initialized data directory:
+
+```bash
+cd data
+uv run --project .. archivebox status
+uv run --project .. archivebox add 'https://example.com'
+uv run --project .. archivebox run
+```
+
+## User-Facing Setup
+
+Recommended CLI install:
+
+```bash
+uv tool install archivebox
+mkdir -p ~/archivebox/data
+cd ~/archivebox/data
+archivebox init --install
+archivebox add 'https://example.com'
+archivebox server 0.0.0.0:8000
+```
+
+Alternative install methods:
+
+- Docker Compose / Docker
+- Homebrew
+- Debian package
+- pip
+
+## Basic Usage
+
+```bash
+archivebox version
+archivebox help
+archivebox status
+archivebox install
+archivebox add 'https://example.com'
+archivebox add --extract=title,screenshot,pdf 'https://example.com'
+archivebox list --json --with-headers
+archivebox search 'example'
+archivebox update --filter-type=domain example.com
+archivebox remove --filter-type=exact 'https://example.com'
+archivebox run
+```
+
+## Verification
+
+Use targeted tests for focused work:
+
+<!--pytest.mark.skip(reason="pytest invocation")-->
+```bash
+uv run pytest archivebox/tests/test_cli_add.py -q
+uv run prek run --all-files
+```
+
+Use the full release/deploy loop only when requested:
+
+<!--pytest.mark.skip(reason="release/deploy script")-->
+```bash
+./bin/release_dev_stack.sh
+```

@@ -51,7 +51,6 @@ ENV CODE_DIR=/app \
     ABXPKG_LIB_DIR=/opt/archivebox/lib \
     PLAYWRIGHT_BROWSERS_PATH=/opt/archivebox/lib/playwright/cache \
     PERSONAS_DIR=/data/personas \
-    CHROME_USER_DATA_DIR=/data/personas/Default/chrome_profile \
     CHROME_HEADLESS=true \
     CHROME_SANDBOX=false \
     CHROME_ISOLATION=crawl \
