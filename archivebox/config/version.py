@@ -47,6 +47,15 @@ def get_COMMIT_HASH() -> str | None:
         if re.fullmatch(r"[0-9a-fA-F]{40}", env_commit_hash):
             return env_commit_hash
 
+    if IN_DOCKER:
+        try:
+            version_text = Path("/VERSION.txt").read_text()
+            match = re.search(r"^COMMIT_HASH=([0-9a-fA-F]{40})$", version_text, re.MULTILINE)
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
+
     def _read_git_file(git_dir: Path, ref: str) -> str | None:
         try:
             return git_dir.joinpath(ref).read_text().strip()
