@@ -228,6 +228,11 @@ def version(
     prnt()
 
     in_data_dir = os.access(CONSTANTS.ARCHIVE_DIR, os.R_OK) and os.access(CONSTANTS.CONFIG_FILE, os.R_OK)
+    if isinstance(binaries, str):
+        requested_names = {name.strip() for name in binaries.split(",") if name.strip()}
+    else:
+        requested_names = {name for name in (binaries or ()) if name}
+
     if not in_data_dir:
         PANEL_TEXT = "\n".join(
             (
@@ -250,6 +255,22 @@ def version(
         )
     prnt()
 
+    if not in_data_dir and not requested_names:
+        prnt("[pale_green1][i] Binary Dependencies:[/pale_green1]")
+        prnt("", "[grey53]Dependency checks require an initialized collection DATA_DIR.[/grey53]")
+        prnt()
+        prnt("[deep_sky_blue3][i] Code locations:[/deep_sky_blue3]")
+        try:
+            for name, path in get_code_locations().items():
+                if isinstance(name, str) and isinstance(path, dict):
+                    prnt(printable_folder_status(name, path), overflow="ignore", crop=False)
+        except Exception as e:
+            prnt(f"  [red]Error getting code locations: {e}[/red]")
+        prnt()
+        prnt("[red][i] Data locations:[/red] (not in a data directory)")
+        prnt()
+        return []
+
     prnt("[pale_green1][i] Binary Dependencies:[/pale_green1]")
     failures = []
     seen_failures: set[str] = set()
@@ -259,11 +280,6 @@ def version(
     from abx_dl.config import get_required_binary_requests
     from abx_dl.dependencies import load_binary
     from abx_dl.models import discover_plugins, filter_plugins
-
-    if isinstance(binaries, str):
-        requested_names = {name.strip() for name in binaries.split(",") if name.strip()}
-    else:
-        requested_names = {name for name in (binaries or ()) if name}
 
     plugins = discover_plugins(runtime="archivebox")
     enabled_plugins = filter_plugins(plugins, get_enabled_plugins(config=config), include_providers=True)
