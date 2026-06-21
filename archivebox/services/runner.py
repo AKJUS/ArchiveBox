@@ -126,6 +126,10 @@ def _count_selected_hooks(plugins: dict[str, Plugin], selected_plugins: list[str
     return sum(1 for plugin in selected.values() for hook in plugin.hooks if "CrawlSetup" in hook.name or "Snapshot" in hook.name)
 
 
+def _is_nonfatal_setup_hook(plugin_name: str, hook_name: str) -> bool:
+    return plugin_name == "chrome" and hook_name.endswith("_chrome_kill_zombies")
+
+
 def _discover_archivebox_plugins() -> dict[str, Plugin]:
     return discover_plugins(runtime="archivebox")
 
@@ -1091,6 +1095,8 @@ class CrawlRunner:
             await completed_process.wait(timeout=crawl_setup_phase_timeout)
             await completed_process.event_results_list()
             if completed_process.status == "failed":
+                if _is_nonfatal_setup_hook(plugin.name, hook.name):
+                    continue
                 raise RuntimeError(f"Crawl setup hook {plugin.name}:{hook.name} failed")
 
     async def run_snapshot(self, snapshot_id: str, crawl_start_event: CrawlStartEvent | None = None) -> None:
