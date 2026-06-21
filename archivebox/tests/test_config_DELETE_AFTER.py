@@ -154,7 +154,7 @@ print(json.dumps({{
     retained = json.loads(stdout.strip().splitlines()[-1])
     assert retained["crawl_id"] == created["crawl_id"]
 
-    _cmd_result = run_archivebox_cmd(["run", "--crawl-id", retained["crawl_id"]], cwd=tmp_path, timeout=120, env=run_env)
+    _cmd_result = run_archivebox_cmd(["run", "--maintenance-only"], cwd=tmp_path, timeout=120, env=run_env)
     stdout, stderr, returncode = _cmd_result.stdout, _cmd_result.stderr, _cmd_result.returncode
     assert returncode == 0, f"archivebox run failed:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
 
