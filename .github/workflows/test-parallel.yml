@@ -198,6 +198,12 @@ jobs:
           fi
           echo "Using ArchiveBox-installed Chromium: $candidate ($version)"
           echo "CHROME_BINARY=$candidate" >> "$GITHUB_ENV"
+          echo "DATA_DIR=$ABX_CI_DATA_DIR" >> "$GITHUB_ENV"
+          echo "NODE_MODULES_DIR=$LIB_DIR/pnpm/packages/chrome/node_modules" >> "$GITHUB_ENV"
+          echo "NODE_PATH=$LIB_DIR/pnpm/packages/chrome/node_modules" >> "$GITHUB_ENV"
+          echo "PNPM_BIN_DIR=$LIB_DIR/pnpm/packages/chrome/node_modules/.bin" >> "$GITHUB_ENV"
+          echo "NPM_BIN_DIR=$LIB_DIR/pnpm/packages/chrome/node_modules/.bin" >> "$GITHUB_ENV"
+          echo "CHROMEWEBSTORE_EXTENSIONS_DIR=$LIB_DIR/chromewebstore/extensions" >> "$GITHUB_ENV"
 
       - name: Install Sonic through ArchiveBox
         if: ${{ matrix.test.needs_sonic }}
@@ -334,6 +340,12 @@ jobs:
           fi
           echo "Using ArchiveBox-installed Chromium: $candidate ($version)"
           echo "CHROME_BINARY=$candidate" >> "$GITHUB_ENV"
+          echo "DATA_DIR=$ABX_CI_DATA_DIR" >> "$GITHUB_ENV"
+          echo "NODE_MODULES_DIR=$LIB_DIR/pnpm/packages/chrome/node_modules" >> "$GITHUB_ENV"
+          echo "NODE_PATH=$LIB_DIR/pnpm/packages/chrome/node_modules" >> "$GITHUB_ENV"
+          echo "PNPM_BIN_DIR=$LIB_DIR/pnpm/packages/chrome/node_modules/.bin" >> "$GITHUB_ENV"
+          echo "NPM_BIN_DIR=$LIB_DIR/pnpm/packages/chrome/node_modules/.bin" >> "$GITHUB_ENV"
+          echo "CHROMEWEBSTORE_EXTENSIONS_DIR=$LIB_DIR/chromewebstore/extensions" >> "$GITHUB_ENV"
 
       - name: Install Sonic through ArchiveBox
         if: ${{ matrix.plugin.needs_sonic }}
@@ -362,6 +374,7 @@ jobs:
 
       - name: Run plugin tests - ${{ matrix.plugin.name }}
         env:
+          ABXPKG_NO_CACHE: "true"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TWOCAPTCHA_API_KEY: ${{ secrets.TWOCAPTCHA_API_KEY }}
           API_KEY_2CAPTCHA: ${{ secrets.TWOCAPTCHA_API_KEY }}
