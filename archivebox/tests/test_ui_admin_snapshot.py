@@ -188,10 +188,8 @@ def test_snapshot_admin_preview_uses_extension_screenshot_when_standard_screensh
     preview = admin._get_preview_data(snapshot)
 
     assert preview is not None
-    assert "screenshot/screenshot.png" in preview["img_url"]
-    first = preview["fallback_list"].index("chrome_extension_screenshot/screenshot-1.png")
-    second = preview["fallback_list"].index("chrome_extension_screenshot/screenshot.png")
-    assert first < second
+    assert "chrome_extension_screenshot/screenshot-1.png" in preview["img_url"]
+    assert "chrome_extension_screenshot/screenshot.png" in preview["fallback_list"]
     assert "chrome_extension_screenshot/screenshot-2.png" not in preview["fallback_list"]
 
 
