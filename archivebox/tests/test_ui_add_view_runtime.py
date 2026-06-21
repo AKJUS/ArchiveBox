@@ -581,7 +581,10 @@ def test_add_view_post_creates_schedule_over_server(tmp_path, recursive_test_sit
 
         with use_archivebox_db(tmp_path):
             schedule = CrawlSchedule.objects.select_related("template").order_by("-created_at").first()
-            row = (schedule.schedule, schedule.template.urls, schedule.template.tags_str) if schedule else None
+            row = None
+            if schedule:
+                template_url = json.loads(schedule.template.urls)["url"]
+                row = (schedule.schedule, template_url, schedule.template.tags_str)
 
         assert row == ("daily", recursive_test_site["root_url"], "web-ui")
     finally:

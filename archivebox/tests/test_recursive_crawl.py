@@ -521,8 +521,11 @@ def test_recursive_crawl_depth_two_all_plugins_runs_snapshots_in_parallel(initia
     from abx_dl.models import discover_plugins
 
     root_url = "https://example.com/"
+    separately_covered_plugins = {"archivewebpage", "defuddle"}
     plugin_selection = ",".join(
-        sorted(plugin for plugin in discover_plugins().keys() if not plugin.startswith("claude")),
+        sorted(
+            plugin for plugin in discover_plugins().keys() if not plugin.startswith("claude") and plugin not in separately_covered_plugins
+        ),
     )
     env = os.environ.copy()
     env.pop("CHROME_BINARY", None)
