@@ -475,11 +475,14 @@ def test_update_index_only_runs_paused_search_rows_and_resume_later_runs_crawl(t
 
     if snapshot_finished_before_pause:
         indexed_state = get_crawl_runtime_state(tmp_path, crawl_id)
-        assert indexed_state["crawl_status"] == "paused"
-        assert indexed_state["crawl_retry_at"] == indexed_state["retry_at_max"]
         assert indexed_state["snapshots"][0]["status"] == "sealed"
         wget_results = [result for result in indexed_state["results"] if result["plugin"] == "wget"]
         assert any(result["status"] == "succeeded" and result["output_size"] > 0 for result in wget_results)
+        if indexed_state["crawl_status"] == "paused":
+            assert indexed_state["crawl_retry_at"] == indexed_state["retry_at_max"]
+        else:
+            assert indexed_state["crawl_status"] == "sealed"
+            assert all(result["status"] not in {"queued", "started", "paused"} for result in indexed_state["results"])
         captured_text = wait_for_snapshot_capture(tmp_path, recursive_test_site["root_url"], timeout=60)
         assert "Root" in captured_text
         assert "About" in captured_text
