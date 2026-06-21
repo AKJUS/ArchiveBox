@@ -9,6 +9,7 @@ import re
 import tempfile
 from pathlib import Path
 from archivebox.config.paths import tmp_dir_socket_path_is_short_enough
+from archivebox.cli.archivebox_version import _binary_row_dedupe_key
 from archivebox.tests.conftest import run_archivebox_cmd
 
 
@@ -28,6 +29,60 @@ def _extract_location_path(output: str, key: str) -> Path:
         if len(columns) >= 5 and columns[1] == key:
             return Path(os.path.expanduser(columns[-1]))
     raise AssertionError(f"Did not find a {key} location line in output:\n{output}")
+
+
+def test_binary_row_dedupe_key_keeps_distinct_paths_visible(tmp_path):
+    first_path = tmp_path / "lib" / "env" / "bin" / "node"
+    second_path = tmp_path / "other" / "bin" / "node"
+    first_path.parent.mkdir(parents=True)
+    second_path.parent.mkdir(parents=True)
+
+    first = _binary_row_dedupe_key(
+        display_name="node",
+        valid=True,
+        version="26.0.0",
+        provider="env",
+        abspath=str(first_path),
+    )
+    repeat = _binary_row_dedupe_key(
+        display_name="node",
+        valid=True,
+        version="26.0.0",
+        provider="env",
+        abspath=str(first_path),
+    )
+    different_path = _binary_row_dedupe_key(
+        display_name="node",
+        valid=True,
+        version="26.0.0",
+        provider="env",
+        abspath=str(second_path),
+    )
+
+    assert repeat == first
+    assert different_path != first
+
+
+def test_binary_row_dedupe_key_collapses_enabled_and_disabled_plugin_references(tmp_path):
+    binary_path = tmp_path / "bin" / "node"
+    binary_path.parent.mkdir(parents=True)
+
+    enabled_reference = _binary_row_dedupe_key(
+        display_name="node",
+        valid=True,
+        version="26.0.0",
+        provider="env",
+        abspath=str(binary_path),
+    )
+    disabled_reference = _binary_row_dedupe_key(
+        display_name="node",
+        valid=True,
+        version="26.0.0",
+        provider="env",
+        abspath=str(binary_path),
+    )
+
+    assert disabled_reference == enabled_reference
 
 
 def test_version_quiet_outputs_version_number(tmp_path):

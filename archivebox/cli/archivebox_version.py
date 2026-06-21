@@ -133,6 +133,23 @@ def _binary_record_matches_runtime(installed, lib_dir: Path) -> bool:
     return True
 
 
+def _binary_row_dedupe_key(
+    *,
+    display_name: str,
+    valid: bool,
+    version: str,
+    provider: str,
+    abspath: str,
+) -> tuple[str, str, str, str]:
+    if not valid:
+        return (display_name, "", "", "")
+    try:
+        resolved_abspath = Path(abspath).expanduser().resolve(strict=False).as_posix()
+    except Exception:
+        resolved_abspath = abspath
+    return (display_name, provider, version, resolved_abspath)
+
+
 @enforce_types
 def version(
     quiet: bool = False,
@@ -231,10 +248,12 @@ def version(
                 subtitle="Full version info is only available when inside a collection [light_slate_blue]DATA DIR[/light_slate_blue]",
             ),
         )
-        prnt()
+    prnt()
 
     prnt("[pale_green1][i] Binary Dependencies:[/pale_green1]")
     failures = []
+    seen_failures: set[str] = set()
+    seen_rows: set[tuple[str, str, str, str]] = set()
 
     from archivebox.plugins.discovery import get_enabled_plugins
     from abx_dl.config import get_required_binary_requests
@@ -352,8 +371,20 @@ def version(
                 else:
                     rendered_path = "[grey53]not installed[/grey53]"
                     status = "[red]X[/red]" if plugin_enabled else "[grey53]-[/grey53]"
-                    if plugin_enabled:
+                    if plugin_enabled and display_name not in seen_failures:
                         failures.append(display_name)
+                        seen_failures.add(display_name)
+
+                row_key = _binary_row_dedupe_key(
+                    display_name=display_name,
+                    valid=valid,
+                    version=version_str if valid else "-",
+                    provider=provider if valid else "-",
+                    abspath=abspath,
+                )
+                if row_key in seen_rows:
+                    continue
+                seen_rows.add(row_key)
 
                 emit_row(
                     {
