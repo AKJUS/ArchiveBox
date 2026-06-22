@@ -239,6 +239,16 @@ def test_snapshot_admin_zip_links():
     assert html.escape(zip_url, quote=True) in str(admin.admin_actions(snapshot))
 
 
+def test_admin_navigation_hides_agent_link_when_opencode_is_disabled(client, admin_user):
+    client.force_login(admin_user)
+
+    response = client.get(reverse("admin:index"), HTTP_HOST="admin.archivebox.localhost:8000")
+
+    assert response.status_code == 200
+    assert b"/admin/agent" not in response.content
+    assert b">\xf0\x9f\x92\xac AI<" not in response.content
+
+
 def test_archiveresult_admin_zip_links():
     from archivebox.core.admin_archiveresults import ArchiveResultAdmin
     from archivebox.core.models import ArchiveResult

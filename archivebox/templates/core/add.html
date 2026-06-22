@@ -48,7 +48,9 @@
                 <div class="crawl-explanation">
                     <p class="crawl-tip" style="user-select: none;">
                         <span style="float: right">
-                            <a href="/admin/agent">💬 Crawl with AI</a> &nbsp; | &nbsp;
+                            {% if user.is_authenticated and user.is_superuser and request.archivebox_config.OPENCODE_ENABLED %}
+                                <a href="/admin/agent">💬 Crawl with AI</a> &nbsp; | &nbsp;
+                            {% endif %}
                             <a href="https://github.com/ArchiveBox/archivebox-browser-extension"><img src="{% static 'chrome_extension_icon.png' %}" alt="Chrome Extension" style="height: 33px; margin-top: -5px;">&nbsp; Get the extension</a>
                         </span>
                         💡 <strong>Tip:</strong> Instantly save a single URL by visiting:
