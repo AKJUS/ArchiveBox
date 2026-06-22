@@ -174,10 +174,11 @@ def test_opencode_agent_superuser_gets_admin_wrapper(admin_client, live_opencode
     from abx_plugins.plugins.opencode import views
 
     response = admin_client.get("/admin/agent", HTTP_HOST=ADMIN_TEST_HOST)
+    recent_session_id = views._recent_session_id(live_opencode.settings)
 
     assert response.status_code == 200
-    assert f'<iframe src="{views._project_route(live_opencode.config.data_dir)}'.encode() in response.content
-    assert b'/session"' in response.content
+    assert recent_session_id
+    assert f'<iframe src="{views._project_route(live_opencode.config.data_dir, recent_session_id)}"'.encode() in response.content
     assert b'id="header"' in response.content
     assert b'id="progress-monitor"' in response.content
 
