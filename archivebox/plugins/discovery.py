@@ -64,6 +64,15 @@ def get_plugins() -> list[str]:
     return sorted(set(plugins))
 
 
+def get_plugin_models():
+    from abx_dl.models import discover_plugins
+
+    plugins = {}
+    for base_dir in (BUILTIN_PLUGINS_DIR, USER_PLUGINS_DIR):
+        plugins.update(discover_plugins(plugins_dir=base_dir, runtime="archivebox"))
+    return plugins
+
+
 def get_plugin_name(plugin: str) -> str:
     """
     Get the base plugin name without numeric prefix.
@@ -91,12 +100,17 @@ def get_enabled_plugins(config: ConfigLookup | None = None, **config_kwargs: Any
         config = get_config(**config_kwargs)
 
     enabled = []
+    disabled = []
     for plugin in get_plugins():
         plugin_config = get_plugin_special_config(plugin, config)
         if plugin_config["enabled"]:
             enabled.append(plugin)
+        else:
+            disabled.append(plugin)
 
-    return enabled
+    from abx_dl.models import filter_plugins
+
+    return list(filter_plugins(get_plugin_models(), enabled, include_providers=True, disabled_names=disabled))
 
 
 def discover_plugins_that_provide_interface(

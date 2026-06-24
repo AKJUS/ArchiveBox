@@ -784,12 +784,10 @@ class ArchiveBoxBaseConfig(
     def _derive_plugin_enabled_config(self, *, respect_current_enabled: bool) -> None:
         plugin_names = _normalize_plugins_config_value(self.PLUGINS)
         enabled_config_keys = _plugin_enabled_config_keys()
+        disabled_plugins = []
         if respect_current_enabled:
-            selected_plugin_roots = {
-                plugin_name for plugin_name in plugin_names if bool(getattr(self, enabled_config_keys.get(plugin_name, ""), True))
-            }
-        else:
-            selected_plugin_roots = plugin_names
+            disabled_plugins = [plugin_name for plugin_name, enabled_key in enabled_config_keys.items() if not getattr(self, enabled_key)]
+        selected_plugin_roots = plugin_names
         if selected_plugin_roots:
             from abx_dl.models import discover_plugins, filter_plugins
 
@@ -798,6 +796,7 @@ class ArchiveBoxBaseConfig(
                     discover_plugins(runtime="archivebox"),
                     sorted(selected_plugin_roots),
                     include_providers=True,
+                    disabled_names=disabled_plugins,
                 ),
             )
         else:

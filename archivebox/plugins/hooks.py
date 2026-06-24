@@ -55,6 +55,7 @@ from archivebox.plugins.discovery import (
     BUILTIN_PLUGINS_DIR,
     USER_PLUGINS_DIR,
     ConfigLookup,
+    get_enabled_plugins,
     get_plugin_special_config,
 )
 
@@ -215,6 +216,7 @@ def discover_hooks(
 
             config = get_config(**config_kwargs)
 
+        enabled_plugins = set(get_enabled_plugins(config=config))
         enabled_hooks = []
 
         for hook in hooks:
@@ -229,9 +231,7 @@ def discover_hooks(
                 enabled_hooks.append(hook)
                 continue
 
-            # Check if plugin is enabled
-            plugin_config = get_plugin_special_config(plugin_name, config)
-            if plugin_config["enabled"]:
+            if plugin_name in enabled_plugins:
                 enabled_hooks.append(hook)
 
         hooks = enabled_hooks
