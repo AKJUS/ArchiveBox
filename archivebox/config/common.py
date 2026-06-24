@@ -507,6 +507,20 @@ def _plugin_user_config(config: Mapping[str, object]) -> dict[str, str]:
     return {key: _plugin_user_config_value(value) for key, value in config.items()}
 
 
+def _plugin_alias_config(config: Mapping[str, object]) -> dict[str, object]:
+    """Keep declared plugin alias inputs long enough for schema resolution.
+
+    The dynamic ``ArchiveBoxConfig`` model only exposes canonical plugin fields
+    (e.g. ``WGET_ENABLED``). Legacy/user-facing aliases such as ``SAVE_WGET``
+    are declared in plugin ``config.json`` files, so they must reach
+    ``resolve_plugin_configs()`` as raw user input instead of being filtered out
+    by the canonical runtime-config normalizer.
+    """
+    canonical_names = set(ArchiveBoxConfig.model_fields)
+    input_names = _archivebox_config_input_names()
+    return {str(key): value for key, value in config.items() if str(key) in input_names and str(key) not in canonical_names}
+
+
 def _discover_plugin_config_schemas() -> PluginSchemaDocuments:
     from archivebox.plugins.discovery import discover_plugin_configs
 
@@ -1007,9 +1021,12 @@ def get_config(
     config_data: ConfigPayload = dict(defaults or {})
     config_data["PERSONAS_DIR"] = str(CONSTANTS.PERSONAS_DIR)
     base_config_payload: ConfigPayload = {}
+    base_config_model = ArchiveBoxConfig()
+    base_config_explicit_keys = set(base_config_model.model_fields_set)
+
     if crawl_config_base:
         config_data.update(
-            normalize_runtime_config(ArchiveBoxConfig().model_dump(mode="json"), exclude_runtime_derived=True, json_safe=False),
+            normalize_runtime_config(base_config_model.model_dump(mode="json"), exclude_runtime_derived=True, json_safe=False),
         )
         config_data.update(normalize_runtime_config(dict(crawl.config or {}), exclude_crawl_execution=True, json_safe=False))
     elif base_config is not None:
@@ -1020,7 +1037,7 @@ def get_config(
         config_data.update(normalize_runtime_config(base_config_payload, exclude_runtime_derived=True, json_safe=False))
     else:
         config_data.update(
-            normalize_runtime_config(ArchiveBoxConfig().model_dump(mode="json"), exclude_runtime_derived=True, json_safe=False),
+            normalize_runtime_config(base_config_model.model_dump(mode="json"), exclude_runtime_derived=True, json_safe=False),
         )
         legacy_permissions = permissions_from_legacy_public_flags({**BaseConfigSet.load_from_file(CONSTANTS.CONFIG_FILE), **os.environ})
         if legacy_permissions:
@@ -1075,16 +1092,20 @@ def get_config(
     if resolve_plugins:
         plugin_schemas = {plugin_name: schema for plugin_name, schema in PLUGIN_CONFIG_SCHEMAS.items() if isinstance(schema, dict)}
         plugin_global_config = {key: str(value) if isinstance(value, Path) else value for key, value in config_data.items()}
+        explicit_base_config = {key: value for key, value in config_data.items() if key in base_config_explicit_keys}
         plugin_user_config = _plugin_user_config(
             {
-                **normalize_runtime_config(config_data, only_crawl_execution=True, json_safe=False),
+                **_plugin_alias_config(os.environ),
+                **normalize_runtime_config(explicit_base_config, only_crawl_execution=True, json_safe=False),
                 **scope_overrides,
             },
         )
         if not crawl_config_base:
+            file_config = BaseConfigSet.load_from_file(CONSTANTS.CONFIG_FILE)
             plugin_user_config = {
+                **_plugin_user_config(_plugin_alias_config(file_config)),
                 **normalize_runtime_config(
-                    BaseConfigSet.load_from_file(CONSTANTS.CONFIG_FILE),
+                    file_config,
                     exclude_runtime_derived=True,
                     json_safe=False,
                 ),
