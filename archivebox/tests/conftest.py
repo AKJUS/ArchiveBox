@@ -211,7 +211,6 @@ def run_archivebox_cmd(
         if disable_extractors:
             run_env.update(
                 {
-                    "PLUGINS": "__archivebox_test_no_plugins__",
                     "SAVE_ARCHIVEDOTORG": "False",
                     "SAVE_TITLE": "False",
                     "SAVE_FAVICON": "False",
@@ -229,6 +228,8 @@ def run_archivebox_cmd(
                     "SAVE_HTMLTOTEXT": "False",
                 },
             )
+            if args and args[0] == "version":
+                run_env["PLUGINS"] = "__archivebox_test_no_plugins__"
         if env:
             run_env.update(env)
     _set_test_source_pythonpath(run_env)
